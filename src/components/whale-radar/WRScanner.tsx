@@ -43,8 +43,8 @@ export function WRScanner({
   const filtered = coins
     .filter(c => !search || c.symbol.includes(search.toUpperCase()) || c.name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
-      const av = (a as Record<string, unknown>)[sortKey];
-      const bv = (b as Record<string, unknown>)[sortKey];
+      const av = (a as unknown as Record<string, unknown>)[sortKey];
+      const bv = (b as unknown as Record<string, unknown>)[sortKey];
       if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sortDir;
       if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * sortDir;
       return 0;
