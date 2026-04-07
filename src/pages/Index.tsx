@@ -1,16 +1,564 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useState, useEffect, useCallback } from 'react';
+import { WRHeader } from '@/components/whale-radar/WRHeader';
+import { WRTicker } from '@/components/whale-radar/WRTicker';
+import { WRScanner } from '@/components/whale-radar/WRScanner';
+import { WRRightPanel } from '@/components/whale-radar/WRRightPanel';
+import { WRStatsBar } from '@/components/whale-radar/WRStatsBar';
+import { WRTracker } from '@/components/whale-radar/WRTracker';
+import { WRSettingsPanel } from '@/components/whale-radar/WRSettingsPanel';
+import { WROnboarding } from '@/components/whale-radar/WROnboarding';
+import { WRModal } from '@/components/whale-radar/WRModal';
+import { WRKeyboardHelp } from '@/components/whale-radar/WRKeyboardHelp';
+import {
+  CoinData, AlertItem, WhaleTrade, TrackedToken, PortfolioEntry,
+  WalletEntry, ScanSnapshot, CFG, fmtN, fmtP, isSolToken, calcThreat,
+  calcSizing, saveState, loadState,
+} from '@/lib/whaleRadarState';
 
-// IMPORTANT: Fully REPLACE this with your own code
-const PlaceholderIndex = () => {
-  // PLACEHOLDER: Replace this entire return statement with the user's app.
-  // The inline background color is intentionally not part of the design system.
+export default function WhaleRadarApp() {
+  // ══ CORE STATE ═══════════════════════════════════════════════════════════
+  const [coins, setCoins] = useState<CoinData[]>([]);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [whaleFeed, setWhaleFeed] = useState<WhaleTrade[]>([]);
+  const [tracked, setTracked] = useState<Record<string, TrackedToken>>({});
+  const [portfolio, setPortfolio] = useState<Record<string, PortfolioEntry>>({});
+  const [wallets, setWallets] = useState<WalletEntry[]>([]);
+  const [scanHistory, setScanHistory] = useState<ScanSnapshot[]>([]);
+
+  // UI State
+  const [theme, setTheme] = useState<'cyber' | 'matrix' | 'dark'>('cyber');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
+  const [autoScan, setAutoScan] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanBadge, setScanBadge] = useState('IDLE');
+  const [kbdOpen, setKbdOpen] = useState(false);
+  const [alertFilter, setAlertFilter] = useState('ALL');
+  const [watchlistOnly, setWatchlistOnly] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  // API keys
+  const [apiKey, setApiKey] = useState('');
+  const [aiKey, setAiKey] = useState('');
+  const [birdKey, setBirdKey] = useState('');
+  const [heliusKey, setHeliusKey] = useState('');
+
+  // Config
+  const [vmcapThr, setVmcapThr] = useState(200);
+  const [pchgThr, setPchgThr] = useState(15);
+  const [whaleThr, setWhaleThr] = useState(150000);
+  const [aggressiveMode, setAggressiveMode] = useState(false);
+
+  // Stats
+  const [apiCallCount, setApiCallCount] = useState(0);
+  const [aiCallCount, setAiCallCount] = useState(0);
+  const [nextScan, setNextScan] = useState('—');
+  const [lastScanTs, setLastScanTs] = useState(0);
+
+  // Modals
+  const [activeModal, setActiveModal] = useState<string | null>(null);
+
+  // Previous volumes for spike detection
+  const [prevVolumes, setPrevVolumes] = useState<Record<string, number>>({});
+
+  // ══ PERSISTENCE ═══════════════════════════════════════════════════════════
+  useEffect(() => {
+    const saved = loadState();
+    if (saved.theme) setTheme(saved.theme as 'cyber' | 'matrix' | 'dark');
+    if (saved.apiKey) setApiKey(saved.apiKey as string);
+    if (saved.aiKey) setAiKey(saved.aiKey as string);
+    if (saved.birdKey) setBirdKey(saved.birdKey as string);
+    if (saved.heliusKey) setHeliusKey(saved.heliusKey as string);
+    if (saved.tracked) setTracked(saved.tracked as Record<string, TrackedToken>);
+    if (saved.portfolio) setPortfolio(saved.portfolio as Record<string, PortfolioEntry>);
+    if (saved.wallets) setWallets(saved.wallets as WalletEntry[]);
+    if (saved.vmcapThr) setVmcapThr(saved.vmcapThr as number);
+    if (saved.pchgThr) setPchgThr(saved.pchgThr as number);
+    if (saved.whaleThr) setWhaleThr(saved.whaleThr as number);
+    if (saved.soundOn !== undefined) setSoundOn(saved.soundOn as boolean);
+    if (saved.scanHistory) setScanHistory(saved.scanHistory as ScanSnapshot[]);
+    if (saved.prevVolumes) setPrevVolumes(saved.prevVolumes as Record<string, number>);
+    if (!localStorage.getItem('wr_v9_onboarded')) setShowOnboarding(true);
+  }, []);
+
+  // Save on state changes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveState({
+        theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
+        vmcapThr, pchgThr, whaleThr, soundOn, scanHistory: scanHistory.slice(-CFG.HISTORY_MAX),
+        prevVolumes, aggressiveMode, watchlistOnly,
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
+    vmcapThr, pchgThr, whaleThr, soundOn, scanHistory, prevVolumes, aggressiveMode, watchlistOnly]);
+
+  // ══ THEME ═════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    document.body.classList.remove('theme-matrix', 'theme-dark');
+    if (theme === 'matrix') document.body.classList.add('theme-matrix');
+    else if (theme === 'dark') document.body.classList.add('theme-dark');
+  }, [theme]);
+
+  // ══ SCAN ══════════════════════════════════════════════════════════════════
+  const triggerScan = useCallback(async () => {
+    if (scanning) return;
+    setScanning(true);
+    setScanBadge('SCANNING');
+    try {
+      const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h';
+      const headers: Record<string, string> = {};
+      if (apiKey) headers['x-cg-pro-api-key'] = apiKey;
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(18000) });
+      if (res.status === 429) {
+        addAlert('high', 'API', 'CoinGecko rate limited — wait 60s');
+        setScanBadge('RATE LIMITED');
+        return;
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      setApiCallCount(c => c + 1);
+      processData(data);
+      setScanBadge('LIVE');
+      setLastScanTs(Date.now());
+    } catch (e: unknown) {
+      setScanBadge('ERROR');
+      addAlert('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
+    } finally {
+      setScanning(false);
+    }
+  }, [scanning, apiKey, prevVolumes]);
+
+  const processData = useCallback((data: unknown[]) => {
+    const newVols: Record<string, number> = {};
+    const mapped: CoinData[] = (data as Record<string, unknown>[]).map((c, i) => {
+      const vol = (c.total_volume as number) || 0;
+      const mcap = (c.market_cap as number) || 1;
+      const vmcap = (vol / mcap) * 100;
+      const chg24 = (c.price_change_percentage_24h as number) || 0;
+      const prevVol = prevVolumes[(c.id as string)] || vol;
+      const volSpike = prevVol > 0 && prevVol !== vol ? vol / prevVol : 1;
+      const supplyPct = c.total_supply ? (((c.circulating_supply as number) / (c.total_supply as number)) * 100) : null;
+      const sym = ((c.symbol as string) || '').toUpperCase();
+      const dexHot = false;
+      const dsLiq = null;
+      const isSol = isSolToken(sym);
+      const birdData = null;
+      newVols[(c.id as string)] = vol;
+      const { score, threat, category, confidence, reasons } = calcThreat({
+        vmcap, chg24, volSpike, supplyPct, vol, mcap, dexHot, dsLiq, isSol, birdData,
+      });
+      return {
+        rank: i + 1, id: c.id as string, symbol: sym, name: c.name as string,
+        price: c.current_price as number, change: chg24, volume: vol, mcap, vmcap, volSpike,
+        supplyPct, score, threat, category, confidence, reasons, dexHot, dsLiq, isSol, birdData,
+      };
+    });
+    setPrevVolumes(newVols);
+    setCoins(mapped);
+
+    // Snapshot
+    const critCount = mapped.filter(c => c.threat === 'CRITICAL').length;
+    const highCount = mapped.filter(c => c.threat === 'HIGH').length;
+    setScanHistory(prev => {
+      const snap: ScanSnapshot = {
+        ts: Date.now(),
+        coins: mapped.map(c => ({ symbol: c.symbol, score: c.score, threat: c.threat, category: c.category, price: c.price, change: c.change, vmcap: c.vmcap })),
+        critCount, highCount,
+      };
+      return [snap, ...prev].slice(0, CFG.HISTORY_MAX);
+    });
+
+    // Generate alerts for critical/high
+    mapped.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
+      addAlert('critical', c.symbol, `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
+    });
+    mapped.filter(c => c.threat === 'HIGH' && c.category).slice(0, 3).forEach(c => {
+      addAlert('high', c.symbol, `[${c.category}] SCORE=${c.score}/100 — ${c.reasons.join(' · ')}`);
+    });
+  }, [prevVolumes]);
+
+  // ══ ALERTS ════════════════════════════════════════════════════════════════
+  const addAlert = useCallback((level: AlertItem['level'], tag: string, text: string, sizing?: string) => {
+    const tc = level === 'critical' ? 'C' : level === 'high' ? 'H' : level === 'medium' ? 'M' : 'I';
+    setAlerts(prev => [{ ts: Date.now(), level, tag, text, tc, sizing, pinned: false }, ...prev].slice(0, CFG.AFEED_MAX * 2));
+  }, []);
+
+  // ══ TRACKING ══════════════════════════════════════════════════════════════
+  const trackToken = useCallback((id: string, symbol: string, price: number) => {
+    setTracked(prev => ({ ...prev, [symbol]: { id, price, basePrice: price, lastPrice: price } }));
+  }, []);
+
+  const untrackToken = useCallback((symbol: string) => {
+    setTracked(prev => {
+      const n = { ...prev };
+      delete n[symbol];
+      return n;
+    });
+  }, []);
+
+  // ══ AUTO SCAN ═════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!autoScan) return;
+    const ms = aggressiveMode ? CFG.SCAN_MS_AGG : CFG.SCAN_MS_NORMAL;
+    triggerScan();
+    const timer = setInterval(() => triggerScan(), ms);
+    const cdTimer = setInterval(() => {
+      const r = Math.max(0, Math.ceil((ms - (Date.now() % ms)) / 1000));
+      setNextScan(r > 0 ? r + 's' : 'NOW');
+    }, 1000);
+    return () => { clearInterval(timer); clearInterval(cdTimer); };
+  }, [autoScan, aggressiveMode]);
+
+  // ══ KEYBOARD SHORTCUTS ════════════════════════════════════════════════════
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName.toLowerCase();
+      if (['input', 'select', 'textarea'].includes(tag)) return;
+      const k = e.key.toLowerCase();
+      if (k === 's') { e.preventDefault(); triggerScan(); }
+      else if (k === 'a') { e.preventDefault(); setAutoScan(p => !p); }
+      else if (k === 'w') { e.preventDefault(); setWatchlistOnly(p => !p); }
+      else if (k === 'b') { e.preventDefault(); setActiveModal('backtest'); }
+      else if (k === 'p') { e.preventDefault(); setActiveModal('portfolio'); }
+      else if (k === 'h') { e.preventDefault(); setActiveModal('history'); }
+      else if (k === '?' || k === '/') { e.preventDefault(); setKbdOpen(p => !p); }
+      else if (k === 'escape') { setActiveModal(null); setKbdOpen(false); }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [triggerScan]);
+
+  // ══ ONBOARDING ════════════════════════════════════════════════════════════
+  const finishOnboarding = useCallback(() => {
+    setShowOnboarding(false);
+    localStorage.setItem('wr_v9_onboarded', '1');
+  }, []);
+
+  // ══ FILTERED COINS ════════════════════════════════════════════════════════
+  const filteredCoins = coins.filter(c => {
+    if (c.vmcap < vmcapThr && Math.abs(c.change) < pchgThr && c.score < 20) return false;
+    if (watchlistOnly && !tracked[c.symbol]) return false;
+    return true;
+  });
+
+  // ══ FILTERED ALERTS ═══════════════════════════════════════════════════════
+  const filteredAlerts = alerts.filter(a => {
+    if (alertFilter === 'PIN') return a.pinned;
+    if (alertFilter !== 'ALL' && a.tc !== alertFilter) return false;
+    return true;
+  });
+
   return (
-    <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: '#fcfbf8' }}>
-      <img data-lovable-blank-page-placeholder="REMOVE_THIS" src="/placeholder.svg" alt="Your app will live here!" />
+    <div className="min-h-screen flex flex-col">
+      {showOnboarding && <WROnboarding onFinish={finishOnboarding} />}
+
+      <WRHeader
+        scanCount={coins.length}
+        alertCount={alerts.length}
+        nextScan={autoScan ? nextScan : '—'}
+        aiCallCount={aiCallCount}
+        scanning={scanning}
+        soundOn={soundOn}
+        onToggleSound={() => setSoundOn(p => !p)}
+        onToggleSettings={() => setSettingsOpen(p => !p)}
+        onToggleKbd={() => setKbdOpen(p => !p)}
+      />
+
+      {settingsOpen && (
+        <WRSettingsPanel
+          apiKey={apiKey} onApiKeyChange={setApiKey}
+          aiKey={aiKey} onAiKeyChange={setAiKey}
+          birdKey={birdKey} onBirdKeyChange={setBirdKey}
+          heliusKey={heliusKey} onHeliusKeyChange={setHeliusKey}
+          theme={theme} onThemeChange={setTheme}
+          aggressiveMode={aggressiveMode} onAggressiveModeChange={setAggressiveMode}
+          whaleThr={whaleThr} onWhaleThrChange={setWhaleThr}
+        />
+      )}
+
+      <WRTicker coins={coins.slice(0, 30)} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] flex-1 min-h-0">
+        <WRScanner
+          coins={filteredCoins}
+          scanBadge={scanBadge}
+          scanning={scanning}
+          autoScan={autoScan}
+          watchlistOnly={watchlistOnly}
+          tracked={tracked}
+          portfolio={portfolio}
+          aiKey={aiKey}
+          vmcapThr={vmcapThr}
+          pchgThr={pchgThr}
+          onScan={triggerScan}
+          onToggleAuto={() => setAutoScan(p => !p)}
+          onToggleWatchlist={() => setWatchlistOnly(p => !p)}
+          onTrack={trackToken}
+          onUntrack={untrackToken}
+          onVmcapChange={setVmcapThr}
+          onPchgChange={setPchgThr}
+          onOpenModal={setActiveModal}
+          onAddAlert={addAlert}
+        />
+
+        <WRRightPanel
+          whaleFeed={whaleFeed}
+          alerts={filteredAlerts}
+          alertFilter={alertFilter}
+          onAlertFilterChange={setAlertFilter}
+          wallets={wallets}
+          onAddWallet={(w) => setWallets(prev => [...prev, w])}
+          onRemoveWallet={(addr) => setWallets(prev => prev.filter(w => w.address !== addr))}
+          onTogglePin={(idx) => setAlerts(prev => prev.map((a, i) => i === idx ? { ...a, pinned: !a.pinned } : a))}
+          onClearAlerts={() => setAlerts([])}
+        />
+      </div>
+
+      <WRStatsBar
+        alertsToday={alerts.length}
+        apiCallCount={apiCallCount}
+        apiKey={apiKey}
+        lastScanTs={lastScanTs}
+        historyCount={scanHistory.length}
+        portfolioValue={Object.entries(portfolio).reduce((s, [sym, p]) => {
+          const coin = coins.find(c => c.symbol === sym);
+          return s + p.amount * (coin?.price || p.entryPrice);
+        }, 0)}
+      />
+
+      <WRTracker tracked={tracked} onUntrack={untrackToken} />
+
+      {kbdOpen && <WRKeyboardHelp onClose={() => setKbdOpen(false)} />}
+
+      {activeModal === 'backtest' && (
+        <WRModal title="📊 BACKTESTING MODULE" onClose={() => setActiveModal(null)}>
+          <BacktestContent scanHistory={scanHistory} />
+        </WRModal>
+      )}
+
+      {activeModal === 'portfolio' && (
+        <WRModal title="💼 PORTFOLIO MANAGER" onClose={() => setActiveModal(null)}>
+          <PortfolioContent
+            portfolio={portfolio}
+            coins={coins}
+            onAdd={(sym, amt, entry) => setPortfolio(p => ({ ...p, [sym]: { amount: amt, entryPrice: entry } }))}
+            onRemove={(sym) => setPortfolio(p => { const n = { ...p }; delete n[sym]; return n; })}
+            onClear={() => setPortfolio({})}
+          />
+        </WRModal>
+      )}
+
+      {activeModal === 'sentiment' && (
+        <WRModal title="✦ AI MARKET SENTIMENT" onClose={() => setActiveModal(null)}>
+          <SentimentContent coins={coins} aiKey={aiKey} />
+        </WRModal>
+      )}
     </div>
   );
-};
+}
 
-const Index = PlaceholderIndex;
+/* ══ BACKTEST CONTENT ═════════════════════════════════════════════════════════ */
+function BacktestContent({ scanHistory }: { scanHistory: ScanSnapshot[] }) {
+  const [results, setResults] = useState<{ sym: string; threat: string; pnlPct: number; ts: number }[]>([]);
+  const [ran, setRan] = useState(false);
 
-export default Index;
+  const runBacktest = () => {
+    if (scanHistory.length < 2) return;
+    const res: typeof results = [];
+    for (let i = 0; i < scanHistory.length - 1; i++) {
+      const snap = scanHistory[i];
+      const next = scanHistory[i + 1];
+      const nextMap: Record<string, number> = {};
+      (next.coins || []).forEach(c => { if (c.symbol && c.price) nextMap[c.symbol] = c.price; });
+      (snap.coins || []).filter(c => c.threat === 'CRITICAL' || c.threat === 'HIGH').slice(0, 5).forEach(c => {
+        const exitP = nextMap[c.symbol!];
+        if (c.price && exitP) {
+          res.push({ sym: c.symbol!, threat: c.threat!, pnlPct: ((exitP - c.price) / c.price) * 100, ts: snap.ts });
+        }
+      });
+    }
+    setResults(res);
+    setRan(true);
+  };
+
+  const avgPnl = results.length ? results.reduce((s, r) => s + r.pnlPct, 0) / results.length : 0;
+  const wins = results.filter(r => r.pnlPct > 0).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 items-center flex-wrap">
+        <span className="text-xs text-wr-muted tracking-widest">SNAPSHOTS: {scanHistory.length}</span>
+        <button className="wr-btn" onClick={runBacktest}>▶ RUN BACKTEST</button>
+      </div>
+      {!ran ? (
+        <p className="text-center text-wr-muted text-xs py-8">Select parameters and click RUN BACKTEST<br /><span className="text-[8px]">Uses scan history snapshots to simulate</span></p>
+      ) : results.length === 0 ? (
+        <p className="text-center text-wr-muted text-xs py-8">No trade simulations — run more scans first</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-wr-bg3 border border-wr-border p-3 text-center">
+              <div className={`font-head text-lg ${avgPnl >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>{avgPnl >= 0 ? '+' : ''}{avgPnl.toFixed(2)}%</div>
+              <div className="text-[7px] text-wr-muted tracking-widest">AVG PNL</div>
+            </div>
+            <div className="bg-wr-bg3 border border-wr-border p-3 text-center">
+              <div className="font-head text-lg text-wr-amber">{results.length > 0 ? ((wins / results.length) * 100).toFixed(0) : 0}%</div>
+              <div className="text-[7px] text-wr-muted tracking-widest">WIN RATE</div>
+            </div>
+            <div className="bg-wr-bg3 border border-wr-border p-3 text-center">
+              <div className="font-head text-lg text-wr-white">{results.length}</div>
+              <div className="text-[7px] text-wr-muted tracking-widest">TRADES</div>
+            </div>
+          </div>
+          <div className="text-[7px] text-wr-muted tracking-widest">SIMULATED — NOT FINANCIAL ADVICE</div>
+          <div className="max-h-60 overflow-y-auto scrollbar-thin space-y-0.5">
+            {results.slice(0, 30).map((r, i) => (
+              <div key={i} className="grid grid-cols-4 gap-2 text-[9px] py-1 border-b border-wr-border/50">
+                <span className="text-wr-muted">{new Date(r.ts).toLocaleTimeString()}</span>
+                <span className="text-wr-white font-head text-[8px]">{r.sym}</span>
+                <span className={`wr-badge wr-badge-${r.threat.toLowerCase()}`}>{r.threat}</span>
+                <span className={r.pnlPct >= 0 ? 'text-wr-green' : 'text-wr-red'}>{r.pnlPct >= 0 ? '+' : ''}{r.pnlPct.toFixed(2)}%</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ══ PORTFOLIO CONTENT ════════════════════════════════════════════════════════ */
+function PortfolioContent({ portfolio, coins, onAdd, onRemove, onClear }: {
+  portfolio: Record<string, PortfolioEntry>;
+  coins: CoinData[];
+  onAdd: (sym: string, amt: number, entry: number) => void;
+  onRemove: (sym: string) => void;
+  onClear: () => void;
+}) {
+  const [sym, setSym] = useState('');
+  const [amt, setAmt] = useState('');
+  const [entry, setEntry] = useState('');
+
+  const handleAdd = () => {
+    const s = sym.trim().toUpperCase();
+    const a = parseFloat(amt);
+    const e = parseFloat(entry);
+    if (!s || isNaN(a) || isNaN(e) || a <= 0 || e <= 0) return;
+    onAdd(s, a, e);
+    setSym(''); setAmt(''); setEntry('');
+  };
+
+  const entries = Object.entries(portfolio);
+  let totalVal = 0, totalEntry = 0;
+  entries.forEach(([s, p]) => {
+    const coin = coins.find(c => c.symbol === s);
+    totalVal += p.amount * (coin?.price || p.entryPrice);
+    totalEntry += p.amount * p.entryPrice;
+  });
+  const totalPnl = totalVal - totalEntry;
+  const totalPnlPct = totalEntry > 0 ? (totalPnl / totalEntry) * 100 : 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 flex-wrap items-center">
+        <input className="wr-input w-20" placeholder="SYMBOL" value={sym} onChange={e => setSym(e.target.value)} style={{ textTransform: 'uppercase' }} />
+        <input className="wr-input w-20" placeholder="AMOUNT" value={amt} onChange={e => setAmt(e.target.value)} />
+        <input className="wr-input w-20" placeholder="ENTRY $" value={entry} onChange={e => setEntry(e.target.value)} />
+        <button className="wr-btn" onClick={handleAdd}>+ ADD</button>
+        <button className="wr-btn red" onClick={onClear}>CLR ALL</button>
+      </div>
+      {entries.length === 0 ? (
+        <p className="text-center text-wr-muted text-xs py-8">No holdings — add manually above</p>
+      ) : (
+        <>
+          <table className="w-full text-[9px] border-collapse">
+            <thead>
+              <tr>
+                <th className="text-left text-wr-muted text-[7px] tracking-widest py-1 border-b border-wr-border">TOKEN</th>
+                <th className="text-left text-wr-muted text-[7px] tracking-widest py-1 border-b border-wr-border">QTY</th>
+                <th className="text-left text-wr-muted text-[7px] tracking-widest py-1 border-b border-wr-border">ENTRY</th>
+                <th className="text-left text-wr-muted text-[7px] tracking-widest py-1 border-b border-wr-border">NOW</th>
+                <th className="text-left text-wr-muted text-[7px] tracking-widest py-1 border-b border-wr-border">PNL%</th>
+                <th className="text-left text-wr-muted text-[7px] tracking-widest py-1 border-b border-wr-border">VALUE</th>
+                <th className="py-1 border-b border-wr-border"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map(([s, p]) => {
+                const coin = coins.find(c => c.symbol === s);
+                const curP = coin?.price || p.entryPrice;
+                const pnl = ((curP - p.entryPrice) / p.entryPrice) * 100;
+                return (
+                  <tr key={s} className="border-b border-wr-border/50">
+                    <td className="text-wr-white font-head text-[9px] py-1">{s}</td>
+                    <td className="py-1">{p.amount}</td>
+                    <td className="py-1">${fmtP(p.entryPrice)}</td>
+                    <td className="text-wr-cyan py-1">${fmtP(curP)}</td>
+                    <td className={`py-1 ${pnl >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>{pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}%</td>
+                    <td className="py-1">${fmtN(p.amount * curP)}</td>
+                    <td className="py-1"><button className="wr-btn red text-[7px] px-1 py-0" onClick={() => onRemove(s)}>✕</button></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-wr-bg3 border border-wr-border p-2 text-center">
+              <div className="font-head text-sm text-wr-white">${fmtN(totalVal)}</div>
+              <div className="text-[7px] text-wr-muted tracking-widest">TOTAL VALUE</div>
+            </div>
+            <div className="bg-wr-bg3 border border-wr-border p-2 text-center">
+              <div className={`font-head text-sm ${totalPnl >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>{totalPnl >= 0 ? '+' : ''}{totalPnlPct.toFixed(2)}%</div>
+              <div className="text-[7px] text-wr-muted tracking-widest">TOTAL PNL</div>
+            </div>
+            <div className="bg-wr-bg3 border border-wr-border p-2 text-center">
+              <div className="font-head text-sm text-wr-white">{entries.length}</div>
+              <div className="text-[7px] text-wr-muted tracking-widest">HOLDINGS</div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ══ SENTIMENT CONTENT ════════════════════════════════════════════════════════ */
+function SentimentContent({ coins, aiKey }: { coins: CoinData[]; aiKey: string }) {
+  const critCount = coins.filter(c => c.threat === 'CRITICAL').length;
+  const highCount = coins.filter(c => c.threat === 'HIGH').length;
+  const washCount = coins.filter(c => c.category === 'WASH').length;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-wr-bg3 border border-wr-border p-3 text-center">
+          <div className="text-[7px] text-wr-muted tracking-widest mb-1">CRITICAL</div>
+          <div className="font-head text-xl text-wr-red">{critCount}</div>
+        </div>
+        <div className="bg-wr-bg3 border border-wr-border p-3 text-center">
+          <div className="text-[7px] text-wr-muted tracking-widest mb-1">HIGH</div>
+          <div className="font-head text-xl text-wr-amber">{highCount}</div>
+        </div>
+        <div className="bg-wr-bg3 border border-wr-border p-3 text-center">
+          <div className="text-[7px] text-wr-muted tracking-widest mb-1">WASH</div>
+          <div className="font-head text-xl text-wr-purple">{washCount}</div>
+        </div>
+      </div>
+      {!aiKey ? (
+        <p className="text-center text-wr-muted text-xs py-4">Enter AI key in ⚙ Settings to enable sentiment analysis</p>
+      ) : (
+        <div className="border-t border-wr-purple/30 pt-3">
+          <div className="text-[8px] text-wr-purple tracking-widest mb-2">✦ AI ASSESSMENT</div>
+          <p className="text-[10px] text-wr-white leading-relaxed">
+            Market shows {critCount > 3 ? 'ELEVATED' : critCount > 0 ? 'MODERATE' : 'LOW'} manipulation risk.
+            {washCount > 0 ? ` ${washCount} tokens flagged for wash trading patterns.` : ''}
+            {critCount > 5 ? ' High cluster of critical alerts suggests coordinated activity.' : ''}
+            Exercise caution with high-score tokens.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
