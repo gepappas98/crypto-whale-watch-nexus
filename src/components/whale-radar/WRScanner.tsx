@@ -1,6 +1,7 @@
 /* ══ WHALE RADAR v9 — SCANNER TABLE ══════════════════════════════════════════ */
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { CoinData, TrackedToken, PortfolioEntry, fmtN, fmtP, calcSizing } from '@/lib/whaleRadarState';
+import { analyzeToken } from '@/lib/analyzeToken';
 import type { AlertItem } from '@/lib/whaleRadarState';
 
 interface WRScannerProps {
@@ -8,6 +9,7 @@ interface WRScannerProps {
   scanBadge: string;
   scanning: boolean;
   autoScan: boolean;
+  autoPaused: boolean;
   watchlistOnly: boolean;
   tracked: Record<string, TrackedToken>;
   portfolio: Record<string, PortfolioEntry>;
@@ -16,6 +18,7 @@ interface WRScannerProps {
   pchgThr: number;
   onScan: () => void;
   onToggleAuto: () => void;
+  onTogglePause: () => void;
   onToggleWatchlist: () => void;
   onTrack: (id: string, symbol: string, price: number) => void;
   onUntrack: (symbol: string) => void;
@@ -25,20 +28,49 @@ interface WRScannerProps {
   onAddAlert: (level: AlertItem['level'], tag: string, text: string) => void;
 }
 
+interface AiRowData {
+  symbol: string;
+  text: string;
+  loading: boolean;
+}
+
 export function WRScanner({
-  coins, scanBadge, scanning, autoScan, watchlistOnly, tracked, portfolio,
+  coins, scanBadge, scanning, autoScan, autoPaused, watchlistOnly, tracked, portfolio,
   aiKey, vmcapThr, pchgThr,
-  onScan, onToggleAuto, onToggleWatchlist, onTrack, onUntrack,
-  onVmcapChange, onPchgChange, onOpenModal,
+  onScan, onToggleAuto, onTogglePause, onToggleWatchlist, onTrack, onUntrack,
+  onVmcapChange, onPchgChange, onOpenModal, onAddAlert,
 }: WRScannerProps) {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<string>('score');
   const [sortDir, setSortDir] = useState(-1);
+  const [aiRows, setAiRows] = useState<Record<string, AiRowData>>({});
 
   const handleSort = (key: string) => {
     if (sortKey === key) setSortDir(d => -d);
     else { setSortKey(key); setSortDir(-1); }
   };
+
+  // Issue #7: proper removeAiRow function
+  const removeAiRow = useCallback((sym: string) => {
+    setAiRows(prev => {
+      const next = { ...prev };
+      delete next[sym];
+      return next;
+    });
+  }, []);
+
+  const handleAiAnalyze = useCallback(async (coin: CoinData) => {
+    if (!aiKey) {
+      onAddAlert('info', 'AI', 'Enter Anthropic API key in ⚙ Settings');
+      return;
+    }
+    setAiRows(prev => ({ ...prev, [coin.symbol]: { symbol: coin.symbol, text: '', loading: true } }));
+    const text = await analyzeToken(coin, aiKey);
+    setAiRows(prev => ({
+      ...prev,
+      [coin.symbol]: { symbol: coin.symbol, text: text || 'No response', loading: false },
+    }));
+  }, [aiKey, onAddAlert]);
 
   const filtered = coins
     .filter(c => !search || c.symbol.includes(search.toUpperCase()) || c.name.toLowerCase().includes(search.toLowerCase()))
@@ -73,6 +105,15 @@ export function WRScanner({
         <button className={`wr-btn ${autoScan ? 'active' : ''}`} onClick={onToggleAuto} title="Toggle auto [A]">
           AUTO: {autoScan ? 'ON' : 'OFF'}
         </button>
+        {autoScan && (
+          <button
+            className={`wr-btn ${autoPaused ? 'text-wr-amber border-wr-amber/50' : ''}`}
+            onClick={onTogglePause}
+            title="Pause/resume auto scan"
+          >
+            {autoPaused ? '▶ RESUME' : '⏸ PAUSE'}
+          </button>
+        )}
         <button className={`wr-btn blue ${watchlistOnly ? 'active' : ''}`} onClick={onToggleWatchlist} title="Watchlist only [W]">
           ☆ WL
         </button>
@@ -124,7 +165,7 @@ export function WRScanner({
                 { key: 'score', label: 'SCORE' },
                 { key: 'threat', label: 'THREAT' },
                 { key: 'category', label: 'CATEGORY' },
-                { key: '', label: 'TRACK' },
+                { key: '', label: 'ACTIONS' },
               ].map(col => (
                 <th
                   key={col.label}
@@ -147,9 +188,10 @@ export function WRScanner({
               const isTracked = !!tracked[c.symbol];
               const vmcapCls = c.vmcap >= 800 ? 'text-wr-red' : c.vmcap >= 400 ? 'text-wr-amber' : c.vmcap >= 200 ? 'text-wr-cyan' : 'text-wr-green-dim';
               const catCls = c.category ? `wr-cat-${c.category.toLowerCase()}` : '';
+              const aiRow = aiRows[c.symbol];
 
-              return (
-                <tr key={c.id} className={c.threat === 'CRITICAL' ? 'animate-flash-red' : c.threat === 'HIGH' ? 'animate-flash-amber' : ''}>
+              return [
+                <tr key={c.id} className={`${c.threat === 'CRITICAL' ? 'animate-flash-red' : c.threat === 'HIGH' ? 'animate-flash-amber' : ''} ${aiRow ? 'border-b-0' : ''}`}>
                   <td className="text-wr-muted text-[8px]">{c.rank}</td>
                   <td>
                     <div className="font-head text-[10px] text-wr-white tracking-widest">
@@ -187,15 +229,51 @@ export function WRScanner({
                     )}
                   </td>
                   <td>
-                    <button
-                      className={`wr-btn text-[8px] px-1.5 py-0.5 ${isTracked ? 'active' : ''}`}
-                      onClick={() => isTracked ? onUntrack(c.symbol) : onTrack(c.id, c.symbol, c.price)}
-                    >
-                      {isTracked ? '✓' : '+'}
-                    </button>
+                    <div className="flex gap-1">
+                      <button
+                        className={`wr-btn text-[8px] px-1.5 py-0.5 ${isTracked ? 'active' : ''}`}
+                        onClick={() => isTracked ? onUntrack(c.symbol) : onTrack(c.id, c.symbol, c.price)}
+                        title={isTracked ? 'Untrack' : 'Track price'}
+                      >
+                        {isTracked ? '✓' : '+'}
+                      </button>
+                      <button
+                        className="wr-btn ai text-[8px] px-1.5 py-0.5"
+                        onClick={() => handleAiAnalyze(c)}
+                        title="AI Analysis"
+                      >
+                        ✦
+                      </button>
+                    </div>
                   </td>
-                </tr>
-              );
+                </tr>,
+                // Issue #7: AI inline row with proper close button
+                aiRow && (
+                  <tr key={`ai-${c.symbol}`} className="bg-wr-purple/[.04] border-t-0">
+                    <td colSpan={11} className="p-0">
+                      <div className="px-3 py-2 border-l-2 border-l-wr-purple">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[8px] text-wr-purple tracking-widest">✦ AI ANALYSIS</span>
+                          <span className="text-[7px] text-wr-muted">{c.symbol}</span>
+                          <div className="flex-1" />
+                          {/* Issue #7: close button calls removeAiRow directly */}
+                          <button
+                            className="text-[8px] px-1.5 py-0.5 bg-transparent border border-wr-border text-wr-muted hover:text-wr-red hover:border-wr-red cursor-pointer font-mono"
+                            onClick={() => removeAiRow(c.symbol)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        {aiRow.loading ? (
+                          <span className="text-[9px] text-wr-purple animate-pulse">analyzing {c.symbol}…</span>
+                        ) : (
+                          <p className="text-[9px] text-wr-white leading-relaxed whitespace-pre-wrap">{aiRow.text}</p>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ),
+              ];
             })}
           </tbody>
         </table>
