@@ -39,6 +39,7 @@ export default function WhaleRadarApp() {
   const [alertFilter, setAlertFilter] = useState('ALL');
   const [watchlistOnly, setWatchlistOnly] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [copiedBtc, setCopiedBtc] = useState(false);
 
   // API keys
   const [apiKey, setApiKey] = useState('');
