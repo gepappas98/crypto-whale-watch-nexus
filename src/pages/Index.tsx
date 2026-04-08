@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { WRHeader } from '@/components/whale-radar/WRHeader';
 import { WRTicker } from '@/components/whale-radar/WRTicker';
 import { WRScanner } from '@/components/whale-radar/WRScanner';
@@ -9,6 +9,7 @@ import { WRSettingsPanel } from '@/components/whale-radar/WRSettingsPanel';
 import { WROnboarding } from '@/components/whale-radar/WROnboarding';
 import { WRModal } from '@/components/whale-radar/WRModal';
 import { WRKeyboardHelp } from '@/components/whale-radar/WRKeyboardHelp';
+import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
 import {
   CoinData, AlertItem, WhaleTrade, TrackedToken, PortfolioEntry,
   WalletEntry, ScanSnapshot, CFG, fmtN, fmtP, isSolToken, calcThreat,
@@ -30,6 +31,7 @@ export default function WhaleRadarApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [autoScan, setAutoScan] = useState(false);
+  const [autoPaused, setAutoPaused] = useState(false); // Issue #6: track paused state
   const [scanning, setScanning] = useState(false);
   const [scanBadge, setScanBadge] = useState('IDLE');
   const [kbdOpen, setKbdOpen] = useState(false);
@@ -48,6 +50,11 @@ export default function WhaleRadarApp() {
   const [pchgThr, setPchgThr] = useState(15);
   const [whaleThr, setWhaleThr] = useState(150000);
   const [aggressiveMode, setAggressiveMode] = useState(false);
+
+  // WebSocket config
+  const [bybitEnabled, setBybitEnabled] = useState(false);
+  const [whaleFeedEx, setWhaleFeedEx] = useState('all');
+  const [subscribedPairs] = useState(() => new Set<string>());
 
   // Stats
   const [apiCallCount, setApiCallCount] = useState(0);
@@ -78,6 +85,16 @@ export default function WhaleRadarApp() {
     if (saved.soundOn !== undefined) setSoundOn(saved.soundOn as boolean);
     if (saved.scanHistory) setScanHistory(saved.scanHistory as ScanSnapshot[]);
     if (saved.prevVolumes) setPrevVolumes(saved.prevVolumes as Record<string, number>);
+    if (saved.bybitEnabled) setBybitEnabled(saved.bybitEnabled as boolean);
+    if (saved.whaleFeedEx) setWhaleFeedEx(saved.whaleFeedEx as string);
+
+    // Issue #6: Restore autoScan but preserve paused state — don't auto-resume
+    if (saved.autoScan) {
+      setAutoScan(true);
+      // If it was previously running, restore as paused so it doesn't auto-resume
+      setAutoPaused(saved.autoPaused as boolean ?? true);
+    }
+
     if (!localStorage.getItem('wr_v9_onboarded')) setShowOnboarding(true);
   }, []);
 
@@ -87,12 +104,14 @@ export default function WhaleRadarApp() {
       saveState({
         theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
         vmcapThr, pchgThr, whaleThr, soundOn, scanHistory: scanHistory.slice(-CFG.HISTORY_MAX),
-        prevVolumes, aggressiveMode, watchlistOnly,
+        prevVolumes, aggressiveMode, watchlistOnly, bybitEnabled, whaleFeedEx,
+        autoScan, autoPaused, // Issue #6: persist auto scan + paused state
       });
     }, 500);
     return () => clearTimeout(timer);
   }, [theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
-    vmcapThr, pchgThr, whaleThr, soundOn, scanHistory, prevVolumes, aggressiveMode, watchlistOnly]);
+    vmcapThr, pchgThr, whaleThr, soundOn, scanHistory, prevVolumes, aggressiveMode,
+    watchlistOnly, bybitEnabled, whaleFeedEx, autoScan, autoPaused]);
 
   // ══ THEME ═════════════════════════════════════════════════════════════════
   useEffect(() => {
@@ -198,9 +217,31 @@ export default function WhaleRadarApp() {
     });
   }, []);
 
+  // ══ WHALE WEBSOCKET ══════════════════════════════════════════════════════
+  const handleWhaleTrade = useCallback((trade: WhaleTrade) => {
+    setWhaleFeed(prev => [trade, ...prev].slice(0, CFG.WFEED_MAX));
+  }, []);
+
+  const handleTrackerPrice = useCallback((sym: string, price: number) => {
+    setTracked(prev => {
+      if (!prev[sym]) return prev;
+      return { ...prev, [sym]: { ...prev[sym], price, lastPrice: prev[sym].price } };
+    });
+  }, []);
+
+  useWhaleWebSocket({
+    subscribedPairs,
+    bybitEnabled,
+    whaleThr,
+    whaleFeedEx,
+    onWhaleTrade: handleWhaleTrade,
+    onTrackerPrice: handleTrackerPrice,
+  });
+
   // ══ AUTO SCAN ═════════════════════════════════════════════════════════════
+  // Issue #6: Only run auto scan if autoScan is ON and NOT paused
   useEffect(() => {
-    if (!autoScan) return;
+    if (!autoScan || autoPaused) return;
     const ms = aggressiveMode ? CFG.SCAN_MS_AGG : CFG.SCAN_MS_NORMAL;
     triggerScan();
     const timer = setInterval(() => triggerScan(), ms);
@@ -209,7 +250,7 @@ export default function WhaleRadarApp() {
       setNextScan(r > 0 ? r + 's' : 'NOW');
     }, 1000);
     return () => { clearInterval(timer); clearInterval(cdTimer); };
-  }, [autoScan, aggressiveMode]);
+  }, [autoScan, autoPaused, aggressiveMode]);
 
   // ══ KEYBOARD SHORTCUTS ════════════════════════════════════════════════════
   useEffect(() => {
@@ -218,7 +259,7 @@ export default function WhaleRadarApp() {
       if (['input', 'select', 'textarea'].includes(tag)) return;
       const k = e.key.toLowerCase();
       if (k === 's') { e.preventDefault(); triggerScan(); }
-      else if (k === 'a') { e.preventDefault(); setAutoScan(p => !p); }
+      else if (k === 'a') { e.preventDefault(); setAutoScan(p => !p); setAutoPaused(false); }
       else if (k === 'w') { e.preventDefault(); setWatchlistOnly(p => !p); }
       else if (k === 'b') { e.preventDefault(); setActiveModal('backtest'); }
       else if (k === 'p') { e.preventDefault(); setActiveModal('portfolio'); }
@@ -234,6 +275,22 @@ export default function WhaleRadarApp() {
   const finishOnboarding = useCallback(() => {
     setShowOnboarding(false);
     localStorage.setItem('wr_v9_onboarded', '1');
+  }, []);
+
+  // ══ TOGGLE HANDLERS ══════════════════════════════════════════════════════
+  const handleToggleAuto = useCallback(() => {
+    setAutoScan(p => {
+      if (!p) setAutoPaused(false); // Starting fresh = not paused
+      return !p;
+    });
+  }, []);
+
+  const handleTogglePause = useCallback(() => {
+    setAutoPaused(p => !p);
+  }, []);
+
+  const handleToggleBybit = useCallback(() => {
+    setBybitEnabled(p => !p);
   }, []);
 
   // ══ FILTERED COINS ════════════════════════════════════════════════════════
@@ -257,7 +314,7 @@ export default function WhaleRadarApp() {
       <WRHeader
         scanCount={coins.length}
         alertCount={alerts.length}
-        nextScan={autoScan ? nextScan : '—'}
+        nextScan={autoScan ? (autoPaused ? 'PAUSED' : nextScan) : '—'}
         aiCallCount={aiCallCount}
         scanning={scanning}
         soundOn={soundOn}
@@ -286,6 +343,7 @@ export default function WhaleRadarApp() {
           scanBadge={scanBadge}
           scanning={scanning}
           autoScan={autoScan}
+          autoPaused={autoPaused}
           watchlistOnly={watchlistOnly}
           tracked={tracked}
           portfolio={portfolio}
@@ -293,7 +351,8 @@ export default function WhaleRadarApp() {
           vmcapThr={vmcapThr}
           pchgThr={pchgThr}
           onScan={triggerScan}
-          onToggleAuto={() => setAutoScan(p => !p)}
+          onToggleAuto={handleToggleAuto}
+          onTogglePause={handleTogglePause}
           onToggleWatchlist={() => setWatchlistOnly(p => !p)}
           onTrack={trackToken}
           onUntrack={untrackToken}
@@ -313,6 +372,10 @@ export default function WhaleRadarApp() {
           onRemoveWallet={(addr) => setWallets(prev => prev.filter(w => w.address !== addr))}
           onTogglePin={(idx) => setAlerts(prev => prev.map((a, i) => i === idx ? { ...a, pinned: !a.pinned } : a))}
           onClearAlerts={() => setAlerts([])}
+          bybitEnabled={bybitEnabled}
+          onToggleBybit={handleToggleBybit}
+          whaleFeedEx={whaleFeedEx}
+          onWhaleFeedExChange={setWhaleFeedEx}
         />
       </div>
 
