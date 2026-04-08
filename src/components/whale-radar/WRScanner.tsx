@@ -4,6 +4,28 @@ import { CoinData, TrackedToken, PortfolioEntry, fmtN, fmtP, calcSizing } from '
 import { analyzeToken } from '@/lib/analyzeToken';
 import type { AlertItem } from '@/lib/whaleRadarState';
 
+// ══ CEO SIGNAL ENGINE v1.0 ════════════════════════════════════════════════
+function getCeoSignal(score: number, threat: string, category: string, vmcap: number) {
+  const t = threat.toUpperCase();
+  const cat = (category || '').toUpperCase();
+  if (score >= 88 || vmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) {
+    return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
+  }
+  if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
+    return { label: 'AGGRESSIVE LONG', mark: '★★★★★', cls: 'text-wr-amber border-wr-amber/60 bg-wr-amber/10' };
+  }
+  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) {
+    return { label: 'LONG (tight stop)', mark: '★★★★', cls: 'text-wr-amber border-wr-amber/40 bg-wr-amber/5' };
+  }
+  if (score >= 45) {
+    return { label: 'LONG', mark: '★★★', cls: 'text-wr-amber border-wr-amber/30 bg-transparent' };
+  }
+  if (score >= 35) {
+    return { label: 'WATCH', mark: '★★', cls: 'text-wr-muted border-wr-border bg-transparent' };
+  }
+  return { label: 'HOLD', mark: '★', cls: 'text-wr-muted border-wr-border bg-transparent' };
+}
+
 interface WRScannerProps {
   coins: CoinData[];
   scanBadge: string;
@@ -166,6 +188,7 @@ export function WRScanner({
                 { key: 'threat', label: 'THREAT' },
                 { key: 'category', label: 'CATEGORY' },
                 { key: '', label: 'ACTIONS' },
+                { key: '', label: 'CEO SIGNAL' },
               ].map(col => (
                 <th
                   key={col.label}
@@ -180,7 +203,7 @@ export function WRScanner({
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={11} className="text-center text-wr-muted text-xs py-12 tracking-widest">
+              <tr><td colSpan={12} className="text-center text-wr-muted text-xs py-12 tracking-widest">
                 {coins.length === 0 ? 'Click SCAN to begin surveillance' : 'No tokens match current filters'}
               </td></tr>
             ) : filtered.map(c => {
@@ -246,11 +269,21 @@ export function WRScanner({
                       </button>
                     </div>
                   </td>
+                  <td className="text-right">
+                    {(() => {
+                      const sig = getCeoSignal(c.score, c.threat, c.category || '', c.vmcap);
+                      return (
+                        <div className={`inline-flex items-center gap-1 border px-2 py-0.5 text-[8px] font-mono tracking-wider ${sig.cls}`}>
+                          {sig.label} <span className="text-[10px]">{sig.mark}</span>
+                        </div>
+                      );
+                    })()}
+                  </td>
                 </tr>,
                 // Issue #7: AI inline row with proper close button
                 aiRow && (
                   <tr key={`ai-${c.symbol}`} className="bg-wr-purple/[.04] border-t-0">
-                    <td colSpan={11} className="p-0">
+                    <td colSpan={12} className="p-0">
                       <div className="px-3 py-2 border-l-2 border-l-wr-purple">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-[8px] text-wr-purple tracking-widest">✦ AI ANALYSIS</span>
