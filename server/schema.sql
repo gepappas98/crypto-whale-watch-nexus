@@ -1,0 +1,143 @@
+-- ══ WHALE RADAR v9 — PostgreSQL Schema ════════════════════════════════════════
+-- Run once on Railway: psql $DATABASE_URL -f server/schema.sql
+
+-- ── Scan Sessions ─────────────────────────────────────────────────────────────
+-- One row per full scan run. Lightweight header for history queries.
+CREATE TABLE IF NOT EXISTS scan_sessions (
+  id          SERIAL PRIMARY KEY,
+  scanned_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  coin_count  INT         NOT NULL DEFAULT 0,
+  crit_count  INT         NOT NULL DEFAULT 0,
+  high_count  INT         NOT NULL DEFAULT 0
+);
+
+-- ── Scan Coins ────────────────────────────────────────────────────────────────
+-- Individual coin results per session. JSONB for flexible fields (reasons, birdData).
+CREATE TABLE IF NOT EXISTS scan_coins (
+  id          SERIAL PRIMARY KEY,
+  session_id  INT         NOT NULL REFERENCES scan_sessions(id) ON DELETE CASCADE,
+  symbol      TEXT        NOT NULL,
+  name        TEXT,
+  rank        INT,
+  price       NUMERIC,
+  change_24h  NUMERIC,
+  volume      NUMERIC,
+  mcap        NUMERIC,
+  vmcap       NUMERIC,
+  vol_spike   NUMERIC,
+  score       INT,
+  threat      TEXT,
+  category    TEXT,
+  confidence  INT,
+  reasons     JSONB,
+  is_sol      BOOLEAN     DEFAULT FALSE,
+  bird_data   JSONB,
+  scanned_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_coins_session  ON scan_coins(session_id);
+CREATE INDEX IF NOT EXISTS idx_scan_coins_symbol   ON scan_coins(symbol);
+CREATE INDEX IF NOT EXISTS idx_scan_coins_score    ON scan_coins(score DESC);
+CREATE INDEX IF NOT EXISTS idx_scan_coins_threat   ON scan_coins(threat);
+
+-- ── Portfolio ─────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS portfolio (
+  id          SERIAL PRIMARY KEY,
+  symbol      TEXT        NOT NULL UNIQUE,
+  amount      NUMERIC     NOT NULL,
+  entry_price NUMERIC     NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── Tracked Tokens (Watchlist) ────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS tracked_tokens (
+  id          SERIAL PRIMARY KEY,
+  symbol      TEXT        NOT NULL UNIQUE,
+  coin_id     TEXT,
+  base_price  NUMERIC,
+  last_price  NUMERIC,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── Alerts ────────────────────────────────────────────────────────────────────
+-- Persists CRITICAL/HIGH alerts. Info alerts are ephemeral (not stored).
+CREATE TABLE IF NOT EXISTS alerts (
+  id          SERIAL PRIMARY KEY,
+  level       TEXT        NOT NULL CHECK (level IN ('critical','high','medium','info')),
+  tag         TEXT,
+  text        TEXT,
+  sizing      TEXT,
+  pinned      BOOLEAN     NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_alerts_level     ON alerts(level);
+CREATE INDEX IF NOT EXISTS idx_alerts_created   ON alerts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alerts_pinned    ON alerts(pinned) WHERE pinned = TRUE;
+
+-- ── Whale Events ──────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS whale_events (
+  id          SERIAL PRIMARY KEY,
+  symbol      TEXT        NOT NULL,
+  side        TEXT        NOT NULL CHECK (side IN ('BUY','SELL')),
+  price       NUMERIC,
+  qty         NUMERIC,
+  usdt        NUMERIC,
+  exchange    TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_whale_symbol   ON whale_events(symbol);
+CREATE INDEX IF NOT EXISTS idx_whale_created  ON whale_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_whale_usdt     ON whale_events(usdt DESC);
+
+-- ── Useful Views ──────────────────────────────────────────────────────────────
+
+-- Latest scan with aggregated threat counts
+CREATE OR REPLACE VIEW v_latest_scan AS
+SELECT
+  ss.id           AS session_id,
+  ss.scanned_at,
+  ss.coin_count,
+  ss.crit_count,
+  ss.high_count,
+  COUNT(sc.id)                                    AS total_coins,
+  COUNT(*) FILTER (WHERE sc.score >= 70)          AS critical_coins,
+  ROUND(AVG(sc.score)::NUMERIC, 1)                AS avg_score,
+  MAX(sc.score)                                   AS max_score
+FROM scan_sessions ss
+JOIN scan_coins sc ON sc.session_id = ss.id
+WHERE ss.id = (SELECT MAX(id) FROM scan_sessions)
+GROUP BY ss.id;
+
+-- Top manipulation candidates across all history
+CREATE OR REPLACE VIEW v_top_threats AS
+SELECT
+  symbol,
+  MAX(score)                    AS peak_score,
+  COUNT(DISTINCT session_id)    AS scan_appearances,
+  MAX(threat)                   AS worst_threat,
+  MODE() WITHIN GROUP (ORDER BY category) AS dominant_category,
+  MAX(scanned_at)               AS last_seen
+FROM scan_coins
+WHERE score >= 45
+GROUP BY symbol
+ORDER BY peak_score DESC, scan_appearances DESC;
+
+-- Portfolio with live price from latest scan
+CREATE OR REPLACE VIEW v_portfolio_live AS
+SELECT
+  p.symbol,
+  p.amount,
+  p.entry_price,
+  sc.price      AS current_price,
+  ROUND(((sc.price - p.entry_price) / p.entry_price * 100)::NUMERIC, 2) AS pnl_pct,
+  ROUND((p.amount * (sc.price - p.entry_price))::NUMERIC, 2)            AS pnl_usd
+FROM portfolio p
+LEFT JOIN LATERAL (
+  SELECT price FROM scan_coins
+  WHERE symbol = p.symbol
+  ORDER BY scanned_at DESC
+  LIMIT 1
+) sc ON TRUE;
