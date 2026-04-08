@@ -1,5 +1,5 @@
 /* ══ WHALE RADAR v9 — RIGHT PANEL ════════════════════════════════════════════ */
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { AlertItem, WhaleTrade, WalletEntry, fmtN, fmtP } from '@/lib/whaleRadarState';
 
 interface WRRightPanelProps {
@@ -12,11 +12,16 @@ interface WRRightPanelProps {
   onRemoveWallet: (addr: string) => void;
   onTogglePin: (idx: number) => void;
   onClearAlerts: () => void;
+  bybitEnabled: boolean;
+  onToggleBybit: () => void;
+  whaleFeedEx: string;
+  onWhaleFeedExChange: (ex: string) => void;
 }
 
 export function WRRightPanel({
   whaleFeed, alerts, alertFilter, onAlertFilterChange,
   wallets, onAddWallet, onRemoveWallet, onTogglePin, onClearAlerts,
+  bybitEnabled, onToggleBybit, whaleFeedEx, onWhaleFeedExChange,
 }: WRRightPanelProps) {
   const [walletInput, setWalletInput] = useState('');
   const [walletLabel, setWalletLabel] = useState('');
@@ -29,6 +34,12 @@ export function WRRightPanel({
     setWalletInput('');
     setWalletLabel('');
   };
+
+  // Issue #4: Re-filter whale trades when exchange filter changes
+  const filteredWhaleFeed = useMemo(() => {
+    if (whaleFeedEx === 'all') return whaleFeed;
+    return whaleFeed.filter(w => w.ex === whaleFeedEx);
+  }, [whaleFeed, whaleFeedEx]);
 
   return (
     <div className="flex flex-col border-l border-wr-border bg-wr-bg2 wr-right-panel min-h-0">
@@ -55,16 +66,51 @@ export function WRRightPanel({
           <div className="wr-panel-header">
             <span className="wr-panel-title">🐳 WHALE TRADES — LIVE</span>
           </div>
+          {/* Issue #4: Exchange filter tabs */}
+          <div className="px-2 py-1 border-b border-wr-border flex gap-1 items-center">
+            {[
+              { key: 'all', label: 'ALL' },
+              { key: 'binance', label: 'BINANCE' },
+              { key: 'bybit', label: 'BYBIT' },
+            ].map(ex => (
+              <button
+                key={ex.key}
+                className={`text-[8px] px-1.5 py-0.5 border cursor-pointer font-mono tracking-widest transition-all
+                  ${whaleFeedEx === ex.key
+                    ? 'bg-wr-green-ghost border-wr-green text-wr-green'
+                    : 'border-wr-border text-wr-muted hover:border-wr-green-dim hover:text-wr-green'}`}
+                onClick={() => onWhaleFeedExChange(ex.key)}
+              >
+                {ex.label}
+              </button>
+            ))}
+            <div className="flex-1" />
+            <button
+              className={`text-[8px] px-1.5 py-0.5 border cursor-pointer font-mono tracking-widest transition-all
+                ${bybitEnabled
+                  ? 'bg-wr-amber/10 border-wr-amber text-wr-amber'
+                  : 'border-wr-border text-wr-muted'}`}
+              onClick={onToggleBybit}
+              title="Toggle Bybit WebSocket"
+            >
+              BBT: {bybitEnabled ? 'ON' : 'OFF'}
+            </button>
+          </div>
           <div className="max-h-48 overflow-y-auto scrollbar-thin">
-            {whaleFeed.length === 0 ? (
+            {filteredWhaleFeed.length === 0 ? (
               <div className="text-center text-wr-muted text-[9px] py-6 tracking-widest">
-                Add a pair to monitor whale trades
+                {whaleFeed.length === 0 ? 'Add a pair to monitor whale trades' : 'No trades for selected exchange'}
               </div>
             ) : (
-              whaleFeed.slice(0, 30).map((w, i) => (
+              filteredWhaleFeed.slice(0, 30).map((w, i) => (
                 <div key={i} className="px-3 py-1.5 border-b border-wr-border/40 grid grid-cols-[46px_1fr_auto] gap-1.5 items-center animate-slide-in">
                   <span className="text-[8px] text-wr-muted">{new Date(w.ts).toLocaleTimeString()}</span>
-                  <span className="text-[9px] text-wr-white">{w.sym} {w.side}</span>
+                  <span className="text-[9px] text-wr-white">
+                    <span className={`text-[7px] mr-1 ${w.ex === 'bybit' ? 'text-wr-amber' : 'text-wr-green-dim'}`}>
+                      {w.ex === 'bybit' ? 'BBT' : 'BNC'}
+                    </span>
+                    {w.sym} {w.side}
+                  </span>
                   <span className={`text-[10px] text-right ${w.usdt >= 5e6 ? 'text-wr-red font-bold' : w.usdt >= 1e6 ? 'text-wr-amber' : 'text-wr-cyan'}`}>
                     ${fmtN(w.usdt)}
                   </span>
