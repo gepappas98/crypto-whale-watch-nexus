@@ -418,6 +418,44 @@ export default function WhaleRadarApp() {
           <SentimentContent coins={coins} aiKey={aiKey} />
         </WRModal>
       )}
+
+      {/* ══ TIP THE CEO ══ */}
+      <div className="border-t border-wr-border bg-wr-bg2/80 py-8 px-4">
+        <div className="max-w-md mx-auto text-center space-y-4">
+          <div className="text-[9px] tracking-[0.3em] text-wr-muted uppercase">Support the Developer</div>
+          <h3 className="font-head text-lg text-wr-cyan">
+            ☕ Found Whale Radar useful?
+          </h3>
+          <p className="text-[11px] text-wr-muted leading-relaxed">
+            If this tool helped your trading or development workflow, consider tipping the CEO. Every sat counts. 🙏
+          </p>
+          <div className="inline-block bg-white rounded-xl p-3 shadow-lg shadow-wr-cyan/10">
+            <img
+              src={btcQr}
+              alt="BTC Donation QR Code"
+              className="w-48 h-48 object-contain"
+            />
+          </div>
+          <div className="space-y-1">
+            <div className="text-[8px] tracking-widest text-wr-muted uppercase">BTC Address</div>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText('bc1q0d0ccaxuw065ezdulr68azp2fjhc0avaqf0pyz');
+                setCopiedBtc(true);
+                setTimeout(() => setCopiedBtc(false), 2000);
+              }}
+              className="font-mono text-[10px] text-wr-green bg-wr-bg3 border border-wr-border rounded px-3 py-2 hover:border-wr-cyan transition-colors cursor-pointer select-all break-all max-w-xs mx-auto block"
+              title="Click to copy"
+            >
+              bc1q0d0ccaxuw065ezdulr68azp2fjhc0avaqf0pyz
+            </button>
+            <div className={`text-[9px] h-4 transition-opacity ${copiedBtc ? 'text-wr-green opacity-100' : 'opacity-0'}`}>
+              ✓ Copied to clipboard!
+            </div>
+          </div>
+          <div className="text-[8px] text-wr-muted/50 pt-2">WHALE RADAR v9 — Built with 🔥 by the CEO</div>
+        </div>
+      </div>
     </div>
   );
 }
