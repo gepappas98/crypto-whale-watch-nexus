@@ -410,6 +410,7 @@ export default function WhaleRadarApp() {
           const coin = coins.find(c => c.symbol === sym);
           return s + p.amount * (coin?.price || p.entryPrice);
         }, 0)}
+        rateLimits={rateLimitInfo}
       />
 
       <WRTracker tracked={tracked} onUntrack={untrackToken} />
