@@ -123,9 +123,26 @@ export default function WhaleRadarApp() {
     else if (theme === 'dark') document.body.classList.add('theme-dark');
   }, [theme]);
 
+  // ══ RATE LIMIT STATE ═══════════════════════════════════════════════════════
+  const [rateLimitInfo, setRateLimitInfo] = useState<{ key: string; remaining: number }[]>([]);
+
+  useEffect(() => {
+    const tick = setInterval(() => setRateLimitInfo(getActiveCooldowns()), 1000);
+    const unsub = onRateLimitChange(() => setRateLimitInfo(getActiveCooldowns()));
+    return () => { clearInterval(tick); unsub(); };
+  }, []);
+
   // ══ SCAN ══════════════════════════════════════════════════════════════════
   const triggerScan = useCallback(async () => {
     if (scanning) return;
+
+    // Check CoinGecko cooldown
+    if (isRateLimited(RL_KEYS.COINGECKO)) {
+      const rem = getCooldownRemaining(RL_KEYS.COINGECKO);
+      setScanBadge(`WAIT ${rem}s`);
+      return;
+    }
+
     setScanning(true);
     setScanBadge('SCANNING');
     try {
@@ -134,8 +151,9 @@ export default function WhaleRadarApp() {
       if (apiKey) headers['x-cg-pro-api-key'] = apiKey;
       const res = await fetch(url, { headers, signal: AbortSignal.timeout(18000) });
       if (res.status === 429) {
-        addAlert('high', 'API', 'CoinGecko rate limited — wait 60s');
+        handleRateLimit('CoinGecko', RL_KEYS.COINGECKO, res.headers.get('Retry-After'));
         setScanBadge('RATE LIMITED');
+        addAlert('high', 'API', `CoinGecko rate limited — cooldown ${getCooldownRemaining(RL_KEYS.COINGECKO)}s`);
         return;
       }
       if (!res.ok) throw new Error('HTTP ' + res.status);
