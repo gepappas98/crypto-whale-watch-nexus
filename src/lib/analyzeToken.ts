@@ -1,6 +1,7 @@
 /* ══ WHALE RADAR v9 — Claude AI Analysis ═════════════════════════════════════ */
 import { CoinData, fmtN, fmtP } from './whaleRadarState';
 import { detect, ManipulationPattern } from './detection';
+import { handleRateLimit, isRateLimited, RL_KEYS } from './rateLimit';
 
 const PATTERN_LABEL: Record<ManipulationPattern, string> = {
   WASH_TRADE:    'Wash Trading',
@@ -68,6 +69,8 @@ Flags: ${det.reasons.join(', ')}
 ${coin.isSol ? 'Chain: Solana' : ''}
 ${coin.birdData ? `On-chain: RugScore=${coin.birdData.rugScore} Top10=${coin.birdData.top10pct?.toFixed(0)}% Mintable=${coin.birdData.isMintable} Age=${coin.birdData.ageDays}d` : ''}`;
 
+  if (isRateLimited(RL_KEYS.CLAUDE)) return 'AI rate limited — cooling down';
+
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -83,6 +86,10 @@ ${coin.birdData ? `On-chain: RugScore=${coin.birdData.rugScore} Top10=${coin.bir
         messages: [{ role: 'user', content: prompt }],
       }),
     });
+    if (res.status === 429) {
+      handleRateLimit('Claude AI', RL_KEYS.CLAUDE, res.headers.get('Retry-After'));
+      return 'AI rate limited — cooling down';
+    }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const text = data.content?.[0]?.text || 'No response';
@@ -110,6 +117,8 @@ export async function analyzeSentiment(
     .map(c => `${c.symbol}(${c.score})`)
     .join(', ');
 
+  if (isRateLimited(RL_KEYS.CLAUDE)) return 'AI rate limited — cooling down';
+
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -128,6 +137,10 @@ export async function analyzeSentiment(
         }],
       }),
     });
+    if (res.status === 429) {
+      handleRateLimit('Claude AI', RL_KEYS.CLAUDE, res.headers.get('Retry-After'));
+      return 'AI rate limited — cooling down';
+    }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     return data.content?.[0]?.text || 'No response';
