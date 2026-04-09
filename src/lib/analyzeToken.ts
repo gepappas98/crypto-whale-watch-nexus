@@ -117,6 +117,8 @@ export async function analyzeSentiment(
     .map(c => `${c.symbol}(${c.score})`)
     .join(', ');
 
+  if (isRateLimited(RL_KEYS.CLAUDE)) return 'AI rate limited — cooling down';
+
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -135,6 +137,10 @@ export async function analyzeSentiment(
         }],
       }),
     });
+    if (res.status === 429) {
+      handleRateLimit('Claude AI', RL_KEYS.CLAUDE, res.headers.get('Retry-After'));
+      return 'AI rate limited — cooling down';
+    }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     return data.content?.[0]?.text || 'No response';
