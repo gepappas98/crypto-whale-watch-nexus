@@ -1,6 +1,11 @@
-/* ══ WHALE RADAR v9 — RIGHT PANEL ════════════════════════════════════════════ */
-import { useState, useMemo } from 'react';
-import { AlertItem, WhaleTrade, WalletEntry, fmtN, fmtP } from '@/lib/whaleRadarState';
+/* ══ WHALE RADAR v9 — RIGHT PANEL ════════════════════════════════════════════
+ *  Virtual-scrolled whale feed (max 50 DOM nodes) + alerts panel.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { AlertItem, WhaleTrade, WalletEntry, fmtN } from '@/lib/whaleRadarState';
+
+const VROW_H = 28;       // virtual row height in px
+const MAX_DOM_ROWS = 50;  // cap rendered DOM nodes
 
 interface WRRightPanelProps {
   whaleFeed: WhaleTrade[];
@@ -35,11 +40,40 @@ export function WRRightPanel({
     setWalletLabel('');
   };
 
-  // Issue #4: Re-filter whale trades when exchange filter changes
+  // Exchange filter
   const filteredWhaleFeed = useMemo(() => {
     if (whaleFeedEx === 'all') return whaleFeed;
     return whaleFeed.filter(w => w.ex === whaleFeedEx);
   }, [whaleFeed, whaleFeedEx]);
+
+  // ── Virtual scrolling state ───────────────────────────────────────────────
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+
+  const handleScroll = useCallback(() => {
+    if (scrollRef.current) setScrollTop(scrollRef.current.scrollTop);
+  }, []);
+
+  const totalItems = filteredWhaleFeed.length;
+  const totalHeight = totalItems * VROW_H;
+
+  const { startIdx, endIdx, visibleItems } = useMemo(() => {
+    const start = Math.max(0, Math.floor(scrollTop / VROW_H) - 2);
+    const visible = Math.min(MAX_DOM_ROWS, Math.ceil(192 / VROW_H) + 4);
+    const end = Math.min(totalItems, start + visible);
+    return {
+      startIdx: start,
+      endIdx: end,
+      visibleItems: filteredWhaleFeed.slice(start, end),
+    };
+  }, [scrollTop, filteredWhaleFeed, totalItems]);
+
+  // Auto-scroll to top on new trades
+  useEffect(() => {
+    if (scrollRef.current && scrollRef.current.scrollTop === 0) {
+      // already at top, no action needed
+    }
+  }, [filteredWhaleFeed.length]);
 
   return (
     <div className="flex flex-col border-l border-wr-border bg-wr-bg2 wr-right-panel min-h-0">
@@ -65,8 +99,9 @@ export function WRRightPanel({
         <div className="border-b border-wr-border">
           <div className="wr-panel-header">
             <span className="wr-panel-title">🐳 WHALE TRADES — LIVE</span>
+            <span className="text-[7px] text-wr-muted font-mono">{totalItems} trades</span>
           </div>
-          {/* Issue #4: Exchange filter tabs */}
+          {/* Exchange filter tabs */}
           <div className="px-2 py-1 border-b border-wr-border flex gap-1 items-center">
             {[
               { key: 'all', label: 'ALL' },
@@ -96,26 +131,44 @@ export function WRRightPanel({
               BBT: {bybitEnabled ? 'ON' : 'OFF'}
             </button>
           </div>
-          <div className="max-h-48 overflow-y-auto scrollbar-thin">
-            {filteredWhaleFeed.length === 0 ? (
+
+          {/* Virtual-scrolled whale feed */}
+          <div
+            ref={scrollRef}
+            className="max-h-48 overflow-y-auto scrollbar-thin"
+            onScroll={handleScroll}
+          >
+            {totalItems === 0 ? (
               <div className="text-center text-wr-muted text-[9px] py-6 tracking-widest">
                 {whaleFeed.length === 0 ? 'Add a pair to monitor whale trades' : 'No trades for selected exchange'}
               </div>
             ) : (
-              filteredWhaleFeed.slice(0, 30).map((w, i) => (
-                <div key={i} className="px-3 py-1.5 border-b border-wr-border/40 grid grid-cols-[46px_1fr_auto] gap-1.5 items-center animate-slide-in">
-                  <span className="text-[8px] text-wr-muted">{new Date(w.ts).toLocaleTimeString()}</span>
-                  <span className="text-[9px] text-wr-white">
-                    <span className={`text-[7px] mr-1 ${w.ex === 'bybit' ? 'text-wr-amber' : 'text-wr-green-dim'}`}>
-                      {w.ex === 'bybit' ? 'BBT' : 'BNC'}
+              <div style={{ height: totalHeight, position: 'relative' }}>
+                {visibleItems.map((w, i) => (
+                  <div
+                    key={startIdx + i}
+                    className="px-3 py-1.5 border-b border-wr-border/40 grid grid-cols-[46px_1fr_auto] gap-1.5 items-center"
+                    style={{
+                      position: 'absolute',
+                      top: (startIdx + i) * VROW_H,
+                      left: 0,
+                      right: 0,
+                      height: VROW_H,
+                    }}
+                  >
+                    <span className="text-[8px] text-wr-muted">{new Date(w.ts).toLocaleTimeString()}</span>
+                    <span className="text-[9px] text-wr-white">
+                      <span className={`text-[7px] mr-1 ${w.ex === 'bybit' ? 'text-wr-amber' : 'text-wr-green-dim'}`}>
+                        {w.ex === 'bybit' ? 'BBT' : 'BNC'}
+                      </span>
+                      {w.sym} {w.side}
                     </span>
-                    {w.sym} {w.side}
-                  </span>
-                  <span className={`text-[10px] text-right ${w.usdt >= 5e6 ? 'text-wr-red font-bold' : w.usdt >= 1e6 ? 'text-wr-amber' : 'text-wr-cyan'}`}>
-                    ${fmtN(w.usdt)}
-                  </span>
-                </div>
-              ))
+                    <span className={`text-[10px] text-right ${w.usdt >= 5e6 ? 'text-wr-red font-bold' : w.usdt >= 1e6 ? 'text-wr-amber' : 'text-wr-cyan'}`}>
+                      ${fmtN(w.usdt)}
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -169,7 +222,6 @@ export function WRRightPanel({
           <button className="wr-btn red text-[7px] px-1.5 py-0.5" onClick={onClearAlerts}>CLR</button>
         </div>
 
-        {/* Alert filter tabs */}
         <div className="px-2 py-1 border-b border-wr-border flex gap-1 items-center flex-wrap">
           {['ALL', 'C', 'H', 'M', 'I', 'PIN'].map(f => (
             <button
@@ -185,7 +237,6 @@ export function WRRightPanel({
           ))}
         </div>
 
-        {/* Alert feed */}
         <div className="flex-1 overflow-y-auto scrollbar-thin">
           {alerts.length === 0 ? (
             <div className="text-center text-wr-muted text-[9px] py-6 tracking-widest">

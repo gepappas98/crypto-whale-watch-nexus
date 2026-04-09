@@ -1,32 +1,67 @@
 /* ══ WHALE RADAR v9 — DB API Client ══════════════════════════════════════════
  *  Frontend service layer. All persistence goes through here.
  *  Falls back to localStorage if the API is unreachable (offline mode).
+ *  Features: auto-retry with exponential backoff + jitter, toast notifications.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 import type { CoinData, PortfolioEntry, TrackedToken, AlertItem } from './whaleRadarState';
+import { toast } from 'sonner';
 
 const BASE = '/api';
 let _dbOnline = true;
 
-// ── Internal fetch wrapper ────────────────────────────────────────────────────
+// ── Retry config ──────────────────────────────────────────────────────────────
+const MAX_RETRIES = 3;
+const BASE_DELAY = 500;   // ms
+const MAX_DELAY = 8000;   // ms
+
+function jitteredDelay(attempt: number): number {
+  const exp = Math.min(BASE_DELAY * Math.pow(2, attempt), MAX_DELAY);
+  return exp * (0.5 + Math.random() * 0.5); // 50-100% of exponential value
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ── Internal fetch wrapper with auto-retry + jitter ───────────────────────────
 
 async function api<T = unknown>(
   path: string,
-  options?: RequestInit
+  options?: RequestInit & { _silent?: boolean }
 ): Promise<T | null> {
-  try {
-    const res = await fetch(BASE + path, {
-      headers: { 'Content-Type': 'application/json' },
-      ...options,
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    _dbOnline = true;
-    return (await res.json()) as T;
-  } catch (err) {
-    _dbOnline = false;
-    console.warn('[DB]', path, (err as Error).message);
-    return null;
+  const silent = options?._silent ?? false;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(BASE + path, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      _dbOnline = true;
+      return (await res.json()) as T;
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (attempt < MAX_RETRIES) {
+        const dly = jitteredDelay(attempt);
+        console.warn(`[DB] ${path} attempt ${attempt + 1} failed (${msg}), retry in ${Math.round(dly)}ms`);
+        await sleep(dly);
+        continue;
+      }
+      // All retries exhausted
+      _dbOnline = false;
+      console.warn('[DB]', path, msg);
+      if (!silent) {
+        toast.error('API unreachable', {
+          description: `${path} failed after ${MAX_RETRIES + 1} attempts`,
+          duration: 4000,
+        });
+      }
+      return null;
+    }
   }
+  return null;
 }
 
 /** True if the last API call succeeded. Use to show DB status badge. */
@@ -34,7 +69,7 @@ export function isDbOnline(): boolean { return _dbOnline; }
 
 /** Ping the server. Returns true if reachable. */
 export async function dbPing(): Promise<boolean> {
-  const r = await api<{ ok: boolean }>('/health');
+  const r = await api<{ ok: boolean }>('/health', { _silent: true });
   return r?.ok === true;
 }
 
@@ -59,42 +94,38 @@ export interface HistoricalCoin {
   scanned_at: string;
 }
 
-/**
- * Persist a completed scan to PostgreSQL.
- * Call this at the end of every scan in Index.tsx / WRScanner.
- */
 export async function saveScan(coins: CoinData[]): Promise<number | null> {
   const r = await api<{ session_id: number }>('/scans', {
     method: 'POST',
     body: JSON.stringify({ coins }),
   });
+  if (r) toast.success('Scan saved', { duration: 2000 });
   return r?.session_id ?? null;
 }
 
-/** List of recent scan session headers (last 50). */
 export async function getScanSessions(): Promise<ScanSession[]> {
   return (await api<ScanSession[]>('/scans')) ?? [];
 }
 
-/** Full coin list for a specific session. */
 export async function getScanCoins(sessionId: number): Promise<CoinData[]> {
   return (await api<CoinData[]>(`/scans/${sessionId}`)) ?? [];
 }
 
-/** Score/threat history for a token — used in backtesting. */
 export async function getTokenHistory(symbol: string): Promise<HistoricalCoin[]> {
   return (await api<HistoricalCoin[]>(`/scans/symbol/${symbol}`)) ?? [];
 }
 
-/** Top manipulation threats across all stored history. */
 export async function getTopThreats(): Promise<Record<string, unknown>[]> {
   return (await api<Record<string, unknown>[]>('/scans/threats/top')) ?? [];
 }
 
 // ══ PORTFOLIO ════════════════════════════════════════════════════════════════
 
-export interface PortfolioRow extends PortfolioEntry {
+/** Raw DB row shape (snake_case from PostgreSQL) */
+interface PortfolioDbRow {
   symbol: string;
+  amount: number;
+  entry_price: number;
   current_price: number | null;
   pnl_pct: number | null;
   pnl_usd: number | null;
@@ -102,25 +133,22 @@ export interface PortfolioRow extends PortfolioEntry {
 
 /** Load portfolio from DB. Falls back to localStorage. */
 export async function loadPortfolio(): Promise<Record<string, PortfolioEntry>> {
-  const rows = await api<PortfolioRow[]>('/portfolio');
+  const rows = await api<PortfolioDbRow[]>('/portfolio');
   if (rows) {
     return Object.fromEntries(
       rows.map(r => [r.symbol, { amount: Number(r.amount), entryPrice: Number(r.entry_price) }])
     );
   }
-  // localStorage fallback
   try {
     const raw = localStorage.getItem('wr_v9_portfolio');
     return raw ? JSON.parse(raw) : {};
   } catch { return {}; }
 }
 
-/** Upsert a portfolio position. */
 export async function savePortfolioEntry(
   symbol: string,
   entry: PortfolioEntry
 ): Promise<void> {
-  // Always write localStorage as fallback
   try {
     const existing = JSON.parse(localStorage.getItem('wr_v9_portfolio') || '{}');
     existing[symbol] = entry;
@@ -133,7 +161,6 @@ export async function savePortfolioEntry(
   });
 }
 
-/** Delete a portfolio position. */
 export async function deletePortfolioEntry(symbol: string): Promise<void> {
   try {
     const existing = JSON.parse(localStorage.getItem('wr_v9_portfolio') || '{}');
@@ -146,7 +173,6 @@ export async function deletePortfolioEntry(symbol: string): Promise<void> {
 
 // ══ TRACKED TOKENS (WATCHLIST) ════════════════════════════════════════════════
 
-/** Load tracked tokens from DB. Falls back to localStorage. */
 export async function loadTracked(): Promise<Record<string, TrackedToken>> {
   const rows = await api<Array<{ symbol: string; coin_id: string; base_price: number; last_price: number }>>('/tracked');
   if (rows) {
@@ -163,7 +189,6 @@ export async function loadTracked(): Promise<Record<string, TrackedToken>> {
   } catch { return {}; }
 }
 
-/** Add a token to the watchlist. */
 export async function saveTrackedToken(
   symbol: string,
   token: TrackedToken
@@ -180,7 +205,6 @@ export async function saveTrackedToken(
   });
 }
 
-/** Remove a token from the watchlist. */
 export async function deleteTrackedToken(symbol: string): Promise<void> {
   try {
     const existing = JSON.parse(localStorage.getItem('wr_v9_tracked') || '{}');
@@ -193,9 +217,8 @@ export async function deleteTrackedToken(symbol: string): Promise<void> {
 
 // ══ ALERTS ════════════════════════════════════════════════════════════════════
 
-/** Persist a non-info alert to the DB. */
 export async function saveAlert(alert: AlertItem): Promise<void> {
-  if (alert.level === 'info') return; // info alerts are ephemeral
+  if (alert.level === 'info') return;
   await api('/alerts', {
     method: 'POST',
     body: JSON.stringify({
@@ -208,7 +231,6 @@ export async function saveAlert(alert: AlertItem): Promise<void> {
   });
 }
 
-/** Load persisted alerts (last 100). */
 export async function loadAlerts(): Promise<AlertItem[]> {
   const rows = await api<Array<{
     id: number; level: string; tag: string; text: string;
@@ -226,7 +248,6 @@ export async function loadAlerts(): Promise<AlertItem[]> {
   }));
 }
 
-/** Toggle pin on a stored alert. */
 export async function toggleAlertPin(dbId: number): Promise<void> {
   await api(`/alerts/${dbId}/pin`, { method: 'PATCH' });
 }
