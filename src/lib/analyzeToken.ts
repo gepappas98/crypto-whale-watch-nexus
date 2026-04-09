@@ -1,6 +1,7 @@
 /* ══ WHALE RADAR v9 — Claude AI Analysis ═════════════════════════════════════ */
 import { CoinData, fmtN, fmtP } from './whaleRadarState';
 import { detect, ManipulationPattern } from './detection';
+import { handleRateLimit, isRateLimited, RL_KEYS } from './rateLimit';
 
 const PATTERN_LABEL: Record<ManipulationPattern, string> = {
   WASH_TRADE:    'Wash Trading',

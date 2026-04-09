@@ -6,6 +6,7 @@
 
 import type { CoinData, PortfolioEntry, TrackedToken, AlertItem } from './whaleRadarState';
 import { toast } from 'sonner';
+import { handleRateLimit, isRateLimited, RL_KEYS } from './rateLimit';
 
 const BASE = '/api';
 let _dbOnline = true;
@@ -17,14 +18,14 @@ const MAX_DELAY = 8000;   // ms
 
 function jitteredDelay(attempt: number): number {
   const exp = Math.min(BASE_DELAY * Math.pow(2, attempt), MAX_DELAY);
-  return exp * (0.5 + Math.random() * 0.5); // 50-100% of exponential value
+  return exp * (0.5 + Math.random() * 0.5);
 }
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// ── Internal fetch wrapper with auto-retry + jitter ───────────────────────────
+// ── Internal fetch wrapper with auto-retry + rate-limit awareness ─────────────
 
 async function api<T = unknown>(
   path: string,
@@ -32,12 +33,33 @@ async function api<T = unknown>(
 ): Promise<T | null> {
   const silent = options?._silent ?? false;
 
+  // Skip if backend is currently rate-limited
+  if (isRateLimited(RL_KEYS.BACKEND)) {
+    if (!silent) {
+      toast.info('Backend cooling down', {
+        description: 'Request skipped — rate limit active',
+        duration: 2000,
+        id: 'rl-skip-backend',
+      });
+    }
+    return null;
+  }
+
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const res = await fetch(BASE + path, {
         headers: { 'Content-Type': 'application/json' },
         ...options,
       });
+
+      // ── 429 Rate Limit ──
+      if (res.status === 429) {
+        const retryAfter = res.headers.get('Retry-After');
+        handleRateLimit('Backend API', RL_KEYS.BACKEND, retryAfter);
+        _dbOnline = true; // server is reachable, just limiting
+        return null;
+      }
+
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       _dbOnline = true;
       return (await res.json()) as T;
@@ -49,7 +71,6 @@ async function api<T = unknown>(
         await sleep(dly);
         continue;
       }
-      // All retries exhausted
       _dbOnline = false;
       console.warn('[DB]', path, msg);
       if (!silent) {
