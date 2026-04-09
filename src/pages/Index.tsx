@@ -16,6 +16,7 @@ import {
   WalletEntry, ScanSnapshot, CFG, fmtN, fmtP, isSolToken, calcThreat,
   calcSizing, saveState, loadState,
 } from '@/lib/whaleRadarState';
+import { handleRateLimit, isRateLimited, getCooldownRemaining, getActiveCooldowns, onRateLimitChange, RL_KEYS } from '@/lib/rateLimit';
 
 export default function WhaleRadarApp() {
   // ══ CORE STATE ═══════════════════════════════════════════════════════════
