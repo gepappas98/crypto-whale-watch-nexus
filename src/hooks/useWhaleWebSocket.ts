@@ -82,6 +82,9 @@ export function useWhaleWebSocket({
     const pairs = optionsRef.current.subscribedPairs;
     if (!pairs.size) { setBinanceReady(false); return; }
 
+    // Note: permessage-deflate compression is negotiated server-side.
+    // Binance & Bybit streams already enable it when supported by the server.
+    // The browser WebSocket API handles decompression transparently — no client config needed.
     const ws = new WebSocket('wss://stream.binance.com:9443/stream');
     wsRef.current = ws;
     setBinanceReady(false);
