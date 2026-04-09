@@ -124,7 +124,7 @@ export default function WhaleRadarApp() {
   }, [theme]);
 
   // ══ RATE LIMIT STATE ═══════════════════════════════════════════════════════
-  const [rateLimitInfo, setRateLimitInfo] = useState<{ key: string; remaining: number }[]>([]);
+  const [rateLimitInfo, setRateLimitInfo] = useState<{ key: string; source: string; remaining: number }[]>([]);
 
   useEffect(() => {
     const tick = setInterval(() => setRateLimitInfo(getActiveCooldowns()), 1000);
