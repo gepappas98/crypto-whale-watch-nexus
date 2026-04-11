@@ -104,6 +104,12 @@ export default function WhaleRadarApp() {
     if (!localStorage.getItem('wr_v9_onboarded')) setShowOnboarding(true);
   }, []);
 
+  // ══ PERFORMANCE MONITORING ═══════════════════════════════════════════════
+  useEffect(() => {
+    const cleanup = startPerfMonitoring();
+    return cleanup;
+  }, []);
+
   // Save on state changes
   useEffect(() => {
     const timer = setTimeout(() => {
