@@ -272,7 +272,7 @@ export default function WhaleRadarApp() {
     });
   }, []);
 
-  useWhaleWebSocket({
+  const { binanceReady, bybitReady, wsStatus, wsLagMs, reconnectAttempts: wsReconnects } = useWhaleWebSocket({
     subscribedPairs,
     bybitEnabled,
     whaleThr,
