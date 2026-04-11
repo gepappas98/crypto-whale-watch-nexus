@@ -17,6 +17,9 @@ import {
   calcSizing, saveState, loadState,
 } from '@/lib/whaleRadarState';
 import { handleRateLimit, isRateLimited, getCooldownRemaining, getActiveCooldowns, onRateLimitChange, RL_KEYS } from '@/lib/rateLimit';
+import { cachedFetch } from '@/lib/cachedFetch';
+import { startPerfMonitoring } from '@/lib/perfBudget';
+import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 
 export default function WhaleRadarApp() {
   // ══ CORE STATE ═══════════════════════════════════════════════════════════
@@ -101,6 +104,12 @@ export default function WhaleRadarApp() {
     if (!localStorage.getItem('wr_v9_onboarded')) setShowOnboarding(true);
   }, []);
 
+  // ══ PERFORMANCE MONITORING ═══════════════════════════════════════════════
+  useEffect(() => {
+    const cleanup = startPerfMonitoring();
+    return cleanup;
+  }, []);
+
   // Save on state changes
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -149,19 +158,32 @@ export default function WhaleRadarApp() {
       const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h';
       const headers: Record<string, string> = {};
       if (apiKey) headers['x-cg-pro-api-key'] = apiKey;
-      const res = await fetch(url, { headers, signal: AbortSignal.timeout(18000) });
-      if (res.status === 429) {
-        handleRateLimit('CoinGecko', RL_KEYS.COINGECKO, res.headers.get('Retry-After'));
-        setScanBadge('RATE LIMITED');
-        addAlert('high', 'API', `CoinGecko rate limited — cooldown ${getCooldownRemaining(RL_KEYS.COINGECKO)}s`);
+
+      const result = await cachedFetch<unknown[]>(url, {
+        headers,
+        signal: AbortSignal.timeout(18000),
+        cacheTtl: 10_000,
+        swrTtl: 30_000,
+        rateLimitKey: RL_KEYS.COINGECKO,
+        rateLimitName: 'CoinGecko',
+      });
+
+      if (result.error && !result.data) {
+        if (result.error.includes('429')) {
+          setScanBadge('RATE LIMITED');
+          addAlert('high', 'API', `CoinGecko rate limited — cooldown ${getCooldownRemaining(RL_KEYS.COINGECKO)}s`);
+        } else {
+          throw new Error(result.error);
+        }
         return;
       }
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
-      setApiCallCount(c => c + 1);
-      processData(data);
-      setScanBadge('LIVE');
-      setLastScanTs(Date.now());
+
+      if (result.data) {
+        setApiCallCount(c => c + (result.fromCache ? 0 : 1));
+        processData(result.data);
+        setScanBadge(result.fromCache ? 'CACHED' : 'LIVE');
+        setLastScanTs(Date.now());
+      }
     } catch (e: unknown) {
       setScanBadge('ERROR');
       addAlert('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
@@ -250,7 +272,7 @@ export default function WhaleRadarApp() {
     });
   }, []);
 
-  useWhaleWebSocket({
+  const { binanceReady, bybitReady, wsStatus, wsLagMs, reconnectAttempts: wsReconnects } = useWhaleWebSocket({
     subscribedPairs,
     bybitEnabled,
     whaleThr,
@@ -332,6 +354,23 @@ export default function WhaleRadarApp() {
     <div className="min-h-screen flex flex-col">
       {showOnboarding && <WROnboarding onFinish={finishOnboarding} />}
 
+      {/* Reconnecting banner — shown after 2+ failed attempts */}
+      {wsReconnects >= 2 && (
+        <div className="bg-wr-amber/20 border-b border-wr-amber/40 px-4 py-1.5 text-center text-[10px] text-wr-amber tracking-widest animate-pulse">
+          ⚠ RECONNECTING… (attempt {wsReconnects}) — Data may be delayed
+        </div>
+      )}
+
+      {/* WS Status indicator */}
+      <div className="flex items-center gap-2 px-4 py-0.5 bg-wr-bg3 border-b border-wr-border/50 text-[8px] tracking-widest">
+        <span className="text-wr-muted">WS:</span>
+        {wsStatus === 'live' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-green animate-blink" /> <span className="text-wr-green">LIVE</span></span>}
+        {wsStatus === 'delayed' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-amber" /> <span className="text-wr-amber">DELAYED ({Math.round(wsLagMs / 1000)}s)</span></span>}
+        {wsStatus === 'fallback' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-red animate-pulse" /> <span className="text-wr-red">FALLBACK (HTTP POLL)</span></span>}
+        {wsStatus === 'reconnecting' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-amber animate-pulse" /> <span className="text-wr-amber">RECONNECTING…</span></span>}
+        {wsStatus === 'offline' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-muted" /> <span className="text-wr-muted">OFFLINE</span></span>}
+        <span className="text-wr-muted ml-auto">BIN: {binanceReady ? '✓' : '—'} | BYB: {bybitReady ? '✓' : '—'}</span>
+      </div>
       <WRHeader
         scanCount={coins.length}
         alertCount={alerts.length}
