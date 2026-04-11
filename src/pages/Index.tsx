@@ -17,6 +17,9 @@ import {
   calcSizing, saveState, loadState,
 } from '@/lib/whaleRadarState';
 import { handleRateLimit, isRateLimited, getCooldownRemaining, getActiveCooldowns, onRateLimitChange, RL_KEYS } from '@/lib/rateLimit';
+import { cachedFetch } from '@/lib/cachedFetch';
+import { startPerfMonitoring } from '@/lib/perfBudget';
+import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 
 export default function WhaleRadarApp() {
   // ══ CORE STATE ═══════════════════════════════════════════════════════════
