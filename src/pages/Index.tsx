@@ -158,19 +158,32 @@ export default function WhaleRadarApp() {
       const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h';
       const headers: Record<string, string> = {};
       if (apiKey) headers['x-cg-pro-api-key'] = apiKey;
-      const res = await fetch(url, { headers, signal: AbortSignal.timeout(18000) });
-      if (res.status === 429) {
-        handleRateLimit('CoinGecko', RL_KEYS.COINGECKO, res.headers.get('Retry-After'));
-        setScanBadge('RATE LIMITED');
-        addAlert('high', 'API', `CoinGecko rate limited — cooldown ${getCooldownRemaining(RL_KEYS.COINGECKO)}s`);
+
+      const result = await cachedFetch<unknown[]>(url, {
+        headers,
+        signal: AbortSignal.timeout(18000),
+        cacheTtl: 10_000,
+        swrTtl: 30_000,
+        rateLimitKey: RL_KEYS.COINGECKO,
+        rateLimitName: 'CoinGecko',
+      });
+
+      if (result.error && !result.data) {
+        if (result.error.includes('429')) {
+          setScanBadge('RATE LIMITED');
+          addAlert('high', 'API', `CoinGecko rate limited — cooldown ${getCooldownRemaining(RL_KEYS.COINGECKO)}s`);
+        } else {
+          throw new Error(result.error);
+        }
         return;
       }
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
-      setApiCallCount(c => c + 1);
-      processData(data);
-      setScanBadge('LIVE');
-      setLastScanTs(Date.now());
+
+      if (result.data) {
+        setApiCallCount(c => c + (result.fromCache ? 0 : 1));
+        processData(result.data);
+        setScanBadge(result.fromCache ? 'CACHED' : 'LIVE');
+        setLastScanTs(Date.now());
+      }
     } catch (e: unknown) {
       setScanBadge('ERROR');
       addAlert('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
