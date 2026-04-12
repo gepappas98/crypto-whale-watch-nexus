@@ -66,6 +66,7 @@ export function WRScanner({
   aiKey, vmcapThr, pchgThr,
   onScan, onToggleAuto, onTogglePause, onToggleWatchlist, onTrack, onUntrack,
   onVmcapChange, onPchgChange, onOpenModal, onAddAlert,
+  advancedFilters, onAdvancedFiltersChange, page, onPageChange,
 }: WRScannerProps) {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<string>('score');
