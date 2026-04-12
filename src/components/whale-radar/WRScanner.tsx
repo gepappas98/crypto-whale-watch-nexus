@@ -110,6 +110,17 @@ export function WRScanner({
       return 0;
     });
 
+  // Pagination
+  const PAGE_SIZE = 20;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedCoins = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, currentPage]);
+
+  const [showAdvFilters, setShowAdvFilters] = useState(false);
+
   const badgeCls = scanBadge === 'LIVE' ? 'text-wr-green border-wr-green-dim bg-wr-green-ghost'
     : scanBadge === 'SCANNING' ? 'text-wr-cyan border-wr-cyan/30'
     : scanBadge === 'ERROR' || scanBadge === 'RATE LIMITED' ? 'text-wr-red border-wr-red/30'
