@@ -435,6 +435,10 @@ export default function WhaleRadarApp() {
           onPchgChange={setPchgThr}
           onOpenModal={setActiveModal}
           onAddAlert={addAlert}
+          advancedFilters={advancedFilters}
+          onAdvancedFiltersChange={setAdvancedFilters}
+          page={scanPage}
+          onPageChange={setScanPage}
         />
 
         <WRRightPanel
