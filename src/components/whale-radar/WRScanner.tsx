@@ -166,27 +166,42 @@ export function WRScanner({
           ✦ SENT <span className="pro-badge">PRO</span>
         </button>
 
+        <button
+          className={`wr-btn text-[8px] hidden lg:inline-flex ${showAdvFilters ? 'active' : ''}`}
+          onClick={() => setShowAdvFilters(p => !p)}
+          title="Advanced filters"
+        >
+          ⚙ FILTERS
+        </button>
+
         <div className="flex-1" />
 
         <input
           className="wr-input max-w-[160px]"
           placeholder="Filter symbol / name…"
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={e => { setSearch(e.target.value); onPageChange(1); }}
         />
 
-        {/* Sliders */}
-        <div className="flex items-center gap-1.5">
+        {/* Sliders — hidden on mobile (use bottom sheet instead) */}
+        <div className="hidden lg:flex items-center gap-1.5">
           <label className="text-[8px] text-wr-green-dim tracking-widest">VOL/MCAP≥</label>
           <input type="range" className="w-16 h-0.5 accent-wr-green" min={50} max={1000} step={25} value={vmcapThr} onChange={e => onVmcapChange(+e.target.value)} />
           <span className="text-[10px] text-wr-amber w-10">{vmcapThr}%</span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="hidden lg:flex items-center gap-1.5">
           <label className="text-[8px] text-wr-green-dim tracking-widest">24H≥</label>
           <input type="range" className="w-16 h-0.5 accent-wr-green" min={5} max={60} step={5} value={pchgThr} onChange={e => onPchgChange(+e.target.value)} />
           <span className="text-[10px] text-wr-amber w-8">{pchgThr}%</span>
         </div>
       </div>
+
+      {/* Advanced Filters Panel (desktop) */}
+      {showAdvFilters && (
+        <div className="border-b border-wr-border bg-wr-bg3/50 hidden lg:block">
+          <WRAdvancedFilters filters={advancedFilters} onChange={onAdvancedFiltersChange} />
+        </div>
+      )}
 
       {/* Table */}
       <div className="flex-1 overflow-auto scrollbar-thin">
