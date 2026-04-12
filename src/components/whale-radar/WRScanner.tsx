@@ -1,8 +1,9 @@
 /* ══ WHALE RADAR v9 — SCANNER TABLE ══════════════════════════════════════════ */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { CoinData, TrackedToken, PortfolioEntry, fmtN, fmtP, calcSizing } from '@/lib/whaleRadarState';
 import { analyzeToken } from '@/lib/analyzeToken';
 import type { AlertItem } from '@/lib/whaleRadarState';
+import { WRAdvancedFilters, type WhaleFilters } from './WRAdvancedFilters';
 
 // ══ CEO SIGNAL ENGINE v1.0 ════════════════════════════════════════════════
 function getCeoSignal(score: number, threat: string, category: string, vmcap: number) {
@@ -48,6 +49,10 @@ interface WRScannerProps {
   onPchgChange: (v: number) => void;
   onOpenModal: (m: string) => void;
   onAddAlert: (level: AlertItem['level'], tag: string, text: string) => void;
+  advancedFilters: WhaleFilters;
+  onAdvancedFiltersChange: (f: WhaleFilters) => void;
+  page: number;
+  onPageChange: (p: number) => void;
 }
 
 interface AiRowData {
@@ -61,6 +66,7 @@ export function WRScanner({
   aiKey, vmcapThr, pchgThr,
   onScan, onToggleAuto, onTogglePause, onToggleWatchlist, onTrack, onUntrack,
   onVmcapChange, onPchgChange, onOpenModal, onAddAlert,
+  advancedFilters, onAdvancedFiltersChange, page, onPageChange,
 }: WRScannerProps) {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<string>('score');
@@ -103,6 +109,17 @@ export function WRScanner({
       if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * sortDir;
       return 0;
     });
+
+  // Pagination
+  const PAGE_SIZE = 20;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedCoins = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, currentPage]);
+
+  const [showAdvFilters, setShowAdvFilters] = useState(false);
 
   const badgeCls = scanBadge === 'LIVE' ? 'text-wr-green border-wr-green-dim bg-wr-green-ghost'
     : scanBadge === 'SCANNING' ? 'text-wr-cyan border-wr-cyan/30'
@@ -149,27 +166,42 @@ export function WRScanner({
           ✦ SENT <span className="pro-badge">PRO</span>
         </button>
 
+        <button
+          className={`wr-btn text-[8px] hidden lg:inline-flex ${showAdvFilters ? 'active' : ''}`}
+          onClick={() => setShowAdvFilters(p => !p)}
+          title="Advanced filters"
+        >
+          ⚙ FILTERS
+        </button>
+
         <div className="flex-1" />
 
         <input
           className="wr-input max-w-[160px]"
           placeholder="Filter symbol / name…"
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={e => { setSearch(e.target.value); onPageChange(1); }}
         />
 
-        {/* Sliders */}
-        <div className="flex items-center gap-1.5">
+        {/* Sliders — hidden on mobile (use bottom sheet instead) */}
+        <div className="hidden lg:flex items-center gap-1.5">
           <label className="text-[8px] text-wr-green-dim tracking-widest">VOL/MCAP≥</label>
           <input type="range" className="w-16 h-0.5 accent-wr-green" min={50} max={1000} step={25} value={vmcapThr} onChange={e => onVmcapChange(+e.target.value)} />
           <span className="text-[10px] text-wr-amber w-10">{vmcapThr}%</span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="hidden lg:flex items-center gap-1.5">
           <label className="text-[8px] text-wr-green-dim tracking-widest">24H≥</label>
           <input type="range" className="w-16 h-0.5 accent-wr-green" min={5} max={60} step={5} value={pchgThr} onChange={e => onPchgChange(+e.target.value)} />
           <span className="text-[10px] text-wr-amber w-8">{pchgThr}%</span>
         </div>
       </div>
+
+      {/* Advanced Filters Panel (desktop) */}
+      {showAdvFilters && (
+        <div className="border-b border-wr-border bg-wr-bg3/50 hidden lg:block">
+          <WRAdvancedFilters filters={advancedFilters} onChange={onAdvancedFiltersChange} />
+        </div>
+      )}
 
       {/* Table */}
       <div className="flex-1 overflow-auto scrollbar-thin">
@@ -206,7 +238,7 @@ export function WRScanner({
               <tr><td colSpan={12} className="text-center text-wr-muted text-xs py-12 tracking-widest">
                 {coins.length === 0 ? 'Click SCAN to begin surveillance' : 'No tokens match current filters'}
               </td></tr>
-            ) : filtered.map(c => {
+            ) : paginatedCoins.map(c => {
               const siz = calcSizing(c);
               const isTracked = !!tracked[c.symbol];
               const vmcapCls = c.vmcap >= 800 ? 'text-wr-red' : c.vmcap >= 400 ? 'text-wr-amber' : c.vmcap >= 200 ? 'text-wr-cyan' : 'text-wr-green-dim';
@@ -311,6 +343,50 @@ export function WRScanner({
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-3 py-2 border-t border-wr-border bg-wr-bg3/50">
+          <span className="text-[8px] text-wr-muted tracking-widest">
+            {filtered.length} TOKENS · PAGE {currentPage}/{totalPages}
+          </span>
+          <div className="flex gap-1">
+            <button
+              className="wr-btn text-[8px] px-2 py-0.5 min-h-[28px]"
+              onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+              disabled={currentPage <= 1}
+            >
+              ◀ PREV
+            </button>
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              let pageNum: number;
+              if (totalPages <= 5) pageNum = i + 1;
+              else if (currentPage <= 3) pageNum = i + 1;
+              else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+              else pageNum = currentPage - 2 + i;
+              return (
+                <button
+                  key={pageNum}
+                  className={`text-[8px] px-1.5 py-0.5 border cursor-pointer font-mono min-h-[28px] min-w-[28px]
+                    ${currentPage === pageNum
+                      ? 'bg-wr-green-ghost border-wr-green text-wr-green'
+                      : 'border-wr-border text-wr-muted hover:border-wr-green-dim'}`}
+                  onClick={() => onPageChange(pageNum)}
+                >
+                  {pageNum}
+                </button>
+              );
+            })}
+            <button
+              className="wr-btn text-[8px] px-2 py-0.5 min-h-[28px]"
+              onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+              disabled={currentPage >= totalPages}
+            >
+              NEXT ▶
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

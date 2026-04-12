@@ -10,7 +10,10 @@ import { WRSettingsPanel } from '@/components/whale-radar/WRSettingsPanel';
 import { WROnboarding } from '@/components/whale-radar/WROnboarding';
 import { WRModal } from '@/components/whale-radar/WRModal';
 import { WRKeyboardHelp } from '@/components/whale-radar/WRKeyboardHelp';
+import { WRAlertBell } from '@/components/whale-radar/WRAlertBell';
+import { WRMobileFilterSheet } from '@/components/whale-radar/WRMobileFilterSheet';
 import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
+import { DEFAULT_FILTERS, type WhaleFilters } from '@/components/whale-radar/WRAdvancedFilters';
 import {
   CoinData, AlertItem, WhaleTrade, TrackedToken, PortfolioEntry,
   WalletEntry, ScanSnapshot, CFG, fmtN, fmtP, isSolToken, calcThreat,
@@ -61,6 +64,8 @@ export default function WhaleRadarApp() {
   const [bybitEnabled, setBybitEnabled] = useState(false);
   const [whaleFeedEx, setWhaleFeedEx] = useState('all');
   const [subscribedPairs] = useState(() => new Set<string>());
+  const [advancedFilters, setAdvancedFilters] = useState<WhaleFilters>(DEFAULT_FILTERS);
+  const [scanPage, setScanPage] = useState(1);
 
   // Stats
   const [apiCallCount, setApiCallCount] = useState(0);
@@ -369,7 +374,17 @@ export default function WhaleRadarApp() {
         {wsStatus === 'fallback' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-red animate-pulse" /> <span className="text-wr-red">FALLBACK (HTTP POLL)</span></span>}
         {wsStatus === 'reconnecting' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-amber animate-pulse" /> <span className="text-wr-amber">RECONNECTING…</span></span>}
         {wsStatus === 'offline' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-muted" /> <span className="text-wr-muted">OFFLINE</span></span>}
-        <span className="text-wr-muted ml-auto">BIN: {binanceReady ? '✓' : '—'} | BYB: {bybitReady ? '✓' : '—'}</span>
+        <span className="text-wr-muted ml-1">BIN: {binanceReady ? '✓' : '—'} | BYB: {bybitReady ? '✓' : '—'}</span>
+        <div className="flex-1" />
+        <WRAlertBell whaleFeed={whaleFeed} />
+        <WRMobileFilterSheet
+          filters={advancedFilters}
+          onChange={setAdvancedFilters}
+          vmcapThr={vmcapThr}
+          pchgThr={pchgThr}
+          onVmcapChange={setVmcapThr}
+          onPchgChange={setPchgThr}
+        />
       </div>
       <WRHeader
         scanCount={coins.length}
@@ -420,6 +435,10 @@ export default function WhaleRadarApp() {
           onPchgChange={setPchgThr}
           onOpenModal={setActiveModal}
           onAddAlert={addAlert}
+          advancedFilters={advancedFilters}
+          onAdvancedFiltersChange={setAdvancedFilters}
+          page={scanPage}
+          onPageChange={setScanPage}
         />
 
         <WRRightPanel
