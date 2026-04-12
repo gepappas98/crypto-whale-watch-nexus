@@ -10,7 +10,10 @@ import { WRSettingsPanel } from '@/components/whale-radar/WRSettingsPanel';
 import { WROnboarding } from '@/components/whale-radar/WROnboarding';
 import { WRModal } from '@/components/whale-radar/WRModal';
 import { WRKeyboardHelp } from '@/components/whale-radar/WRKeyboardHelp';
+import { WRAlertBell } from '@/components/whale-radar/WRAlertBell';
+import { WRMobileFilterSheet } from '@/components/whale-radar/WRMobileFilterSheet';
 import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
+import { DEFAULT_FILTERS, type WhaleFilters } from '@/components/whale-radar/WRAdvancedFilters';
 import {
   CoinData, AlertItem, WhaleTrade, TrackedToken, PortfolioEntry,
   WalletEntry, ScanSnapshot, CFG, fmtN, fmtP, isSolToken, calcThreat,
