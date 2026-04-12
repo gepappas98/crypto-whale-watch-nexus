@@ -343,6 +343,50 @@ export function WRScanner({
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-3 py-2 border-t border-wr-border bg-wr-bg3/50">
+          <span className="text-[8px] text-wr-muted tracking-widest">
+            {filtered.length} TOKENS · PAGE {currentPage}/{totalPages}
+          </span>
+          <div className="flex gap-1">
+            <button
+              className="wr-btn text-[8px] px-2 py-0.5 min-h-[28px]"
+              onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+              disabled={currentPage <= 1}
+            >
+              ◀ PREV
+            </button>
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              let pageNum: number;
+              if (totalPages <= 5) pageNum = i + 1;
+              else if (currentPage <= 3) pageNum = i + 1;
+              else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+              else pageNum = currentPage - 2 + i;
+              return (
+                <button
+                  key={pageNum}
+                  className={`text-[8px] px-1.5 py-0.5 border cursor-pointer font-mono min-h-[28px] min-w-[28px]
+                    ${currentPage === pageNum
+                      ? 'bg-wr-green-ghost border-wr-green text-wr-green'
+                      : 'border-wr-border text-wr-muted hover:border-wr-green-dim'}`}
+                  onClick={() => onPageChange(pageNum)}
+                >
+                  {pageNum}
+                </button>
+              );
+            })}
+            <button
+              className="wr-btn text-[8px] px-2 py-0.5 min-h-[28px]"
+              onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+              disabled={currentPage >= totalPages}
+            >
+              NEXT ▶
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
