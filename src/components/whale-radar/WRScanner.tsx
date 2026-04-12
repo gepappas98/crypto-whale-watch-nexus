@@ -1,8 +1,9 @@
 /* ══ WHALE RADAR v9 — SCANNER TABLE ══════════════════════════════════════════ */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { CoinData, TrackedToken, PortfolioEntry, fmtN, fmtP, calcSizing } from '@/lib/whaleRadarState';
 import { analyzeToken } from '@/lib/analyzeToken';
 import type { AlertItem } from '@/lib/whaleRadarState';
+import { WRAdvancedFilters, type WhaleFilters } from './WRAdvancedFilters';
 
 // ══ CEO SIGNAL ENGINE v1.0 ════════════════════════════════════════════════
 function getCeoSignal(score: number, threat: string, category: string, vmcap: number) {
