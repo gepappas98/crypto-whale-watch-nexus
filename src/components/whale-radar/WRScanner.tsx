@@ -49,6 +49,10 @@ interface WRScannerProps {
   onPchgChange: (v: number) => void;
   onOpenModal: (m: string) => void;
   onAddAlert: (level: AlertItem['level'], tag: string, text: string) => void;
+  advancedFilters: WhaleFilters;
+  onAdvancedFiltersChange: (f: WhaleFilters) => void;
+  page: number;
+  onPageChange: (p: number) => void;
 }
 
 interface AiRowData {
