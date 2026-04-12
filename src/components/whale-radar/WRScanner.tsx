@@ -238,7 +238,7 @@ export function WRScanner({
               <tr><td colSpan={12} className="text-center text-wr-muted text-xs py-12 tracking-widest">
                 {coins.length === 0 ? 'Click SCAN to begin surveillance' : 'No tokens match current filters'}
               </td></tr>
-            ) : filtered.map(c => {
+            ) : paginatedCoins.map(c => {
               const siz = calcSizing(c);
               const isTracked = !!tracked[c.symbol];
               const vmcapCls = c.vmcap >= 800 ? 'text-wr-red' : c.vmcap >= 400 ? 'text-wr-amber' : c.vmcap >= 200 ? 'text-wr-cyan' : 'text-wr-green-dim';
