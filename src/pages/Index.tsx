@@ -374,7 +374,17 @@ export default function WhaleRadarApp() {
         {wsStatus === 'fallback' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-red animate-pulse" /> <span className="text-wr-red">FALLBACK (HTTP POLL)</span></span>}
         {wsStatus === 'reconnecting' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-amber animate-pulse" /> <span className="text-wr-amber">RECONNECTING…</span></span>}
         {wsStatus === 'offline' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-muted" /> <span className="text-wr-muted">OFFLINE</span></span>}
-        <span className="text-wr-muted ml-auto">BIN: {binanceReady ? '✓' : '—'} | BYB: {bybitReady ? '✓' : '—'}</span>
+        <span className="text-wr-muted ml-1">BIN: {binanceReady ? '✓' : '—'} | BYB: {bybitReady ? '✓' : '—'}</span>
+        <div className="flex-1" />
+        <WRAlertBell whaleFeed={whaleFeed} />
+        <WRMobileFilterSheet
+          filters={advancedFilters}
+          onChange={setAdvancedFilters}
+          vmcapThr={vmcapThr}
+          pchgThr={pchgThr}
+          onVmcapChange={setVmcapThr}
+          onPchgChange={setPchgThr}
+        />
       </div>
       <WRHeader
         scanCount={coins.length}
