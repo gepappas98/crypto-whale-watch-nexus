@@ -64,6 +64,8 @@ export default function WhaleRadarApp() {
   const [bybitEnabled, setBybitEnabled] = useState(false);
   const [whaleFeedEx, setWhaleFeedEx] = useState('all');
   const [subscribedPairs] = useState(() => new Set<string>());
+  const [advancedFilters, setAdvancedFilters] = useState<WhaleFilters>(DEFAULT_FILTERS);
+  const [scanPage, setScanPage] = useState(1);
 
   // Stats
   const [apiCallCount, setApiCallCount] = useState(0);
