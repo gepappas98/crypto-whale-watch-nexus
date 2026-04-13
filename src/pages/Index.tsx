@@ -22,7 +22,8 @@ import {
 import { handleRateLimit, isRateLimited, getCooldownRemaining, getActiveCooldowns, onRateLimitChange, RL_KEYS } from '@/lib/rateLimit';
 import { detect } from '@/lib/detection';
 import { cachedFetch } from '@/lib/cachedFetch';
-import { saveWhaleEvent, recordSignalOutcome, saveScan } from '@/lib/db';
+import { saveWhaleEvent, recordSignalOutcome, saveScan, initBackendCheck } from '@/lib/db';
+import { fillSignalPrices } from '@/lib/signalStore';
 import { fetchBirdeyeToken } from '@/lib/birdeye';
 import { fetchDexData } from '@/lib/dexscreener';
 import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
@@ -131,6 +132,23 @@ export default function WhaleRadarApp() {
   useEffect(() => {
     const cleanup = startPerfMonitoring();
     return cleanup;
+  }, []);
+
+  // ══ BACKEND CHECK + SIGNAL PRICE FILLER ══════════════════════════════════
+  // Runs once on mount: pings backend, then starts periodic CoinGecko price filling.
+  useEffect(() => {
+    // 1. Check backend availability (suppresses noisy toasts when offline)
+    initBackendCheck();
+
+    // 2. Fill outcome prices immediately on mount (catches any pending fills)
+    fillSignalPrices().catch(() => {});
+
+    // 3. Re-fill every 30 minutes (mirrors backend priceFiller schedule)
+    const fillTimer = setInterval(() => {
+      fillSignalPrices().catch(() => {});
+    }, 30 * 60 * 1000);
+
+    return () => clearInterval(fillTimer);
   }, []);
 
   // Save on state changes

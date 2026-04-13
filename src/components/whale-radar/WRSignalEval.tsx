@@ -1,11 +1,12 @@
 /* ══ WHALE RADAR — SIGNAL EVAL PANEL ══════════════════════════════════════════
  *  Shows win-rate table for CEO Signal Engine outputs.
- *  Data comes from signal_outcomes table, filled by background price filler.
- *  After 2 weeks of live data this tells you: does AGGRESSIVE LONG actually work?
+ *  Data source: localStorage (always) + backend DB (when available).
+ *  Outcome prices fetched from CoinGecko at 1h / 4h / 24h marks.
  * ═══════════════════════════════════════════════════════════════════════════ */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { loadSignalEval } from '@/lib/db';
 import type { SignalEvalRow } from '@/lib/db';
+import { fillSignalPrices, getSignalStoreStats } from '@/lib/signalStore';
 
 const SIGNAL_ORDER = [
   'AGGRESSIVE LONG',
@@ -45,18 +46,31 @@ function winColor(rate: number | null): string {
   return 'text-wr-red';
 }
 
-export function WRSignalEval() {
-  const [rows, setRows]     = useState<SignalEvalRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]   = useState<string | null>(null);
-  const [lastFetch, setLastFetch] = useState<Date | null>(null);
+function timeAgo(iso: string | null): string {
+  if (!iso) return '—';
+  const diff = Date.now() - new Date(iso).getTime();
+  const h = Math.floor(diff / 3600000);
+  if (h < 1) return '<1h ago';
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
 
-  async function fetchEval() {
+export function WRSignalEval() {
+  const [rows, setRows]         = useState<SignalEvalRow[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [filling, setFilling]   = useState(false);
+  const [lastFetch, setLastFetch] = useState<Date | null>(null);
+  const [lastFilled, setLastFilled] = useState<number>(0);
+  const [storeStats, setStoreStats] = useState({ total: 0, pendingFill: 0, oldestFiredAt: null as number | null });
+
+  const refreshStats = useCallback(() => {
+    setStoreStats(getSignalStoreStats());
+  }, []);
+
+  const fetchEval = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
       const data = await loadSignalEval();
-      // Sort by canonical signal order
       data.sort((a, b) => {
         const ai = SIGNAL_ORDER.indexOf(a.signal);
         const bi = SIGNAL_ORDER.indexOf(b.signal);
@@ -64,62 +78,99 @@ export function WRSignalEval() {
       });
       setRows(data);
       setLastFetch(new Date());
-    } catch {
-      setError('Could not load eval data — is the API server running?');
+      refreshStats();
     } finally {
       setLoading(false);
     }
-  }
+  }, [refreshStats]);
 
-  useEffect(() => { fetchEval(); }, []);
+  const handleFillNow = useCallback(async () => {
+    setFilling(true);
+    try {
+      const filled = await fillSignalPrices();
+      setLastFilled(filled);
+      await fetchEval(); // Refresh table after filling
+    } finally {
+      setFilling(false);
+    }
+  }, [fetchEval]);
 
-  const totalFires   = rows.reduce((s, r) => s + Number(r.fires), 0);
-  const withOutcome  = rows.reduce((s, r) => s + Number(r.with_outcome), 0);
-  const coverage     = totalFires > 0 ? Math.round((withOutcome / totalFires) * 100) : 0;
+  useEffect(() => {
+    fetchEval();
+  }, [fetchEval]);
+
+  const totalFires  = rows.reduce((s, r) => s + Number(r.fires), 0);
+  const withOutcome = rows.reduce((s, r) => s + Number(r.with_outcome), 0);
+  const coverage    = totalFires > 0 ? Math.round((withOutcome / totalFires) * 100) : 0;
 
   return (
     <div className="space-y-4 text-[11px] font-mono">
 
-      {/* ── Header meta ───────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      <div className="flex items-start justify-between gap-2">
         <div className="space-y-0.5">
           <div className="text-[8px] text-wr-muted tracking-widest">LAST 30 DAYS · CEO SIGNAL ENGINE v1.0</div>
           <div className="text-[8px] text-wr-muted">
-            {totalFires} signals recorded · {withOutcome} with 4h outcomes ({coverage}% filled)
+            {storeStats.total} signals stored · {totalFires} in 30d window · {withOutcome} with 4h outcome ({coverage}% filled)
           </div>
+          {storeStats.pendingFill > 0 && (
+            <div className="text-[8px] text-wr-amber">
+              ⏳ {storeStats.pendingFill} pending price fill
+            </div>
+          )}
         </div>
-        <button
-          onClick={fetchEval}
-          disabled={loading}
-          className="wr-btn text-[8px] px-2 py-0.5"
-        >
-          {loading ? '...' : '↻ REFRESH'}
-        </button>
+        <div className="flex gap-1 flex-shrink-0">
+          <button
+            onClick={handleFillNow}
+            disabled={filling || loading}
+            className="wr-btn text-[8px] px-2 py-0.5"
+            title="Fetch outcome prices now from CoinGecko"
+          >
+            {filling ? '...' : '⚡ FILL'}
+          </button>
+          <button
+            onClick={fetchEval}
+            disabled={loading}
+            className="wr-btn text-[8px] px-2 py-0.5"
+          >
+            {loading ? '...' : '↻'}
+          </button>
+        </div>
       </div>
 
-      {/* ── Coverage warning ──────────────────────────────────────────────── */}
-      {withOutcome === 0 && !loading && (
+      {/* ── Last fill result ─────────────────────────────────────────────────── */}
+      {lastFilled > 0 && (
+        <div className="text-[8px] text-wr-green">
+          ✓ Filled {lastFilled} outcome price{lastFilled !== 1 ? 's' : ''} from CoinGecko
+        </div>
+      )}
+
+      {/* ── No data yet ─────────────────────────────────────────────────────── */}
+      {storeStats.total === 0 && !loading && (
         <div className="border border-wr-amber/30 bg-wr-amber/5 rounded p-3 text-[10px] text-wr-amber leading-relaxed">
-          <div className="font-bold mb-1">⏳ Collecting data — no outcomes yet</div>
-          Signals are being recorded. The price filler runs every 30 minutes and fills in
-          1h / 4h / 24h outcomes via CoinGecko. Come back in a few hours to see win rates.
-          You need at least 20 signals with 4h outcomes for meaningful statistics.
+          <div className="font-bold mb-1">📡 No signals recorded yet</div>
+          Run a scan — the engine records every signal automatically.
+          Outcome prices (1h / 4h / 24h) are fetched from CoinGecko after each window elapses.
+          Hit <span className="text-wr-white font-bold">⚡ FILL</span> to pull prices for any ready signals.
+        </div>
+      )}
+
+      {/* ── Has signals but no outcomes yet ─────────────────────────────────── */}
+      {storeStats.total > 0 && withOutcome === 0 && !loading && (
+        <div className="border border-wr-border rounded p-3 text-[10px] text-wr-muted leading-relaxed space-y-1">
+          <div className="text-wr-white font-bold">⏳ {storeStats.total} signals recorded — waiting for 1h mark</div>
+          <div>Outcome prices fill automatically after 1h, 4h, 24h have elapsed.</div>
+          <div>Hit <span className="text-wr-green font-bold">⚡ FILL</span> to check now.</div>
         </div>
       )}
 
       {withOutcome > 0 && withOutcome < 20 && (
         <div className="border border-wr-border rounded p-2 text-[9px] text-wr-muted">
-          ⚠ Only {withOutcome} outcomes so far — win rates will stabilize after ~20+ samples per signal.
+          ⚠ {withOutcome} outcomes so far — win rates stabilize after ~20+ samples per signal.
         </div>
       )}
 
-      {error && (
-        <div className="border border-wr-red/30 bg-wr-red/5 rounded p-3 text-[10px] text-wr-red">
-          {error}
-        </div>
-      )}
-
-      {/* ── Main eval table ───────────────────────────────────────────────── */}
+      {/* ── Main table ──────────────────────────────────────────────────────── */}
       {!loading && rows.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-[10px]">
@@ -131,7 +182,8 @@ export function WRSignalEval() {
                 <th className="text-right py-1.5 px-2 text-[8px] text-wr-muted tracking-widest font-normal">AVG 4H</th>
                 <th className="text-right py-1.5 px-2 text-[8px] text-wr-muted tracking-widest font-normal">AVG 24H</th>
                 <th className="text-right py-1.5 px-2 text-[8px] text-wr-muted tracking-widest font-normal">WIN% 4H</th>
-                <th className="text-right py-1.5 pl-2 text-[8px] text-wr-muted tracking-widest font-normal">AVG SCORE</th>
+                <th className="text-right py-1.5 px-2 text-[8px] text-wr-muted tracking-widest font-normal">SCORE</th>
+                <th className="text-right py-1.5 pl-2 text-[8px] text-wr-muted tracking-widest font-normal">LAST</th>
               </tr>
             </thead>
             <tbody>
@@ -142,25 +194,16 @@ export function WRSignalEval() {
                   </td>
                   <td className="text-right px-2 text-wr-white">
                     {row.fires}
-                    <span className="text-wr-muted ml-1">
-                      ({row.with_outcome})
-                    </span>
+                    <span className="text-wr-muted ml-1">({row.with_outcome})</span>
                   </td>
-                  <td className={`text-right px-2 ${pctColor(row.avg_1h_pct)}`}>
-                    {pct(row.avg_1h_pct)}
-                  </td>
-                  <td className={`text-right px-2 font-bold ${pctColor(row.avg_4h_pct)}`}>
-                    {pct(row.avg_4h_pct)}
-                  </td>
-                  <td className={`text-right px-2 ${pctColor(row.avg_24h_pct)}`}>
-                    {pct(row.avg_24h_pct)}
-                  </td>
+                  <td className={`text-right px-2 ${pctColor(row.avg_1h_pct)}`}>{pct(row.avg_1h_pct)}</td>
+                  <td className={`text-right px-2 font-bold ${pctColor(row.avg_4h_pct)}`}>{pct(row.avg_4h_pct)}</td>
+                  <td className={`text-right px-2 ${pctColor(row.avg_24h_pct)}`}>{pct(row.avg_24h_pct)}</td>
                   <td className={`text-right px-2 font-bold ${winColor(row.win_rate_4h)}`}>
                     {row.win_rate_4h != null ? `${row.win_rate_4h}%` : '—'}
                   </td>
-                  <td className="text-right pl-2 text-wr-muted">
-                    {row.avg_score ?? '—'}
-                  </td>
+                  <td className="text-right px-2 text-wr-muted">{row.avg_score ?? '—'}</td>
+                  <td className="text-right pl-2 text-wr-muted text-[8px]">{timeAgo(row.last_fire)}</td>
                 </tr>
               ))}
             </tbody>
@@ -168,32 +211,33 @@ export function WRSignalEval() {
         </div>
       )}
 
-      {/* ── Legend ────────────────────────────────────────────────────────── */}
+      {/* ── Legend ──────────────────────────────────────────────────────────── */}
       <div className="border-t border-wr-border pt-3 space-y-1 text-[8px] text-wr-muted leading-relaxed">
-        <div><span className="text-wr-white">Fires</span> = total signal fires · <span className="text-wr-white">(n)</span> = with 4h outcome filled</div>
-        <div><span className="text-wr-white">WIN% 4H</span> = % of signals where price was higher 4h later</div>
-        <div><span className="text-wr-white">AVG 4H</span> = mean % change from entry price at 4h mark</div>
-        <div>Prices filled every 30min via CoinGecko. Outcomes need {'>'}2 weeks to be statistically meaningful.</div>
+        <div><span className="text-wr-white">Fires</span> = total fires · <span className="text-wr-white">(n)</span> = with 4h outcome filled</div>
+        <div><span className="text-wr-white">WIN% 4H</span> = % of signals where price rose after 4h</div>
+        <div><span className="text-wr-white">AVG 4H</span> = mean % change from entry at 4h mark</div>
+        <div>Outcomes filled from CoinGecko. Stored in browser localStorage. Needs 2+ weeks for statistical significance.</div>
         {lastFetch && (
-          <div className="text-wr-muted/50">Last fetched: {lastFetch.toLocaleTimeString()}</div>
+          <div className="text-wr-muted/50">Updated: {lastFetch.toLocaleTimeString()}</div>
         )}
       </div>
 
-      {/* ── Quick read ────────────────────────────────────────────────────── */}
+      {/* ── Quick read ──────────────────────────────────────────────────────── */}
       {withOutcome >= 20 && rows.length > 0 && (() => {
-        const best = rows.filter(r => r.avg_4h_pct != null).sort((a, b) => (b.avg_4h_pct ?? -999) - (a.avg_4h_pct ?? -999))[0];
-        const worst = rows.filter(r => r.avg_4h_pct != null).sort((a, b) => (a.avg_4h_pct ?? 999) - (b.avg_4h_pct ?? 999))[0];
-        if (!best || !worst) return null;
+        const ranked = rows.filter(r => r.avg_4h_pct != null);
+        if (ranked.length < 2) return null;
+        const best  = [...ranked].sort((a, b) => (b.avg_4h_pct ?? -999) - (a.avg_4h_pct ?? -999))[0];
+        const worst = [...ranked].sort((a, b) => (a.avg_4h_pct ?? 999)  - (b.avg_4h_pct ?? 999))[0];
         return (
           <div className="border border-wr-cyan/20 bg-wr-cyan/5 rounded p-3 space-y-1">
             <div className="text-[8px] text-wr-cyan tracking-widest mb-2">✦ QUICK READ</div>
             <div className="text-[10px] text-wr-white">
-              Best 4h performer: <span className={`font-bold ${SIGNAL_COLOR[best.signal] ?? ''}`}>{best.signal}</span>
-              {' '}({pct(best.avg_4h_pct)} avg · {best.win_rate_4h}% win rate)
+              Best 4h: <span className={`font-bold ${SIGNAL_COLOR[best.signal] ?? ''}`}>{best.signal}</span>
+              {' '}({pct(best.avg_4h_pct)} avg · {best.win_rate_4h}% win)
             </div>
             <div className="text-[10px] text-wr-white">
-              Worst 4h performer: <span className={`font-bold ${SIGNAL_COLOR[worst.signal] ?? ''}`}>{worst.signal}</span>
-              {' '}({pct(worst.avg_4h_pct)} avg · {worst.win_rate_4h}% win rate)
+              Worst 4h: <span className={`font-bold ${SIGNAL_COLOR[worst.signal] ?? ''}`}>{worst.signal}</span>
+              {' '}({pct(worst.avg_4h_pct)} avg · {worst.win_rate_4h}% win)
             </div>
           </div>
         );
@@ -202,3 +246,43 @@ export function WRSignalEval() {
     </div>
   );
 }
+
+
+const SIGNAL_ORDER = [
+  'AGGRESSIVE LONG',
+  'LONG (tight stop)',
+  'LONG',
+  'WATCH',
+  'AVOID / SHORT',
+];
+
+const SIGNAL_COLOR: Record<string, string> = {
+  'AGGRESSIVE LONG':    'text-wr-amber',
+  'LONG (tight stop)':  'text-wr-amber',
+  'LONG':               'text-wr-green',
+  'WATCH':              'text-wr-muted',
+  'AVOID / SHORT':      'text-wr-red',
+};
+
+function pct(n: number | null, decimals = 1): string {
+  if (n == null) return '—';
+  const s = n.toFixed(decimals);
+  return n > 0 ? `+${s}%` : `${s}%`;
+}
+
+function pctColor(n: number | null): string {
+  if (n == null) return 'text-wr-muted';
+  if (n > 3)  return 'text-wr-green';
+  if (n > 0)  return 'text-green-400/70';
+  if (n > -3) return 'text-wr-red/70';
+  return 'text-wr-red';
+}
+
+function winColor(rate: number | null): string {
+  if (rate == null) return 'text-wr-muted';
+  if (rate >= 60) return 'text-wr-green';
+  if (rate >= 50) return 'text-green-400/70';
+  if (rate >= 40) return 'text-wr-amber';
+  return 'text-wr-red';
+}
+

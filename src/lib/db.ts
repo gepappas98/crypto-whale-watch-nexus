@@ -7,9 +7,38 @@
 import type { CoinData, PortfolioEntry, TrackedToken, AlertItem } from './whaleRadarState';
 import { toast } from 'sonner';
 import { handleRateLimit, isRateLimited, RL_KEYS } from './rateLimit';
+import { saveSignal, computeSignalEval } from './signalStore';
 
 const BASE = '/api';
 let _dbOnline = true;
+// null = not yet checked, true = available, false = confirmed offline this session
+let _backendAvailable: boolean | null = null;
+let _offlineToastShown = false;
+
+// ── Backend availability check ────────────────────────────────────────────────
+// Call once on app mount. If the backend is unreachable, silently marks it
+// offline for the session so no further error toasts are shown.
+export async function initBackendCheck(): Promise<boolean> {
+  if (_backendAvailable !== null) return _backendAvailable;
+  try {
+    const res = await fetch(BASE + '/health', {
+      signal: AbortSignal.timeout(4000),
+    });
+    _backendAvailable = res.ok;
+  } catch {
+    _backendAvailable = false;
+  }
+  _dbOnline = _backendAvailable;
+  if (!_backendAvailable && !_offlineToastShown) {
+    _offlineToastShown = true;
+    toast.info('Running without backend', {
+      description: 'Persistence disabled — scan data will not be saved.',
+      duration: 6000,
+      id: 'backend-offline',
+    });
+  }
+  return _backendAvailable;
+}
 
 // ── Retry config ──────────────────────────────────────────────────────────────
 const MAX_RETRIES = 3;
@@ -32,6 +61,9 @@ async function api<T = unknown>(
   options?: RequestInit & { _silent?: boolean }
 ): Promise<T | null> {
   const silent = options?._silent ?? false;
+
+  // If backend confirmed offline this session, skip all calls silently
+  if (_backendAvailable === false) return null;
 
   // Skip if backend is currently rate-limited
   if (isRateLimited(RL_KEYS.BACKEND)) {
@@ -125,19 +157,19 @@ export async function saveScan(coins: CoinData[]): Promise<number | null> {
 }
 
 export async function getScanSessions(): Promise<ScanSession[]> {
-  return (await api<ScanSession[]>('/scans')) ?? [];
+  return (await api<ScanSession[]>('/scans', { _silent: true })) ?? [];
 }
 
 export async function getScanCoins(sessionId: number): Promise<CoinData[]> {
-  return (await api<CoinData[]>(`/scans/${sessionId}`)) ?? [];
+  return (await api<CoinData[]>(`/scans/${sessionId}`, { _silent: true })) ?? [];
 }
 
 export async function getTokenHistory(symbol: string): Promise<HistoricalCoin[]> {
-  return (await api<HistoricalCoin[]>(`/scans/symbol/${symbol}`)) ?? [];
+  return (await api<HistoricalCoin[]>(`/scans/symbol/${symbol}`, { _silent: true })) ?? [];
 }
 
 export async function getTopThreats(): Promise<Record<string, unknown>[]> {
-  return (await api<Record<string, unknown>[]>('/scans/threats/top')) ?? [];
+  return (await api<Record<string, unknown>[]>('/scans/threats/top', { _silent: true })) ?? [];
 }
 
 // ══ PORTFOLIO ════════════════════════════════════════════════════════════════
@@ -154,7 +186,7 @@ interface PortfolioDbRow {
 
 /** Load portfolio from DB. Falls back to localStorage. */
 export async function loadPortfolio(): Promise<Record<string, PortfolioEntry>> {
-  const rows = await api<PortfolioDbRow[]>('/portfolio');
+  const rows = await api<PortfolioDbRow[]>('/portfolio', { _silent: true });
   if (rows) {
     return Object.fromEntries(
       rows.map(r => [r.symbol, { amount: Number(r.amount), entryPrice: Number(r.entry_price) }])
@@ -195,7 +227,7 @@ export async function deletePortfolioEntry(symbol: string): Promise<void> {
 // ══ TRACKED TOKENS (WATCHLIST) ════════════════════════════════════════════════
 
 export async function loadTracked(): Promise<Record<string, TrackedToken>> {
-  const rows = await api<Array<{ symbol: string; coin_id: string; base_price: number; last_price: number }>>('/tracked');
+  const rows = await api<Array<{ symbol: string; coin_id: string; base_price: number; last_price: number }>>('/tracked', { _silent: true });
   if (rows) {
     return Object.fromEntries(
       rows.map(r => [
@@ -256,7 +288,7 @@ export async function loadAlerts(): Promise<AlertItem[]> {
   const rows = await api<Array<{
     id: number; level: string; tag: string; text: string;
     sizing: string | null; pinned: boolean; created_at: string;
-  }>>('/alerts');
+  }>>('/alerts', { _silent: true });
   if (!rows) return [];
   return rows.map(r => ({
     ts: new Date(r.created_at).getTime(),
@@ -317,12 +349,17 @@ export interface SignalOutcomePayload {
 }
 
 export async function recordSignalOutcome(payload: SignalOutcomePayload): Promise<void> {
-  if (payload.signal === 'HOLD') return; // HOLD is not a signal worth tracking
+  if (payload.signal === 'HOLD') return;
+
+  // Always save to localStorage first (works offline, zero latency, no data loss)
+  saveSignal(payload);
+
+  // Also send to backend when available (belt-and-suspenders for cross-device sync)
   api('/signal-outcomes', {
     method: 'POST',
     body: JSON.stringify(payload),
     _silent: true,
-  }).catch(() => { /* ignore persistence errors silently */ });
+  }).catch(() => {});
 }
 
 // ══ SIGNAL EVAL ═══════════════════════════════════════════════════════════════
@@ -342,6 +379,11 @@ export interface SignalEvalRow {
 }
 
 export async function loadSignalEval(): Promise<SignalEvalRow[]> {
-  const rows = await api<SignalEvalRow[]>('/signal-outcomes/eval');
-  return rows ?? [];
+  // Try backend first (cross-device, historical)
+  if (_backendAvailable !== false) {
+    const rows = await api<SignalEvalRow[]>('/signal-outcomes/eval', { _silent: true });
+    if (rows && rows.length > 0) return rows;
+  }
+  // Fall back to local signalStore — always works, browser-persisted
+  return computeSignalEval();
 }
