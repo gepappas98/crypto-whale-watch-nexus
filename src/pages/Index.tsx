@@ -245,7 +245,7 @@ export default function WhaleRadarApp() {
   }, []);  // birdKeyRef is a ref — no dep needed
 
   // ── Data source status ──────────────────────────────────────────────────────
-  const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
+  const [dataSource, setDataSource] = useState<'live' | 'cached'>('live');
 
   const triggerScan = useCallback(async () => {
     if (scanning) return;
@@ -259,7 +259,7 @@ export default function WhaleRadarApp() {
 
     try {
       let scanData: unknown[] | null = null;
-      let source: 'live' | 'cached' | 'fallback' = 'live';
+      let source: 'live' | 'cached' = 'live';
 
       // Strategy 1: Try backend proxy first (handles rate limits server-side).
       // NOTE: do NOT gate this on isRateLimited() — the proxy has its own
@@ -323,7 +323,7 @@ export default function WhaleRadarApp() {
       setDataSource(source);
       setApiCallCount(c => c + (source === 'live' ? 1 : 0));
       const mapped = processData(scanData);
-      setScanBadge(source === 'live' ? 'LIVE' : source === 'cached' ? 'CACHED' : 'DEGRADED');
+      setScanBadge(source === 'live' ? 'LIVE' : 'CACHED');
       setLastScanTs(Date.now());
 
       // Persist + enrich (fire-and-forget)
@@ -331,7 +331,6 @@ export default function WhaleRadarApp() {
       enrichCoins(mapped).catch(() => {});
     } catch (e: unknown) {
       setScanBadge('ERROR');
-      setDataSource('fallback');
       addAlert('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
     } finally {
       setScanning(false);
@@ -546,11 +545,6 @@ export default function WhaleRadarApp() {
       {showOnboarding && <WROnboarding onFinish={finishOnboarding} />}
 
       {/* Degraded mode banner */}
-      {dataSource === 'fallback' && (
-        <div className="bg-wr-red/20 border-b-2 border-wr-red/60 px-4 py-2 text-center text-[10px] text-wr-red tracking-widest">
-          ⚠ RUNNING IN DEGRADED MODE — Showing simulated whale activity. Live data temporarily unavailable.
-        </div>
-      )}
       {dataSource === 'cached' && scanBadge === 'CACHED' && (
         <div className="bg-wr-amber/15 border-b border-wr-amber/40 px-4 py-1 text-center text-[8px] text-wr-amber tracking-widest">
           📦 Serving cached data — API rate limited or slow

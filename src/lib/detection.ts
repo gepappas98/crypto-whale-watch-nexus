@@ -112,6 +112,11 @@ export function whaleScore(input: WhaleScoreInput): WhaleScoreResult {
   // DEX trending
   if (dexHot) { score += 10; reasons.push('DEX TRENDING 🔵'); flagCount++; }
 
+  // PUMP + low-float unlock — coordinated exit setup
+  if (chg24 >= 30 && supplyPct !== null && supplyPct <= 30) {
+    score += 15; reasons.push('PUMP+UNLOCK'); flagCount++;
+  }
+
   // Liquidity ratio: vol vs pool depth
   if (dsLiq) {
     const lr = vol / (dsLiq.liq || 1);

@@ -48,9 +48,21 @@ function loadRecords(): SignalRecord[] {
 }
 
 function persistRecords(records: SignalRecord[]): void {
+  const trimmed = records.slice(0, MAX_RECORDS);
+  const payload = JSON.stringify(trimmed);
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(records.slice(0, MAX_RECORDS)));
-  } catch { /* quota exceeded — silent */ }
+    localStorage.setItem(STORE_KEY, payload);
+  } catch (e) {
+    // Bug #13 fix: quota exceeded — evict the oldest half and retry once,
+    // then notify the user rather than silently dropping the write.
+    try {
+      const half = trimmed.slice(0, Math.floor(trimmed.length / 2));
+      localStorage.setItem(STORE_KEY, JSON.stringify(half));
+      console.warn('[SignalStore] localStorage quota hit — evicted oldest 50% of records');
+    } catch {
+      console.error('[SignalStore] localStorage write failed even after eviction:', e);
+    }
+  }
 }
 
 function uid(): string {
@@ -130,6 +142,9 @@ async function fetchCgPrices(coinIds: string[]): Promise<Record<string, number>>
 // Returns count of records updated.
 
 export async function fillSignalPrices(): Promise<number> {
+  // Bug #9: purge null-coin_id orphans before filling so they don't inflate pendingFill
+  purgeOrphanedRecords();
+
   const records = loadRecords();
   const now = Date.now();
 
@@ -266,6 +281,27 @@ export function getSignalStoreStats(): SignalStoreStats {
     ? records.reduce((mn, r) => (r.fired_at < mn ? r.fired_at : mn), records[0].fired_at)
     : null;
   return { total: records.length, pendingFill: pending.length, oldestFiredAt: oldest };
+}
+
+// ── 6. Purge orphaned records ─────────────────────────────────────────────────
+// Bug #9 fix: records with coin_id === null can never have their outcome prices
+// filled and will sit in pendingFill forever. Purge them once they're past the
+// 24h fill window — keeping them only wastes quota and inflates pendingFill.
+export function purgeOrphanedRecords(): number {
+  const records = loadRecords();
+  const now = Date.now();
+  const before = records.length;
+  const cleaned = records.filter(r => {
+    // Keep records that still have a chance of being filled
+    if (r.coin_id) return true;
+    // Orphan (no coin_id) — keep if still within the 1h fill eligibility window
+    return now - r.fired_at < HOUR_MS;
+  });
+  if (cleaned.length < before) {
+    persistRecords(cleaned);
+    console.info(`[SignalStore] Purged ${before - cleaned.length} orphaned records (no coin_id)`);
+  }
+  return before - cleaned.length;
 }
 
 export function clearSignalStore(): void {
