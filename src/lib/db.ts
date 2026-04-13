@@ -119,8 +119,8 @@ export async function saveScan(coins: CoinData[]): Promise<number | null> {
   const r = await api<{ session_id: number }>('/scans', {
     method: 'POST',
     body: JSON.stringify({ coins }),
+    _silent: true,
   });
-  if (r) toast.success('Scan saved', { duration: 2000 });
   return r?.session_id ?? null;
 }
 

@@ -34,9 +34,9 @@ export async function analyzeToken(coin: CoinData, aiKey: string): Promise<strin
     volSpike:  coin.volSpike,
     vol:       coin.volume,
     mcap:      coin.mcap,
-    supplyPct: null,
+    supplyPct: coin.supplyPct,  // was null — now passes actual circulating supply %
     dexHot:    coin.dexHot,
-    dsLiq:     null,
+    dsLiq:     coin.dsLiq,
     isSol:     coin.isSol,
     birdData:  coin.birdData,
   });
@@ -78,6 +78,7 @@ ${coin.birdData ? `On-chain: RugScore=${coin.birdData.rugScore} Top10=${coin.bir
         'Content-Type': 'application/json',
         'x-api-key': aiKey,
         'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-only': 'true',
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
@@ -126,6 +127,7 @@ export async function analyzeSentiment(
         'Content-Type': 'application/json',
         'x-api-key': aiKey,
         'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-only': 'true',
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',

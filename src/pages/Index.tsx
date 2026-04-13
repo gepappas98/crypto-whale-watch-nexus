@@ -232,24 +232,25 @@ export default function WhaleRadarApp() {
   const triggerScan = useCallback(async () => {
     if (scanning) return;
 
-    // Check CoinGecko cooldown
-    if (isRateLimited(RL_KEYS.COINGECKO)) {
-      const rem = getCooldownRemaining(RL_KEYS.COINGECKO);
-      setScanBadge(`WAIT ${rem}s`);
-      return;
-    }
-
     setScanning(true);
     setScanBadge('SCANNING');
+
+    // Detect CoinGecko key type: demo keys start with "CG-", pro keys are UUIDs
+    const isCgDemoKey = apiKey && apiKey.startsWith('CG-');
+    const isCgProKey  = apiKey && !apiKey.startsWith('CG-');
+
     try {
       let scanData: unknown[] | null = null;
       let source: 'live' | 'cached' | 'fallback' = 'live';
 
-      // Strategy 1: Try backend proxy first (handles rate limits server-side)
+      // Strategy 1: Try backend proxy first (handles rate limits server-side).
+      // NOTE: do NOT gate this on isRateLimited() — the proxy has its own
+      // server-side cache and the local rate-limit state reflects *direct* CG calls.
       try {
         const proxyHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
         if (apiKey) proxyHeaders['x-cg-api-key'] = apiKey;
-        const proxyRes = await fetch('/api/scan', { headers: proxyHeaders, signal: AbortSignal.timeout(5000) });
+        // 20s — backend itself retries up to 3× with 8s timeouts
+        const proxyRes = await fetch('/api/scan', { headers: proxyHeaders, signal: AbortSignal.timeout(20000) });
         if (proxyRes.ok) {
           const result = await proxyRes.json();
           if (result.success && result.data?.length) {
@@ -261,11 +262,24 @@ export default function WhaleRadarApp() {
         // Backend unavailable — fall through to direct fetch
       }
 
-      // Strategy 2: Direct CoinGecko call (works when no backend)
+      // Strategy 2: Direct CoinGecko call (works when no backend).
+      // Use the correct base URL and header for the key type.
       if (!scanData) {
-        const cgUrl = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h';
+        // Only gate direct CG calls on rate-limit (not the proxy path above)
+        if (isRateLimited(RL_KEYS.COINGECKO)) {
+          const rem = getCooldownRemaining(RL_KEYS.COINGECKO);
+          setScanBadge(`WAIT ${rem}s`);
+          setScanning(false);
+          return;
+        }
+
+        const cgBase = isCgProKey
+          ? 'https://pro-api.coingecko.com/api/v3'
+          : 'https://api.coingecko.com/api/v3';
+        const cgUrl = `${cgBase}/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h&include_platform=false`;
         const cgHeaders: Record<string, string> = {};
-        if (apiKey) cgHeaders['x-cg-pro-api-key'] = apiKey;
+        if (isCgProKey)  cgHeaders['x-cg-pro-api-key']  = apiKey;
+        if (isCgDemoKey) cgHeaders['x-cg-demo-api-key'] = apiKey;
 
         const result = await cachedFetch<unknown[]>(cgUrl, {
           headers: cgHeaders,
@@ -431,12 +445,16 @@ export default function WhaleRadarApp() {
   });
 
   // ══ AUTO SCAN ═════════════════════════════════════════════════════════════
-  // Issue #6: Only run auto scan if autoScan is ON and NOT paused
+  // Use a stable ref so the interval always calls the LATEST triggerScan
+  // without needing it in the effect dep array (avoids restart on every scan).
+  const triggerScanRef = useRef(triggerScan);
+  useEffect(() => { triggerScanRef.current = triggerScan; }, [triggerScan]);
+
   useEffect(() => {
     if (!autoScan || autoPaused) return;
     const ms = aggressiveMode ? CFG.SCAN_MS_AGG : CFG.SCAN_MS_NORMAL;
-    triggerScan();
-    const timer = setInterval(() => triggerScan(), ms);
+    triggerScanRef.current();
+    const timer = setInterval(() => triggerScanRef.current(), ms);
     const cdTimer = setInterval(() => {
       const r = Math.max(0, Math.ceil((ms - (Date.now() % ms)) / 1000));
       setNextScan(r > 0 ? r + 's' : 'NOW');
@@ -490,6 +508,11 @@ export default function WhaleRadarApp() {
   const filteredCoins = coins.filter(c => {
     if (c.vmcap < vmcapThr && Math.abs(c.change) < pchgThr && c.score < 20) return false;
     if (watchlistOnly && !tracked[c.symbol]) return false;
+    // Advanced filters: chain
+    if (advancedFilters.chain === 'solana' && !c.isSol) return false;
+    if (['ethereum', 'bsc', 'polygon'].includes(advancedFilters.chain) && c.isSol) return false;
+    // Advanced filters: min volume threshold
+    if (advancedFilters.minThreshold > 0 && c.volume < advancedFilters.minThreshold) return false;
     return true;
   });
 

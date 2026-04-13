@@ -44,7 +44,7 @@ export async function fetchDexData(
   signal?: AbortSignal,
 ): Promise<DexData> {
   const result = await cachedFetch<DexSearchResponse>(
-    `${BASE}/search/?q=${encodeURIComponent(symbol)}USDT`,
+    `${BASE}/search/?q=${encodeURIComponent(symbol)}`,
     {
       signal,
       cacheTtl: DEX_CACHE_MS,

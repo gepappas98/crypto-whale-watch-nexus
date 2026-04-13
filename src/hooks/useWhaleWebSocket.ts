@@ -61,6 +61,9 @@ export function useWhaleWebSocket({
   const wsRetries = useRef(0);
   const ws2Retries = useRef(0);
 
+  // Bybit reconnect delay timer (needs to be tracked for cleanup)
+  const ws2ReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Rebuild debounce timers
   const wsRebuildTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ws2RebuildTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -294,14 +297,16 @@ export function useWhaleWebSocket({
       if (ws2Ref.current !== ws) return;
       if (ws2PingInterval.current) clearInterval(ws2PingInterval.current);
       if (ws2WatchdogTimer.current) clearTimeout(ws2WatchdogTimer.current);
+      if (ws2ReconnectTimer.current) clearTimeout(ws2ReconnectTimer.current);
       setBybitReady(false);
       if (optionsRef.current.bybitEnabled && optionsRef.current.subscribedPairs.size) {
         ws2Retries.current++;
-        setTimeout(() => {
-          if (optionsRef.current.bybitEnabled) {
-            scheduleRebuildWs2(0);
-          }
-        }, backoffWithJitter(ws2Retries.current - 1));
+        const dly = backoffWithJitter(ws2Retries.current - 1);
+        // Store timer ref so it can be cleaned up on unmount
+        ws2ReconnectTimer.current = setTimeout(() => {
+          ws2ReconnectTimer.current = null;
+          if (optionsRef.current.bybitEnabled) scheduleRebuildWs2(0);
+        }, dly);
       }
     };
   }, [startWs2Watchdog]);
@@ -333,6 +338,7 @@ export function useWhaleWebSocket({
       if (ws2WatchdogTimer.current) clearTimeout(ws2WatchdogTimer.current);
       if (wsRebuildTimer.current) clearTimeout(wsRebuildTimer.current);
       if (ws2RebuildTimer.current) clearTimeout(ws2RebuildTimer.current);
+      if (ws2ReconnectTimer.current) clearTimeout(ws2ReconnectTimer.current);
       stopFallbackPolling();
     };
   }, [subscribedPairs, bybitEnabled]);
