@@ -225,57 +225,52 @@ export default function WhaleRadarApp() {
     }
   }, []);  // birdKeyRef is a ref — no dep needed
 
+  // ── Data source status ──────────────────────────────────────────────────────
+  const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
+
   const triggerScan = useCallback(async () => {
     if (scanning) return;
-
-    // Check CoinGecko cooldown
-    if (isRateLimited(RL_KEYS.COINGECKO)) {
-      const rem = getCooldownRemaining(RL_KEYS.COINGECKO);
-      setScanBadge(`WAIT ${rem}s`);
-      return;
-    }
 
     setScanning(true);
     setScanBadge('SCANNING');
     try {
-      const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h';
-      const headers: Record<string, string> = {};
-      if (apiKey) headers['x-cg-pro-api-key'] = apiKey;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['x-cg-api-key'] = apiKey;
 
-      const result = await cachedFetch<unknown[]>(url, {
-        headers,
-        signal: AbortSignal.timeout(18000),
-        cacheTtl: 10_000,
-        swrTtl: 30_000,
-        rateLimitKey: RL_KEYS.COINGECKO,
-        rateLimitName: 'CoinGecko',
-      });
+      const res = await fetch('/api/scan', { headers, signal: AbortSignal.timeout(15000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      if (result.error && !result.data) {
-        if (result.error.includes('429')) {
-          setScanBadge('RATE LIMITED');
-          addAlert('high', 'API', `CoinGecko rate limited — cooldown ${getCooldownRemaining(RL_KEYS.COINGECKO)}s`);
-        } else {
-          throw new Error(result.error);
-        }
-        return;
+      const result = await res.json() as {
+        success: boolean;
+        data: Array<Record<string, unknown>>;
+        source: 'live' | 'cached' | 'fallback';
+        error?: string;
+      };
+
+      if (!result.success || !result.data?.length) {
+        throw new Error(result.error || 'Empty response');
       }
 
-      if (result.data) {
-        setApiCallCount(c => c + (result.fromCache ? 0 : 1));
-        const mapped = processData(result.data);
-        setScanBadge(result.fromCache ? 'CACHED' : 'LIVE');
-        setLastScanTs(Date.now());
+      setDataSource(result.source);
+      setApiCallCount(c => c + (result.source === 'live' ? 1 : 0));
 
-        // ── Persist scan to PostgreSQL (Fix: saveScan was never called) ────
-        // Fire-and-forget — don't block the UI on DB write latency
-        saveScan(mapped).catch(() => { /* offline — ignore */ });
+      // Transform server response into CoinData[]
+      const mapped = processData(result.data);
 
-        // ── Enrich with Birdeye + DexScreener (async, updates coins in state)
-        enrichCoins(mapped).catch(() => { /* ignore enrichment errors */ });
-      }
+      setScanBadge(
+        result.source === 'live' ? 'LIVE' :
+        result.source === 'cached' ? 'CACHED' : 'DEGRADED'
+      );
+      setLastScanTs(Date.now());
+
+      // Persist scan to PostgreSQL (fire-and-forget)
+      saveScan(mapped).catch(() => {});
+
+      // Enrich with Birdeye + DexScreener (async)
+      enrichCoins(mapped).catch(() => {});
     } catch (e: unknown) {
       setScanBadge('ERROR');
+      setDataSource('fallback');
       addAlert('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
     } finally {
       setScanning(false);
