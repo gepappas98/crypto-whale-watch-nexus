@@ -21,7 +21,6 @@ import {
 } from '@/lib/whaleRadarState';
 import { handleRateLimit, isRateLimited, getCooldownRemaining, getActiveCooldowns, onRateLimitChange, RL_KEYS } from '@/lib/rateLimit';
 import { detect } from '@/lib/detection';
-import { cachedFetch } from '@/lib/cachedFetch';
 import { saveWhaleEvent, recordSignalOutcome, saveScan } from '@/lib/db';
 import { fetchBirdeyeToken } from '@/lib/birdeye';
 import { fetchDexData } from '@/lib/dexscreener';
@@ -226,57 +225,52 @@ export default function WhaleRadarApp() {
     }
   }, []);  // birdKeyRef is a ref — no dep needed
 
+  // ── Data source status ──────────────────────────────────────────────────────
+  const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
+
   const triggerScan = useCallback(async () => {
     if (scanning) return;
-
-    // Check CoinGecko cooldown
-    if (isRateLimited(RL_KEYS.COINGECKO)) {
-      const rem = getCooldownRemaining(RL_KEYS.COINGECKO);
-      setScanBadge(`WAIT ${rem}s`);
-      return;
-    }
 
     setScanning(true);
     setScanBadge('SCANNING');
     try {
-      const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h';
-      const headers: Record<string, string> = {};
-      if (apiKey) headers['x-cg-pro-api-key'] = apiKey;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['x-cg-api-key'] = apiKey;
 
-      const result = await cachedFetch<unknown[]>(url, {
-        headers,
-        signal: AbortSignal.timeout(18000),
-        cacheTtl: 10_000,
-        swrTtl: 30_000,
-        rateLimitKey: RL_KEYS.COINGECKO,
-        rateLimitName: 'CoinGecko',
-      });
+      const res = await fetch('/api/scan', { headers, signal: AbortSignal.timeout(15000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      if (result.error && !result.data) {
-        if (result.error.includes('429')) {
-          setScanBadge('RATE LIMITED');
-          addAlert('high', 'API', `CoinGecko rate limited — cooldown ${getCooldownRemaining(RL_KEYS.COINGECKO)}s`);
-        } else {
-          throw new Error(result.error);
-        }
-        return;
+      const result = await res.json() as {
+        success: boolean;
+        data: Array<Record<string, unknown>>;
+        source: 'live' | 'cached' | 'fallback';
+        error?: string;
+      };
+
+      if (!result.success || !result.data?.length) {
+        throw new Error(result.error || 'Empty response');
       }
 
-      if (result.data) {
-        setApiCallCount(c => c + (result.fromCache ? 0 : 1));
-        const mapped = processData(result.data);
-        setScanBadge(result.fromCache ? 'CACHED' : 'LIVE');
-        setLastScanTs(Date.now());
+      setDataSource(result.source);
+      setApiCallCount(c => c + (result.source === 'live' ? 1 : 0));
 
-        // ── Persist scan to PostgreSQL (Fix: saveScan was never called) ────
-        // Fire-and-forget — don't block the UI on DB write latency
-        saveScan(mapped).catch(() => { /* offline — ignore */ });
+      // Transform server response into CoinData[]
+      const mapped = processData(result.data);
 
-        // ── Enrich with Birdeye + DexScreener (async, updates coins in state)
-        enrichCoins(mapped).catch(() => { /* ignore enrichment errors */ });
-      }
+      setScanBadge(
+        result.source === 'live' ? 'LIVE' :
+        result.source === 'cached' ? 'CACHED' : 'DEGRADED'
+      );
+      setLastScanTs(Date.now());
+
+      // Persist scan to PostgreSQL (fire-and-forget)
+      saveScan(mapped).catch(() => {});
+
+      // Enrich with Birdeye + DexScreener (async)
+      enrichCoins(mapped).catch(() => {});
     } catch (e: unknown) {
       setScanBadge('ERROR');
+      setDataSource('fallback');
       addAlert('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
     } finally {
       setScanning(false);
@@ -286,10 +280,10 @@ export default function WhaleRadarApp() {
   const processData = useCallback((data: unknown[]): CoinData[] => {
     const newVols: Record<string, number> = {};
     const mapped: CoinData[] = (data as Record<string, unknown>[]).map((c, i) => {
-      const vol = (c.total_volume as number) || 0;
-      const mcap = (c.market_cap as number) || 1;
-      const vmcap = (vol / mcap) * 100;
-      const chg24 = (c.price_change_percentage_24h as number) || 0;
+      const vol = (c.total_volume as number) || (c.volume as number) || 0;
+      const mcap = (c.market_cap as number) || (c.mcap as number) || 1;
+      const vmcap = (c.vmcap as number) || ((vol / mcap) * 100);
+      const chg24 = (c.price_change_percentage_24h as number) || (c.change_24h as number) || (c.change as number) || 0;
       const prevVol = prevVolumes[(c.id as string)] || vol;
       const volSpike = prevVol > 0 && prevVol !== vol ? vol / prevVol : 1;
       const supplyPct = c.total_supply ? (((c.circulating_supply as number) / (c.total_supply as number)) * 100) : null;
@@ -299,22 +293,18 @@ export default function WhaleRadarApp() {
       const isSol = isSolToken(sym);
       const birdData = null;
       newVols[(c.id as string)] = vol;
-      // detect() from detection.ts is the canonical engine — replaces legacy calcThreat()
-      // It returns the same {score, threat, category, confidence, reasons} plus
-      // manipulation breakdown and boolean signals used by the CEO Signal Engine.
-      const det = detect({ vmcap, chg24: chg24, volSpike, supplyPct, vol, mcap, dexHot, dsLiq, isSol, birdData });
+      const det = detect({ vmcap, chg24, volSpike, supplyPct, vol, mcap, dexHot, dsLiq, isSol, birdData });
       const { score, threat, category, confidence, reasons } = det;
       return {
-        rank: i + 1, id: c.id as string, symbol: sym, name: c.name as string,
-        price: c.current_price as number, change: chg24, volume: vol, mcap, vmcap, volSpike,
+        rank: (c.rank as number) || (i + 1), id: c.id as string, symbol: sym, name: c.name as string,
+        price: (c.current_price as number) || (c.price as number) || 0, change: chg24, volume: vol, mcap, vmcap, volSpike,
         supplyPct, score, threat, category, confidence, reasons, dexHot, dsLiq, isSol, birdData,
       };
     });
     setPrevVolumes(newVols);
     setCoins(mapped);
-    return mapped; // returned so triggerScan can saveScan + enrichCoins
 
-    // Snapshot
+    // Snapshot history
     const critCount = mapped.filter(c => c.threat === 'CRITICAL').length;
     const highCount = mapped.filter(c => c.threat === 'HIGH').length;
     setScanHistory(prev => {
@@ -326,17 +316,15 @@ export default function WhaleRadarApp() {
       return [snap, ...prev].slice(0, CFG.HISTORY_MAX);
     });
 
-    // ── Record CEO signal outcomes (Fix #3: profit-proof layer) ──────────────
-    // Only tokens with score >= 35 (WATCH+) get recorded. HOLD is skipped.
-    // Server deduplicates via UNIQUE INDEX on (symbol, signal, hour).
+    // Record CEO signal outcomes
     mapped
       .filter(c => c.score >= 35)
-      .slice(0, 20) // cap at 20 per scan to limit API writes
+      .slice(0, 20)
       .forEach(c => {
         const signal = getCeoSignalLabel(c.score, c.threat, c.category || '', c.vmcap);
         recordSignalOutcome({
           symbol: c.symbol,
-          coin_id: c.id,          // CoinGecko id — needed by price filler
+          coin_id: c.id,
           signal,
           score: c.score,
           category: c.category,
@@ -352,6 +340,8 @@ export default function WhaleRadarApp() {
     mapped.filter(c => c.threat === 'HIGH' && c.category).slice(0, 3).forEach(c => {
       addAlert('high', c.symbol, `[${c.category}] SCORE=${c.score}/100 — ${c.reasons.join(' · ')}`);
     });
+
+    return mapped;
   }, [prevVolumes]);
 
   // ══ ALERTS ════════════════════════════════════════════════════════════════
@@ -484,6 +474,18 @@ export default function WhaleRadarApp() {
   return (
     <div className="min-h-screen flex flex-col">
       {showOnboarding && <WROnboarding onFinish={finishOnboarding} />}
+
+      {/* Degraded mode banner */}
+      {dataSource === 'fallback' && (
+        <div className="bg-wr-red/20 border-b-2 border-wr-red/60 px-4 py-2 text-center text-[10px] text-wr-red tracking-widest">
+          ⚠ RUNNING IN DEGRADED MODE — Showing simulated whale activity. Live data temporarily unavailable.
+        </div>
+      )}
+      {dataSource === 'cached' && scanBadge === 'CACHED' && (
+        <div className="bg-wr-amber/15 border-b border-wr-amber/40 px-4 py-1 text-center text-[8px] text-wr-amber tracking-widest">
+          📦 Serving cached data — API rate limited or slow
+        </div>
+      )}
 
       {/* Reconnecting banner — shown after 2+ failed attempts */}
       {wsReconnects >= 2 && (
