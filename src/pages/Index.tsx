@@ -21,7 +21,6 @@ import {
 } from '@/lib/whaleRadarState';
 import { handleRateLimit, isRateLimited, getCooldownRemaining, getActiveCooldowns, onRateLimitChange, RL_KEYS } from '@/lib/rateLimit';
 import { detect } from '@/lib/detection';
-import { cachedFetch } from '@/lib/cachedFetch';
 import { saveWhaleEvent, recordSignalOutcome, saveScan } from '@/lib/db';
 import { fetchBirdeyeToken } from '@/lib/birdeye';
 import { fetchDexData } from '@/lib/dexscreener';
