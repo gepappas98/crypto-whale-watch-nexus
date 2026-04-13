@@ -50,6 +50,11 @@ async function ensureTable(): Promise<void> {
 }
 
 // POST /api/signal-outcomes — record a CEO signal fire
+//
+// Bug #2 fixed: the original ON CONFLICT referenced date_trunc('hour', fired_at)
+// on the row being inserted, but fired_at = DEFAULT NOW() is evaluated *after*
+// the INSERT, so PostgreSQL never saw a conflict — every call created a new row.
+// Fix: explicit app-side pre-check within the same transaction.
 signalOutcomesRouter.post('/', async (req: Request, res: Response) => {
   const { symbol, coin_id, signal, score, category, vmcap, entry_price } =
     req.body as Record<string, unknown>;
@@ -59,22 +64,29 @@ signalOutcomesRouter.post('/', async (req: Request, res: Response) => {
   }
   if (signal === 'HOLD') return res.json({ skipped: true });
 
+  const sym = String(symbol).toUpperCase();
+
   try {
     await ensureTable();
+
+    // Dedup: skip if the same (symbol, signal) was already recorded this clock-hour
+    const existing = await query<{ id: number }>(
+      `SELECT id FROM signal_outcomes
+       WHERE symbol = $1
+         AND signal = $2
+         AND fired_at >= date_trunc('hour', NOW())
+         AND fired_at <  date_trunc('hour', NOW()) + INTERVAL '1 hour'
+       LIMIT 1`,
+      [sym, signal]
+    );
+    const rows = unwrap<{ id: number }>(existing);
+    if (rows.length > 0) return res.json({ ok: true, skipped: true });
+
     await query(
       `INSERT INTO signal_outcomes
          (symbol, coin_id, signal, score, category, vmcap, entry_price)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (symbol, signal, date_trunc('hour', fired_at)) DO NOTHING`,
-      [
-        String(symbol).toUpperCase(),
-        coin_id ?? null,
-        signal,
-        score ?? null,
-        category ?? null,
-        vmcap ?? null,
-        entry_price,
-      ]
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [sym, coin_id ?? null, signal, score ?? null, category ?? null, vmcap ?? null, entry_price]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -212,28 +224,37 @@ export async function fillOutcomePrices(): Promise<FillResult> {
     return { filled: 0 };
   }
 
-  // Fetch current prices from CoinCap (free, no API key required)
-  // CoinCap uses its own asset IDs — map coin_ids if needed (usually same as CoinGecko)
-  let prices: Record<string, { usd: number }> = {};
+  // Bug #3 fixed: was using CoinCap (coincap.io) which has different slug IDs
+  // (e.g. "bonk-coin" vs CoinGecko's "bonk"). coin_id is populated from CoinGecko
+  // scan data, so we must fetch prices from CoinGecko to match.
+  let prices: Record<string, number> = {};
   try {
-    const url = `https://api.coincap.io/v2/assets?ids=${coinIds.join(',')}`;
-    const cgRes = await fetch(url, {
-      headers: { 'Accept': 'application/json' },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (cgRes.ok) {
-      const json = await cgRes.json() as { data: { id: string; priceUsd: string }[] };
-      for (const asset of json.data ?? []) {
-        if (asset.id && asset.priceUsd) {
-          prices[asset.id] = { usd: parseFloat(asset.priceUsd) };
-        }
+    // CoinGecko simple/price — batched, up to 250 IDs, no key needed on free tier
+    const batches: string[][] = [];
+    for (let i = 0; i < coinIds.length; i += 250) batches.push(coinIds.slice(i, i + 250));
+
+    for (const batch of batches) {
+      const cgUrl = `https://api.coingecko.com/api/v3/simple/price?ids=${batch.join(',')}&vs_currencies=usd`;
+      const cgRes = await fetch(cgUrl, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!cgRes.ok) {
+        console.warn('[priceFiller] CoinGecko returned', cgRes.status);
+        continue;
       }
-    } else {
-      console.warn('[priceFiller] CoinCap returned', cgRes.status);
-      return { filled: 0 };
+      const json = await cgRes.json() as Record<string, { usd?: number }>;
+      for (const [id, v] of Object.entries(json)) {
+        if (v.usd != null) prices[id] = v.usd;
+      }
     }
   } catch (e) {
-    console.error('[priceFiller] CoinCap fetch failed:', e);
+    console.error('[priceFiller] CoinGecko fetch failed:', e);
+    return { filled: 0 };
+  }
+
+  if (!Object.keys(prices).length) {
+    console.warn('[priceFiller] No prices returned from CoinGecko');
     return { filled: 0 };
   }
 
@@ -246,7 +267,7 @@ export async function fillOutcomePrices(): Promise<FillResult> {
   ) {
     for (const row of rows) {
       if (!row.coin_id) continue;
-      const p = prices[row.coin_id]?.usd;
+      const p = prices[row.coin_id];
       if (!p) continue;
       const entry = parseFloat(row.entry_price);
       const pctChange = entry > 0 ? ((p - entry) / entry) * 100 : null;

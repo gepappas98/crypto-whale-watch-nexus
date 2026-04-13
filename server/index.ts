@@ -16,8 +16,16 @@ import { signalOutcomesRouter, fillOutcomePrices } from './routes/signalOutcomes
 const app = express();
 const PORT = Number(process.env.API_PORT) || 3001;
 
+// Bug #7 fixed: CORS no longer mirrors any Origin when CORS_ORIGIN is unset.
+// In production set CORS_ORIGIN to your Railway frontend URL, e.g.:
+//   CORS_ORIGIN=https://your-app.up.railway.app
+// In dev the Vite proxy handles /api so CORS is only needed for direct calls.
+const corsOrigin = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
+  : (process.env.NODE_ENV === 'production' ? false : 'http://localhost:8080');
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || true, // true = mirror request Origin header (safe for same-deployment)
+  origin: corsOrigin,
   credentials: false,
 }));
 app.use(express.json({ limit: '2mb' }));
