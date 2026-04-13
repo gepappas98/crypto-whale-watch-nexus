@@ -8,10 +8,48 @@ import { query } from '../db';
 
 export const signalOutcomesRouter = Router();
 
+// ── helper: unwrap pg QueryResult OR raw array ────────────────────────────────
+function unwrap<T = unknown>(result: unknown): T[] {
+  if (!result) return [];
+  if (Array.isArray(result)) return result as T[];
+  // pg QueryResult shape
+  const r = result as { rows?: T[] };
+  if (Array.isArray(r.rows)) return r.rows;
+  return [];
+}
+
+// ── helper: ensure the table exists before we query it ───────────────────────
+async function ensureTable(): Promise<void> {
+  await query(`
+    CREATE TABLE IF NOT EXISTS signal_outcomes (
+      id            SERIAL PRIMARY KEY,
+      symbol        TEXT        NOT NULL,
+      coin_id       TEXT,
+      signal        TEXT        NOT NULL,
+      score         NUMERIC,
+      category      TEXT,
+      vmcap         NUMERIC,
+      entry_price   NUMERIC     NOT NULL,
+      price_1h      NUMERIC,
+      price_4h      NUMERIC,
+      price_24h     NUMERIC,
+      outcome_1h    NUMERIC,
+      outcome_4h    NUMERIC,
+      outcome_24h   NUMERIC,
+      filled_1h_at  TIMESTAMPTZ,
+      filled_4h_at  TIMESTAMPTZ,
+      filled_24h_at TIMESTAMPTZ,
+      fired_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  // Unique index — safe to run repeatedly
+  await query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS signal_outcomes_dedup_idx
+    ON signal_outcomes (symbol, signal, date_trunc('hour', fired_at))
+  `);
+}
+
 // POST /api/signal-outcomes — record a CEO signal fire
-// Client calls this once per scan per token with score >= 45.
-// The UNIQUE INDEX on (symbol, signal, date_trunc('hour', fired_at))
-// ensures we never double-count the same signal within the same hour.
 signalOutcomesRouter.post('/', async (req: Request, res: Response) => {
   const { symbol, coin_id, signal, score, category, vmcap, entry_price } =
     req.body as Record<string, unknown>;
@@ -19,10 +57,10 @@ signalOutcomesRouter.post('/', async (req: Request, res: Response) => {
   if (!symbol || !signal || entry_price == null) {
     return res.status(400).json({ error: 'symbol, signal, entry_price required' });
   }
-  // Skip HOLD — it's noise, not a signal
   if (signal === 'HOLD') return res.json({ skipped: true });
 
   try {
+    await ensureTable();
     await query(
       `INSERT INTO signal_outcomes
          (symbol, coin_id, signal, score, category, vmcap, entry_price)
@@ -41,14 +79,16 @@ signalOutcomesRouter.post('/', async (req: Request, res: Response) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[signal-outcomes POST]', err);
-    res.status(500).json({ error: 'DB error' });
+    res.status(500).json({ error: 'DB error', detail: String(err) });
   }
 });
 
 // GET /api/signal-outcomes/eval — win-rate table across all signals (last 30d)
 signalOutcomesRouter.get('/eval', async (_req: Request, res: Response) => {
   try {
-    const rows = await query(
+    await ensureTable();
+
+    const raw = await query(
       `SELECT
          signal,
          COUNT(*)                                                    AS fires,
@@ -69,10 +109,11 @@ signalOutcomesRouter.get('/eval', async (_req: Request, res: Response) => {
        GROUP BY signal
        ORDER BY avg_4h_pct DESC NULLS LAST`
     );
-    res.json(rows);
+
+    res.json(unwrap(raw));
   } catch (err) {
     console.error('[signal-outcomes/eval]', err);
-    res.status(500).json({ error: 'DB error' });
+    res.status(500).json({ error: 'DB error', detail: String(err) });
   }
 });
 
@@ -81,7 +122,8 @@ signalOutcomesRouter.get('/recent', async (req: Request, res: Response) => {
   const limit = Math.min(Number(req.query.limit) || 100, 500);
   const sig = req.query.signal as string | undefined;
   try {
-    const rows = sig
+    await ensureTable();
+    const raw = sig
       ? await query(
           `SELECT * FROM signal_outcomes WHERE signal = $1 ORDER BY fired_at DESC LIMIT $2`,
           [sig, limit]
@@ -90,34 +132,35 @@ signalOutcomesRouter.get('/recent', async (req: Request, res: Response) => {
           `SELECT * FROM signal_outcomes ORDER BY fired_at DESC LIMIT $1`,
           [limit]
         );
-    res.json(rows);
+    res.json(unwrap(raw));
   } catch (err) {
-    res.status(500).json({ error: 'DB error' });
+    console.error('[signal-outcomes/recent]', err);
+    res.status(500).json({ error: 'DB error', detail: String(err) });
   }
 });
 
 // POST /api/signal-outcomes/fill-prices — trigger price fill-in manually
-// (also called by the background priceFiller on a schedule)
 signalOutcomesRouter.post('/fill-prices', async (_req: Request, res: Response) => {
   try {
     const { filled } = await fillOutcomePrices();
     res.json({ ok: true, filled });
   } catch (err) {
     console.error('[signal-outcomes/fill-prices]', err);
-    res.status(500).json({ error: 'Fill failed' });
+    res.status(500).json({ error: 'Fill failed', detail: String(err) });
   }
 });
 
 // ── Price fill-in logic ───────────────────────────────────────────────────────
-// Exported so server/index.ts can call it on a schedule too.
 
 export interface FillResult { filled: number }
 
 export async function fillOutcomePrices(): Promise<FillResult> {
   let filled = 0;
 
-  // ── 1h window: fired 1h-25h ago, price_1h still null ──────────────────────
-  const need1h = await query<{
+  await ensureTable();
+
+  // ── 1h window ─────────────────────────────────────────────────────────────
+  const raw1h = await query<{
     id: number; coin_id: string | null; symbol: string; entry_price: string;
   }>(
     `SELECT id, coin_id, symbol, entry_price
@@ -127,9 +170,10 @@ export async function fillOutcomePrices(): Promise<FillResult> {
        AND fired_at > NOW() - INTERVAL '25 hours'
      LIMIT 30`
   );
+  const need1h = unwrap<{ id: number; coin_id: string | null; symbol: string; entry_price: string }>(raw1h);
 
   // ── 4h window ─────────────────────────────────────────────────────────────
-  const need4h = await query<{
+  const raw4h = await query<{
     id: number; coin_id: string | null; symbol: string; entry_price: string;
   }>(
     `SELECT id, coin_id, symbol, entry_price
@@ -139,9 +183,10 @@ export async function fillOutcomePrices(): Promise<FillResult> {
        AND fired_at > NOW() - INTERVAL '49 hours'
      LIMIT 30`
   );
+  const need4h = unwrap<{ id: number; coin_id: string | null; symbol: string; entry_price: string }>(raw4h);
 
   // ── 24h window ────────────────────────────────────────────────────────────
-  const need24h = await query<{
+  const raw24h = await query<{
     id: number; coin_id: string | null; symbol: string; entry_price: string;
   }>(
     `SELECT id, coin_id, symbol, entry_price
@@ -151,8 +196,8 @@ export async function fillOutcomePrices(): Promise<FillResult> {
        AND fired_at > NOW() - INTERVAL '8 days'
      LIMIT 30`
   );
+  const need24h = unwrap<{ id: number; coin_id: string | null; symbol: string; entry_price: string }>(raw24h);
 
-  // Collect all unique coin_ids we need to price
   const allRows = [...need1h, ...need4h, ...need24h];
   if (!allRows.length) return { filled: 0 };
 
@@ -163,27 +208,32 @@ export async function fillOutcomePrices(): Promise<FillResult> {
   )];
 
   if (!coinIds.length) {
-    // No coin_ids recorded — can't fill without them
     console.warn('[priceFiller] No coin_ids available, skipping fill');
     return { filled: 0 };
   }
 
-  // Fetch current prices from CoinGecko free tier (no key needed)
+  // Fetch current prices from CoinCap (free, no API key required)
+  // CoinCap uses its own asset IDs — map coin_ids if needed (usually same as CoinGecko)
   let prices: Record<string, { usd: number }> = {};
   try {
-    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${coinIds.join(',')}&vs_currencies=usd`;
-    const res = await fetch(url, {
+    const url = `https://api.coincap.io/v2/assets?ids=${coinIds.join(',')}`;
+    const cgRes = await fetch(url, {
       headers: { 'Accept': 'application/json' },
       signal: AbortSignal.timeout(10_000),
     });
-    if (res.ok) {
-      prices = await res.json() as Record<string, { usd: number }>;
+    if (cgRes.ok) {
+      const json = await cgRes.json() as { data: { id: string; priceUsd: string }[] };
+      for (const asset of json.data ?? []) {
+        if (asset.id && asset.priceUsd) {
+          prices[asset.id] = { usd: parseFloat(asset.priceUsd) };
+        }
+      }
     } else {
-      console.warn('[priceFiller] CoinGecko returned', res.status);
+      console.warn('[priceFiller] CoinCap returned', cgRes.status);
       return { filled: 0 };
     }
   } catch (e) {
-    console.error('[priceFiller] CoinGecko fetch failed:', e);
+    console.error('[priceFiller] CoinCap fetch failed:', e);
     return { filled: 0 };
   }
 
