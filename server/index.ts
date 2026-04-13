@@ -6,6 +6,7 @@ import express from 'express';
 import cors from 'cors';
 import { ping } from './db';
 import { scansRouter }          from './routes/scans';
+import { scanRouter }           from './routes/scan';
 import { portfolioRouter }      from './routes/portfolio';
 import { trackedRouter }        from './routes/tracked';
 import { alertsRouter }         from './routes/alerts';
@@ -25,6 +26,7 @@ app.get('/api/health', async (_req, res) => {
 });
 
 // ── Routes ─────────────────────────────────────────────────────────────────
+app.use('/api/scan',             scanRouter);
 app.use('/api/scans',            scansRouter);
 app.use('/api/portfolio',        portfolioRouter);
 app.use('/api/tracked',          trackedRouter);
