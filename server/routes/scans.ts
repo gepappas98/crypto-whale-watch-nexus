@@ -66,21 +66,8 @@ scansRouter.get('/', async (_req: Request, res: Response) => {
   }
 });
 
-// GET /api/scans/:id — full coin list for a session
-scansRouter.get('/:id', async (req: Request, res: Response) => {
-  try {
-    const rows = await query(
-      `SELECT * FROM scan_coins WHERE session_id = $1 ORDER BY score DESC`,
-      [req.params.id]
-    );
-    res.json(rows);
-  } catch (err) {
-    console.error('[scans/:id GET]', err);
-    res.status(500).json({ error: 'DB error' });
-  }
-});
-
 // GET /api/scans/symbol/:sym — history for a specific token
+// MUST be before /:id or Express matches "symbol" as an id
 scansRouter.get('/symbol/:sym', async (req: Request, res: Response) => {
   try {
     const rows = await query(
@@ -99,6 +86,7 @@ scansRouter.get('/symbol/:sym', async (req: Request, res: Response) => {
 });
 
 // GET /api/scans/threats/top — top threats across all history
+// MUST be before /:id or Express matches "threats" as an id
 scansRouter.get('/threats/top', async (_req: Request, res: Response) => {
   try {
     const rows = await query(
@@ -110,6 +98,21 @@ scansRouter.get('/threats/top', async (_req: Request, res: Response) => {
     res.json(rows);
   } catch (err) {
     console.error('[scans/threats/top]', err);
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+// GET /api/scans/:id — full coin list for a session
+// Kept LAST — would shadow /symbol/:sym and /threats/top if placed earlier
+scansRouter.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const rows = await query(
+      `SELECT * FROM scan_coins WHERE session_id = $1 ORDER BY score DESC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('[scans/:id GET]', err);
     res.status(500).json({ error: 'DB error' });
   }
 });

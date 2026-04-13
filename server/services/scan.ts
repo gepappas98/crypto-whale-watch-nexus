@@ -165,12 +165,22 @@ export async function performScan(apiKey?: string): Promise<ScanResult> {
     };
   }
 
-  const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h';
+  // Detect key type: demo keys start with "CG-", pro keys are UUIDs/other
+  const isCgDemoKey = apiKey && apiKey.startsWith('CG-');
+  const isCgProKey  = apiKey && !apiKey.startsWith('CG-');
+
+  const cgBase = isCgProKey
+    ? 'https://pro-api.coingecko.com/api/v3'
+    : 'https://api.coingecko.com/api/v3';
+
+  const url = `${cgBase}/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h&include_platform=false`;
+
   const headers: Record<string, string> = {};
-  if (apiKey) headers['x-cg-pro-api-key'] = apiKey;
+  if (isCgProKey)  headers['x-cg-pro-api-key']  = apiKey!;
+  if (isCgDemoKey) headers['x-cg-demo-api-key'] = apiKey!;
 
   try {
-    const raw = await fetchWithRetry(url, headers);
+    const raw = await fetchWithRetry(url, headers, 2);
     const data = transform(raw);
     cachedData = data;
     cacheTs = Date.now();

@@ -16,7 +16,10 @@ import { signalOutcomesRouter, fillOutcomePrices } from './routes/signalOutcomes
 const app = express();
 const PORT = Number(process.env.API_PORT) || 3001;
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:5173' }));
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || true, // true = mirror request Origin header (safe for same-deployment)
+  credentials: false,
+}));
 app.use(express.json({ limit: '2mb' }));
 
 // ── Health ─────────────────────────────────────────────────────────────────
