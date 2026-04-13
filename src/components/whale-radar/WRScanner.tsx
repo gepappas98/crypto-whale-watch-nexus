@@ -165,6 +165,10 @@ export function WRScanner({
         <button className="wr-btn ai" onClick={() => onOpenModal('sentiment')} title="AI Sentiment">
           ✦ SENT <span className="pro-badge">PRO</span>
         </button>
+        <button className="wr-btn" onClick={() => onOpenModal('signal-eval')} title="Signal Eval — win rates [E]"
+          style={{ borderColor: 'hsl(var(--wr-cyan) / 0.4)', color: 'hsl(var(--wr-cyan))' }}>
+          📈 EVAL
+        </button>
 
         <button
           className={`wr-btn text-[8px] hidden lg:inline-flex ${showAdvFilters ? 'active' : ''}`}

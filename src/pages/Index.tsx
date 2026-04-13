@@ -16,13 +16,31 @@ import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
 import { DEFAULT_FILTERS, type WhaleFilters } from '@/components/whale-radar/WRAdvancedFilters';
 import {
   CoinData, AlertItem, WhaleTrade, TrackedToken, PortfolioEntry,
-  WalletEntry, ScanSnapshot, CFG, fmtN, fmtP, isSolToken, calcThreat,
+  WalletEntry, ScanSnapshot, CFG, fmtN, fmtP, isSolToken,
   calcSizing, saveState, loadState,
 } from '@/lib/whaleRadarState';
 import { handleRateLimit, isRateLimited, getCooldownRemaining, getActiveCooldowns, onRateLimitChange, RL_KEYS } from '@/lib/rateLimit';
+import { detect } from '@/lib/detection';
 import { cachedFetch } from '@/lib/cachedFetch';
+import { saveWhaleEvent, recordSignalOutcome, saveScan } from '@/lib/db';
+import { fetchBirdeyeToken } from '@/lib/birdeye';
+import { fetchDexData } from '@/lib/dexscreener';
+import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
 import { startPerfMonitoring } from '@/lib/perfBudget';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
+
+// ── CEO Signal label (mirrors WRScanner getCeoSignal) ─────────────────────────
+// Kept here so processData can record signal outcomes without importing WRScanner.
+function getCeoSignalLabel(score: number, threat: string, category: string, vmcap: number): string {
+  const t = threat.toUpperCase();
+  const cat = (category || '').toUpperCase();
+  if (score >= 88 || vmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) return 'AVOID / SHORT';
+  if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE')))         return 'AGGRESSIVE LONG';
+  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) return 'LONG (tight stop)';
+  if (score >= 45) return 'LONG';
+  if (score >= 35) return 'WATCH';
+  return 'HOLD';
+}
 
 export default function WhaleRadarApp() {
   // ══ CORE STATE ═══════════════════════════════════════════════════════════
@@ -147,6 +165,67 @@ export default function WhaleRadarApp() {
   }, []);
 
   // ══ SCAN ══════════════════════════════════════════════════════════════════
+  // Stable refs so enrichCoins doesn't need birdKey in its dep array
+  const birdKeyRef = useRef('');
+  useEffect(() => { birdKeyRef.current = birdKey; }, [birdKey]);
+
+  // ── Enrich coins with Birdeye (SOL) + DexScreener (high-vmcap) ──────────────
+  // Called after processData. Updates individual coins in state asynchronously.
+  // Each fetch is independently cached so a re-scan doesn't burn API quota.
+  const enrichCoins = useCallback(async (mapped: CoinData[]) => {
+    const key = birdKeyRef.current;
+
+    // ── DexScreener: small/mid caps where DEX liquidity matters ──────────────
+    const dexTargets = mapped
+      .filter(c => c.vmcap > 50 && c.mcap < 2e9)  // skip mega-caps — they don't rug on DEX
+      .slice(0, 15);                                // cap: 15 req per scan
+
+    // ── Birdeye: only tokens we have addresses for ────────────────────────────
+    const solTargets = mapped.filter(c => c.isSol && CFG.SOL_ADDRS[c.symbol]);
+
+    // Fire DexScreener requests — no key needed, throttle to 15/scan
+    for (const coin of dexTargets) {
+      try {
+        const dex = await fetchDexData(coin.symbol, coin.volume);
+        if (!dex.dexHot && !dex.dsLiq) continue; // nothing new — skip state update
+        setCoins(prev => prev.map(c => {
+          if (c.symbol !== coin.symbol) return c;
+          // Re-run detection with enriched DEX data
+          const det = detect({
+            vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
+            supplyPct: c.supplyPct, vol: c.volume, mcap: c.mcap,
+            dexHot: dex.dexHot, dsLiq: dex.dsLiq, isSol: c.isSol, birdData: c.birdData,
+          });
+          return { ...c, dexHot: dex.dexHot, dsLiq: dex.dsLiq,
+            score: det.score, threat: det.threat, category: det.category,
+            confidence: det.confidence, reasons: det.reasons };
+        }));
+      } catch { /* ignore per-coin errors */ }
+    }
+
+    // Fire Birdeye requests — requires key, rate limited
+    if (!key) return;
+    for (const coin of solTargets) {
+      const addr = CFG.SOL_ADDRS[coin.symbol];
+      try {
+        const bird = await fetchBirdeyeToken(addr, coin.symbol, key);
+        if (!bird) continue;
+        setCoins(prev => prev.map(c => {
+          if (c.symbol !== coin.symbol) return c;
+          // Re-run detection with on-chain data — this is the real Solana score
+          const det = detect({
+            vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
+            supplyPct: c.supplyPct, vol: c.volume, mcap: c.mcap,
+            dexHot: c.dexHot, dsLiq: c.dsLiq, isSol: true, birdData: bird,
+          });
+          return { ...c, birdData: bird,
+            score: det.score, threat: det.threat, category: det.category,
+            confidence: det.confidence, reasons: det.reasons };
+        }));
+      } catch { /* ignore per-coin errors */ }
+    }
+  }, []);  // birdKeyRef is a ref — no dep needed
+
   const triggerScan = useCallback(async () => {
     if (scanning) return;
 
@@ -185,9 +264,16 @@ export default function WhaleRadarApp() {
 
       if (result.data) {
         setApiCallCount(c => c + (result.fromCache ? 0 : 1));
-        processData(result.data);
+        const mapped = processData(result.data);
         setScanBadge(result.fromCache ? 'CACHED' : 'LIVE');
         setLastScanTs(Date.now());
+
+        // ── Persist scan to PostgreSQL (Fix: saveScan was never called) ────
+        // Fire-and-forget — don't block the UI on DB write latency
+        saveScan(mapped).catch(() => { /* offline — ignore */ });
+
+        // ── Enrich with Birdeye + DexScreener (async, updates coins in state)
+        enrichCoins(mapped).catch(() => { /* ignore enrichment errors */ });
       }
     } catch (e: unknown) {
       setScanBadge('ERROR');
@@ -197,7 +283,7 @@ export default function WhaleRadarApp() {
     }
   }, [scanning, apiKey, prevVolumes]);
 
-  const processData = useCallback((data: unknown[]) => {
+  const processData = useCallback((data: unknown[]): CoinData[] => {
     const newVols: Record<string, number> = {};
     const mapped: CoinData[] = (data as Record<string, unknown>[]).map((c, i) => {
       const vol = (c.total_volume as number) || 0;
@@ -213,9 +299,11 @@ export default function WhaleRadarApp() {
       const isSol = isSolToken(sym);
       const birdData = null;
       newVols[(c.id as string)] = vol;
-      const { score, threat, category, confidence, reasons } = calcThreat({
-        vmcap, chg24, volSpike, supplyPct, vol, mcap, dexHot, dsLiq, isSol, birdData,
-      });
+      // detect() from detection.ts is the canonical engine — replaces legacy calcThreat()
+      // It returns the same {score, threat, category, confidence, reasons} plus
+      // manipulation breakdown and boolean signals used by the CEO Signal Engine.
+      const det = detect({ vmcap, chg24: chg24, volSpike, supplyPct, vol, mcap, dexHot, dsLiq, isSol, birdData });
+      const { score, threat, category, confidence, reasons } = det;
       return {
         rank: i + 1, id: c.id as string, symbol: sym, name: c.name as string,
         price: c.current_price as number, change: chg24, volume: vol, mcap, vmcap, volSpike,
@@ -224,6 +312,7 @@ export default function WhaleRadarApp() {
     });
     setPrevVolumes(newVols);
     setCoins(mapped);
+    return mapped; // returned so triggerScan can saveScan + enrichCoins
 
     // Snapshot
     const critCount = mapped.filter(c => c.threat === 'CRITICAL').length;
@@ -236,6 +325,25 @@ export default function WhaleRadarApp() {
       };
       return [snap, ...prev].slice(0, CFG.HISTORY_MAX);
     });
+
+    // ── Record CEO signal outcomes (Fix #3: profit-proof layer) ──────────────
+    // Only tokens with score >= 35 (WATCH+) get recorded. HOLD is skipped.
+    // Server deduplicates via UNIQUE INDEX on (symbol, signal, hour).
+    mapped
+      .filter(c => c.score >= 35)
+      .slice(0, 20) // cap at 20 per scan to limit API writes
+      .forEach(c => {
+        const signal = getCeoSignalLabel(c.score, c.threat, c.category || '', c.vmcap);
+        recordSignalOutcome({
+          symbol: c.symbol,
+          coin_id: c.id,          // CoinGecko id — needed by price filler
+          signal,
+          score: c.score,
+          category: c.category,
+          vmcap: c.vmcap,
+          entry_price: c.price,
+        });
+      });
 
     // Generate alerts for critical/high
     mapped.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
@@ -266,8 +374,25 @@ export default function WhaleRadarApp() {
   }, []);
 
   // ══ WHALE WEBSOCKET ══════════════════════════════════════════════════════
+  // Throttle: 1 DB write per symbol per 30s — avoids flooding on high-volume pairs
+  const whaleEventThrottle = useRef<Map<string, number>>(new Map());
+
   const handleWhaleTrade = useCallback((trade: WhaleTrade) => {
     setWhaleFeed(prev => [trade, ...prev].slice(0, CFG.WFEED_MAX));
+
+    // ── Persist to whale_events (Fix #2: wire dead table) ──────────────────
+    const lastWrite = whaleEventThrottle.current.get(trade.sym) ?? 0;
+    if (Date.now() - lastWrite > 30_000) {
+      whaleEventThrottle.current.set(trade.sym, Date.now());
+      saveWhaleEvent({
+        symbol: trade.sym,
+        side: trade.side,
+        price: trade.price,
+        qty: trade.qty,
+        usdt: trade.usdt,
+        exchange: trade.ex,
+      });
+    }
   }, []);
 
   const handleTrackerPrice = useCallback((sym: string, price: number) => {
@@ -313,6 +438,7 @@ export default function WhaleRadarApp() {
       else if (k === 'p') { e.preventDefault(); setActiveModal('portfolio'); }
       else if (k === 'h') { e.preventDefault(); setActiveModal('history'); }
       else if (k === '?' || k === '/') { e.preventDefault(); setKbdOpen(p => !p); }
+      else if (k === 'e') { e.preventDefault(); setActiveModal('signal-eval'); }
       else if (k === 'escape') { setActiveModal(null); setKbdOpen(false); }
     };
     document.addEventListener('keydown', handler);
@@ -496,6 +622,12 @@ export default function WhaleRadarApp() {
       {activeModal === 'sentiment' && (
         <WRModal title="✦ AI MARKET SENTIMENT" onClose={() => setActiveModal(null)}>
           <SentimentContent coins={coins} aiKey={aiKey} />
+        </WRModal>
+      )}
+
+      {activeModal === 'signal-eval' && (
+        <WRModal title="📈 SIGNAL EVAL — PROFIT PROOF" onClose={() => setActiveModal(null)}>
+          <WRSignalEval />
         </WRModal>
       )}
 

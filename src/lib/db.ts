@@ -272,3 +272,76 @@ export async function loadAlerts(): Promise<AlertItem[]> {
 export async function toggleAlertPin(dbId: number): Promise<void> {
   await api(`/alerts/${dbId}/pin`, { method: 'PATCH' });
 }
+
+// ══ WHALE EVENTS ══════════════════════════════════════════════════════════════
+// Persists live trades from the WebSocket feed.
+// Caller (Index.tsx) throttles to 1 write per symbol per 30s.
+
+export interface WhaleEventPayload {
+  symbol: string;
+  side: string;
+  price: number;
+  qty: number;
+  usdt: number;
+  exchange: string;
+}
+
+export async function saveWhaleEvent(payload: WhaleEventPayload): Promise<void> {
+  // Fire-and-forget — we don't block the trade feed on DB latency
+  api('/whale-events', {
+    method: 'POST',
+    body: JSON.stringify({
+      symbol: payload.symbol,
+      side: payload.side,
+      price: payload.price,
+      qty: payload.qty,
+      usdt: payload.usdt,
+      exchange: payload.exchange,
+    }),
+    _silent: true,
+  }).catch(() => { /* ignore persistence errors silently */ });
+}
+
+// ══ SIGNAL OUTCOMES ═══════════════════════════════════════════════════════════
+// Records CEO Signal Engine fires so we can measure actual profit/loss.
+// The server deduplicates via UNIQUE INDEX on (symbol, signal, hour).
+
+export interface SignalOutcomePayload {
+  symbol: string;
+  coin_id: string | null;
+  signal: string;     // 'AGGRESSIVE LONG' | 'LONG (tight stop)' | 'LONG' | 'WATCH' | 'AVOID / SHORT'
+  score: number;
+  category: string | null;
+  vmcap: number;
+  entry_price: number;
+}
+
+export async function recordSignalOutcome(payload: SignalOutcomePayload): Promise<void> {
+  if (payload.signal === 'HOLD') return; // HOLD is not a signal worth tracking
+  api('/signal-outcomes', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    _silent: true,
+  }).catch(() => { /* ignore persistence errors silently */ });
+}
+
+// ══ SIGNAL EVAL ═══════════════════════════════════════════════════════════════
+
+export interface SignalEvalRow {
+  signal: string;
+  fires: number;
+  with_outcome: number;
+  avg_1h_pct: number | null;
+  avg_4h_pct: number | null;
+  avg_24h_pct: number | null;
+  positive_4h: number;
+  profitable_4h: number;
+  win_rate_4h: number | null;
+  avg_score: number | null;
+  last_fire: string | null;
+}
+
+export async function loadSignalEval(): Promise<SignalEvalRow[]> {
+  const rows = await api<SignalEvalRow[]>('/signal-outcomes/eval');
+  return rows ?? [];
+}

@@ -99,8 +99,9 @@ export function getActiveCooldowns(): Array<{ key: string; source: string; remai
 
 // Well-known API keys
 export const RL_KEYS = {
-  COINGECKO: 'coingecko',
-  CLAUDE: 'claude',
-  BIRDEYE: 'birdeye',
-  BACKEND: 'backend',
+  COINGECKO:   'coingecko',
+  CLAUDE:      'claude',
+  BIRDEYE:     'birdeye',
+  BACKEND:     'backend',
+  DEXSCREENER: 'dexscreener',
 } as const;
