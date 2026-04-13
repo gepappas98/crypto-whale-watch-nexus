@@ -1,0 +1,221 @@
+/* ══ WHALE RADAR — /api/signal-outcomes routes ═════════════════════════════════
+ *  Records CEO Signal Engine fires and fills in 1h/4h/24h price outcomes.
+ *  This is the profit-proof layer: after 2 weeks of data you can run the
+ *  eval query and know if your signals actually have alpha.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+import { Router, Request, Response } from 'express';
+import { query } from '../db';
+
+export const signalOutcomesRouter = Router();
+
+// POST /api/signal-outcomes — record a CEO signal fire
+// Client calls this once per scan per token with score >= 45.
+// The UNIQUE INDEX on (symbol, signal, date_trunc('hour', fired_at))
+// ensures we never double-count the same signal within the same hour.
+signalOutcomesRouter.post('/', async (req: Request, res: Response) => {
+  const { symbol, coin_id, signal, score, category, vmcap, entry_price } =
+    req.body as Record<string, unknown>;
+
+  if (!symbol || !signal || entry_price == null) {
+    return res.status(400).json({ error: 'symbol, signal, entry_price required' });
+  }
+  // Skip HOLD — it's noise, not a signal
+  if (signal === 'HOLD') return res.json({ skipped: true });
+
+  try {
+    await query(
+      `INSERT INTO signal_outcomes
+         (symbol, coin_id, signal, score, category, vmcap, entry_price)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (symbol, signal, date_trunc('hour', fired_at)) DO NOTHING`,
+      [
+        String(symbol).toUpperCase(),
+        coin_id ?? null,
+        signal,
+        score ?? null,
+        category ?? null,
+        vmcap ?? null,
+        entry_price,
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[signal-outcomes POST]', err);
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+// GET /api/signal-outcomes/eval — win-rate table across all signals (last 30d)
+signalOutcomesRouter.get('/eval', async (_req: Request, res: Response) => {
+  try {
+    const rows = await query(
+      `SELECT
+         signal,
+         COUNT(*)                                                    AS fires,
+         COUNT(*) FILTER (WHERE outcome_4h IS NOT NULL)             AS with_outcome,
+         ROUND(AVG(outcome_1h)::NUMERIC, 2)                         AS avg_1h_pct,
+         ROUND(AVG(outcome_4h)::NUMERIC, 2)                         AS avg_4h_pct,
+         ROUND(AVG(outcome_24h)::NUMERIC, 2)                        AS avg_24h_pct,
+         COUNT(*) FILTER (WHERE outcome_4h > 0)                     AS positive_4h,
+         COUNT(*) FILTER (WHERE outcome_4h > 2)                     AS profitable_4h,
+         ROUND(
+           COUNT(*) FILTER (WHERE outcome_4h > 0)::NUMERIC
+           / NULLIF(COUNT(*) FILTER (WHERE outcome_4h IS NOT NULL), 0) * 100, 1
+         )                                                           AS win_rate_4h,
+         ROUND(AVG(score)::NUMERIC, 0)                              AS avg_score,
+         MAX(fired_at)                                              AS last_fire
+       FROM signal_outcomes
+       WHERE fired_at > NOW() - INTERVAL '30 days'
+       GROUP BY signal
+       ORDER BY avg_4h_pct DESC NULLS LAST`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('[signal-outcomes/eval]', err);
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+// GET /api/signal-outcomes/recent — last 100 signal fires with outcomes
+signalOutcomesRouter.get('/recent', async (req: Request, res: Response) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const sig = req.query.signal as string | undefined;
+  try {
+    const rows = sig
+      ? await query(
+          `SELECT * FROM signal_outcomes WHERE signal = $1 ORDER BY fired_at DESC LIMIT $2`,
+          [sig, limit]
+        )
+      : await query(
+          `SELECT * FROM signal_outcomes ORDER BY fired_at DESC LIMIT $1`,
+          [limit]
+        );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+// POST /api/signal-outcomes/fill-prices — trigger price fill-in manually
+// (also called by the background priceFiller on a schedule)
+signalOutcomesRouter.post('/fill-prices', async (_req: Request, res: Response) => {
+  try {
+    const { filled } = await fillOutcomePrices();
+    res.json({ ok: true, filled });
+  } catch (err) {
+    console.error('[signal-outcomes/fill-prices]', err);
+    res.status(500).json({ error: 'Fill failed' });
+  }
+});
+
+// ── Price fill-in logic ───────────────────────────────────────────────────────
+// Exported so server/index.ts can call it on a schedule too.
+
+export interface FillResult { filled: number }
+
+export async function fillOutcomePrices(): Promise<FillResult> {
+  let filled = 0;
+
+  // ── 1h window: fired 1h-25h ago, price_1h still null ──────────────────────
+  const need1h = await query<{
+    id: number; coin_id: string | null; symbol: string; entry_price: string;
+  }>(
+    `SELECT id, coin_id, symbol, entry_price
+     FROM signal_outcomes
+     WHERE price_1h IS NULL
+       AND fired_at < NOW() - INTERVAL '1 hour'
+       AND fired_at > NOW() - INTERVAL '25 hours'
+     LIMIT 30`
+  );
+
+  // ── 4h window ─────────────────────────────────────────────────────────────
+  const need4h = await query<{
+    id: number; coin_id: string | null; symbol: string; entry_price: string;
+  }>(
+    `SELECT id, coin_id, symbol, entry_price
+     FROM signal_outcomes
+     WHERE price_4h IS NULL
+       AND fired_at < NOW() - INTERVAL '4 hours'
+       AND fired_at > NOW() - INTERVAL '49 hours'
+     LIMIT 30`
+  );
+
+  // ── 24h window ────────────────────────────────────────────────────────────
+  const need24h = await query<{
+    id: number; coin_id: string | null; symbol: string; entry_price: string;
+  }>(
+    `SELECT id, coin_id, symbol, entry_price
+     FROM signal_outcomes
+     WHERE price_24h IS NULL
+       AND fired_at < NOW() - INTERVAL '24 hours'
+       AND fired_at > NOW() - INTERVAL '8 days'
+     LIMIT 30`
+  );
+
+  // Collect all unique coin_ids we need to price
+  const allRows = [...need1h, ...need4h, ...need24h];
+  if (!allRows.length) return { filled: 0 };
+
+  const coinIds = [...new Set(
+    allRows
+      .map(r => r.coin_id)
+      .filter((id): id is string => Boolean(id))
+  )];
+
+  if (!coinIds.length) {
+    // No coin_ids recorded — can't fill without them
+    console.warn('[priceFiller] No coin_ids available, skipping fill');
+    return { filled: 0 };
+  }
+
+  // Fetch current prices from CoinGecko free tier (no key needed)
+  let prices: Record<string, { usd: number }> = {};
+  try {
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${coinIds.join(',')}&vs_currencies=usd`;
+    const res = await fetch(url, {
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.ok) {
+      prices = await res.json() as Record<string, { usd: number }>;
+    } else {
+      console.warn('[priceFiller] CoinGecko returned', res.status);
+      return { filled: 0 };
+    }
+  } catch (e) {
+    console.error('[priceFiller] CoinGecko fetch failed:', e);
+    return { filled: 0 };
+  }
+
+  // Apply prices to each bucket
+  async function applyFill(
+    rows: typeof need1h,
+    col: 'price_1h' | 'price_4h' | 'price_24h',
+    outcomeCol: 'outcome_1h' | 'outcome_4h' | 'outcome_24h',
+    filledAtCol: 'filled_1h_at' | 'filled_4h_at' | 'filled_24h_at'
+  ) {
+    for (const row of rows) {
+      if (!row.coin_id) continue;
+      const p = prices[row.coin_id]?.usd;
+      if (!p) continue;
+      const entry = parseFloat(row.entry_price);
+      const pctChange = entry > 0 ? ((p - entry) / entry) * 100 : null;
+      await query(
+        `UPDATE signal_outcomes
+         SET ${col} = $1, ${outcomeCol} = $2, ${filledAtCol} = NOW()
+         WHERE id = $3`,
+        [p, pctChange, row.id]
+      );
+      filled++;
+    }
+  }
+
+  await applyFill(need1h,  'price_1h',  'outcome_1h',  'filled_1h_at');
+  await applyFill(need4h,  'price_4h',  'outcome_4h',  'filled_4h_at');
+  await applyFill(need24h, 'price_24h', 'outcome_24h', 'filled_24h_at');
+
+  if (filled > 0) {
+    console.log(`[priceFiller] Filled ${filled} outcome prices`);
+  }
+  return { filled };
+}

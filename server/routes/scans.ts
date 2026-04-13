@@ -25,7 +25,7 @@ scansRouter.post('/', async (req: Request, res: Response) => {
     // Bulk-insert coins
     const values: unknown[] = [];
     const placeholders = coins.map((c, i) => {
-      const base = i * 13;
+      const base = i * 17; // 17 values pushed per coin — was wrongly 13, causing corrupt $N offsets for i > 0
       values.push(
         session.id, c.symbol, c.name, c.rank,
         c.price, c.change, c.volume, c.mcap,

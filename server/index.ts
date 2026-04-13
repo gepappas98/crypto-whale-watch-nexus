@@ -5,10 +5,12 @@
 import express from 'express';
 import cors from 'cors';
 import { ping } from './db';
-import { scansRouter }     from './routes/scans';
-import { portfolioRouter } from './routes/portfolio';
-import { trackedRouter }   from './routes/tracked';
-import { alertsRouter }    from './routes/alerts';
+import { scansRouter }          from './routes/scans';
+import { portfolioRouter }      from './routes/portfolio';
+import { trackedRouter }        from './routes/tracked';
+import { alertsRouter }         from './routes/alerts';
+import { whaleEventsRouter }    from './routes/whaleEvents';
+import { signalOutcomesRouter, fillOutcomePrices } from './routes/signalOutcomes';
 
 const app = express();
 const PORT = Number(process.env.API_PORT) || 3001;
@@ -23,15 +25,35 @@ app.get('/api/health', async (_req, res) => {
 });
 
 // ── Routes ─────────────────────────────────────────────────────────────────
-app.use('/api/scans',     scansRouter);
-app.use('/api/portfolio', portfolioRouter);
-app.use('/api/tracked',   trackedRouter);
-app.use('/api/alerts',    alertsRouter);
+app.use('/api/scans',            scansRouter);
+app.use('/api/portfolio',        portfolioRouter);
+app.use('/api/tracked',          trackedRouter);
+app.use('/api/alerts',           alertsRouter);
+app.use('/api/whale-events',     whaleEventsRouter);
+app.use('/api/signal-outcomes',  signalOutcomesRouter);
 
 // ── 404 ────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
+// ── Start ──────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`[API] Whale RADAR server listening on :${PORT}`);
   ping().then(ok => console.log(`[DB]  PostgreSQL ${ok ? '✓ connected' : '✗ OFFLINE'}`));
 });
+
+// ── Background price filler ────────────────────────────────────────────────
+// Runs every 30 minutes to fill in 1h/4h/24h outcome prices for recorded signals.
+// This is what turns signal_outcomes from a log into a profit-proof layer.
+const FILL_INTERVAL_MS = 30 * 60 * 1000;
+
+// Initial fill 10s after boot (let DB settle first)
+setTimeout(() => {
+  fillOutcomePrices().catch(e => console.error('[priceFiller] init fill error:', e));
+}, 10_000);
+
+// Recurring fill every 30 minutes
+setInterval(() => {
+  fillOutcomePrices().catch(e => console.error('[priceFiller] scheduled fill error:', e));
+}, FILL_INTERVAL_MS);
+
+console.log(`[priceFiller] Background price filler scheduled every ${FILL_INTERVAL_MS / 60_000}min`);

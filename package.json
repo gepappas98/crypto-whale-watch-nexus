@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "dev:api": "cd server && npm run dev",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:api\"",
-    "db:migrate": "psql $DATABASE_URL -f server/schema.sql"
+    "db:migrate": "psql $DATABASE_URL -f server/schema.sql",
+    "fill-prices": "curl -X POST http://localhost:3001/api/signal-outcomes/fill-prices"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
