@@ -475,6 +475,18 @@ export default function WhaleRadarApp() {
     <div className="min-h-screen flex flex-col">
       {showOnboarding && <WROnboarding onFinish={finishOnboarding} />}
 
+      {/* Degraded mode banner */}
+      {dataSource === 'fallback' && (
+        <div className="bg-wr-red/20 border-b-2 border-wr-red/60 px-4 py-2 text-center text-[10px] text-wr-red tracking-widest">
+          ⚠ RUNNING IN DEGRADED MODE — Showing simulated whale activity. Live data temporarily unavailable.
+        </div>
+      )}
+      {dataSource === 'cached' && scanBadge === 'CACHED' && (
+        <div className="bg-wr-amber/15 border-b border-wr-amber/40 px-4 py-1 text-center text-[8px] text-wr-amber tracking-widest">
+          📦 Serving cached data — API rate limited or slow
+        </div>
+      )}
+
       {/* Reconnecting banner — shown after 2+ failed attempts */}
       {wsReconnects >= 2 && (
         <div className="bg-wr-amber/20 border-b border-wr-amber/40 px-4 py-1.5 text-center text-[10px] text-wr-amber tracking-widest animate-pulse">
