@@ -232,42 +232,70 @@ export default function WhaleRadarApp() {
   const triggerScan = useCallback(async () => {
     if (scanning) return;
 
+    // Check CoinGecko cooldown
+    if (isRateLimited(RL_KEYS.COINGECKO)) {
+      const rem = getCooldownRemaining(RL_KEYS.COINGECKO);
+      setScanBadge(`WAIT ${rem}s`);
+      return;
+    }
+
     setScanning(true);
     setScanBadge('SCANNING');
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (apiKey) headers['x-cg-api-key'] = apiKey;
+      let scanData: unknown[] | null = null;
+      let source: 'live' | 'cached' | 'fallback' = 'live';
 
-      const res = await fetch('/api/scan', { headers, signal: AbortSignal.timeout(15000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const result = await res.json() as {
-        success: boolean;
-        data: Array<Record<string, unknown>>;
-        source: 'live' | 'cached' | 'fallback';
-        error?: string;
-      };
-
-      if (!result.success || !result.data?.length) {
-        throw new Error(result.error || 'Empty response');
+      // Strategy 1: Try backend proxy first (handles rate limits server-side)
+      try {
+        const proxyHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (apiKey) proxyHeaders['x-cg-api-key'] = apiKey;
+        const proxyRes = await fetch('/api/scan', { headers: proxyHeaders, signal: AbortSignal.timeout(5000) });
+        if (proxyRes.ok) {
+          const result = await proxyRes.json();
+          if (result.success && result.data?.length) {
+            scanData = result.data;
+            source = result.source || 'live';
+          }
+        }
+      } catch {
+        // Backend unavailable — fall through to direct fetch
       }
 
-      setDataSource(result.source);
-      setApiCallCount(c => c + (result.source === 'live' ? 1 : 0));
+      // Strategy 2: Direct CoinGecko call (works when no backend)
+      if (!scanData) {
+        const cgUrl = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h';
+        const cgHeaders: Record<string, string> = {};
+        if (apiKey) cgHeaders['x-cg-pro-api-key'] = apiKey;
 
-      // Transform server response into CoinData[]
-      const mapped = processData(result.data);
+        const result = await cachedFetch<unknown[]>(cgUrl, {
+          headers: cgHeaders,
+          signal: AbortSignal.timeout(18000),
+          cacheTtl: 10_000,
+          swrTtl: 30_000,
+          rateLimitKey: RL_KEYS.COINGECKO,
+          rateLimitName: 'CoinGecko',
+        });
 
-      setScanBadge(
-        result.source === 'live' ? 'LIVE' :
-        result.source === 'cached' ? 'CACHED' : 'DEGRADED'
-      );
+        if (result.data?.length) {
+          scanData = result.data;
+          source = result.fromCache ? 'cached' : 'live';
+        } else if (result.error) {
+          throw new Error(result.error);
+        }
+      }
+
+      if (!scanData?.length) {
+        throw new Error('No data from any source');
+      }
+
+      setDataSource(source);
+      setApiCallCount(c => c + (source === 'live' ? 1 : 0));
+      const mapped = processData(scanData);
+      setScanBadge(source === 'live' ? 'LIVE' : source === 'cached' ? 'CACHED' : 'DEGRADED');
       setLastScanTs(Date.now());
 
-      // Persist scan to PostgreSQL (fire-and-forget)
+      // Persist + enrich (fire-and-forget)
       saveScan(mapped).catch(() => {});
-
-      // Enrich with Birdeye + DexScreener (async)
       enrichCoins(mapped).catch(() => {});
     } catch (e: unknown) {
       setScanBadge('ERROR');
