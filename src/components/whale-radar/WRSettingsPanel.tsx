@@ -1,5 +1,8 @@
-/* ══ WHALE RADAR v9 — SETTINGS PANEL ═════════════════════════════════════════ */
+/* ══ WHALE RADAR v9 — SETTINGS PANEL ═════════════════════════════════════════
+ *  v9.1: Added Hyperliquid Scanner settings group.
+ * ═══════════════════════════════════════════════════════════════════════════ */
 import { fmtN } from '@/lib/whaleRadarState';
+import { isHLConfigured } from '@/lib/hyperliquid';
 
 interface WRSettingsPanelProps {
   apiKey: string; onApiKeyChange: (v: string) => void;
@@ -9,6 +12,11 @@ interface WRSettingsPanelProps {
   theme: 'cyber' | 'matrix' | 'dark'; onThemeChange: (v: 'cyber' | 'matrix' | 'dark') => void;
   aggressiveMode: boolean; onAggressiveModeChange: (v: boolean) => void;
   whaleThr: number; onWhaleThrChange: (v: number) => void;
+  // ── Hyperliquid ──
+  hlScannerEnabled: boolean; onHlScannerEnabledChange: (v: boolean) => void;
+  hlMegaTxUsd: number; onHlMegaTxUsdChange: (v: number) => void;
+  supabaseUrl: string; onSupabaseUrlChange: (v: string) => void;
+  supabaseAnonKey: string; onSupabaseAnonKeyChange: (v: string) => void;
 }
 
 export function WRSettingsPanel({
@@ -19,7 +27,13 @@ export function WRSettingsPanel({
   theme, onThemeChange,
   aggressiveMode, onAggressiveModeChange,
   whaleThr, onWhaleThrChange,
+  hlScannerEnabled, onHlScannerEnabledChange,
+  hlMegaTxUsd, onHlMegaTxUsdChange,
+  supabaseUrl, onSupabaseUrlChange,
+  supabaseAnonKey, onSupabaseAnonKeyChange,
 }: WRSettingsPanelProps) {
+  const hlOk = isHLConfigured();
+
   return (
     <div className="flex flex-wrap gap-4 p-4 bg-wr-bg3 border-b-2 border-wr-amber/60 items-start animate-slide-in">
       {/* CoinGecko API */}
@@ -84,6 +98,56 @@ export function WRSettingsPanel({
             </button>
           ))}
         </div>
+      </SettingsGroup>
+
+      {/* ── Hyperliquid Settings ─────────────────────────────────────────────── */}
+      <SettingsGroup label="🔗 HYPERLIQUID SCANNER">
+        <div className="flex gap-1.5 items-center">
+          <button
+            className={`wr-btn ${hlScannerEnabled ? 'active' : ''} cyan text-[8px]`}
+            onClick={() => onHlScannerEnabledChange(!hlScannerEnabled)}
+          >
+            {hlScannerEnabled ? '● ON' : '○ OFF'}
+          </button>
+          <span className={`text-[8px] font-mono ${hlOk ? 'text-wr-cyan' : 'text-wr-amber'}`}>
+            {hlOk ? '✓ Supabase connected' : '⚠ Set Supabase URL below'}
+          </span>
+        </div>
+        <div className="flex gap-2 items-center mt-0.5">
+          <span className="text-[8px] text-wr-muted">Mega TX ≥</span>
+          <input
+            type="range"
+            className="w-16 accent-wr-cyan"
+            min={100000}
+            max={5000000}
+            step={100000}
+            value={hlMegaTxUsd}
+            onChange={e => onHlMegaTxUsdChange(+e.target.value)}
+          />
+          <span className="text-[8px] text-wr-cyan">${fmtN(hlMegaTxUsd)}</span>
+        </div>
+        <Note cls="text-wr-muted">On-chain manipulation detector · 300ms poll</Note>
+      </SettingsGroup>
+
+      <SettingsGroup label="🗄 SUPABASE (HL CACHE)">
+        <input
+          className="wr-input text-[8px]"
+          type="text"
+          placeholder="https://xxxx.supabase.co"
+          value={supabaseUrl}
+          onChange={e => onSupabaseUrlChange(e.target.value)}
+        />
+        <input
+          className="wr-input text-[8px] mt-1"
+          type="password"
+          placeholder="Supabase anon key (eyJ…)"
+          value={supabaseAnonKey}
+          onChange={e => onSupabaseAnonKeyChange(e.target.value)}
+        />
+        <Note cls={hlOk ? 'text-wr-cyan' : 'text-wr-muted'}>
+          {hlOk ? '✓ HL cache active — 200 req/min server-side' : 'Required for Hyperliquid Explorer & Scanner'}
+        </Note>
+        <Note cls="text-wr-amber">Stored locally · Run: supabase functions deploy hyperliquid-cache</Note>
       </SettingsGroup>
     </div>
   );

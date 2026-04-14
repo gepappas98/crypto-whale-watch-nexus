@@ -29,6 +29,7 @@ import { fetchDexData } from '@/lib/dexscreener';
 import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
 import { startPerfMonitoring } from '@/lib/perfBudget';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
+import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
 
 // ── CEO Signal label (mirrors WRScanner getCeoSignal) ─────────────────────────
 // Kept here so processData can record signal outcomes without importing WRScanner.
@@ -82,6 +83,11 @@ export default function WhaleRadarApp() {
   // WebSocket config
   const [bybitEnabled, setBybitEnabled] = useState(false);
   const [whaleFeedEx, setWhaleFeedEx] = useState('all');
+  // ── Hyperliquid settings ─────────────────────────────────────────────────
+  const [hlScannerEnabled, setHlScannerEnabled] = useState(true);
+  const [hlMegaTxUsd, setHlMegaTxUsd] = useState(500_000);
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState('');
   const [subscribedPairs] = useState(() => new Set<string>());
   const [advancedFilters, setAdvancedFilters] = useState<WhaleFilters>(DEFAULT_FILTERS);
   const [scanPage, setScanPage] = useState(1);
@@ -117,6 +123,14 @@ export default function WhaleRadarApp() {
     if (saved.prevVolumes) setPrevVolumes(saved.prevVolumes as Record<string, number>);
     if (saved.bybitEnabled) setBybitEnabled(saved.bybitEnabled as boolean);
     if (saved.whaleFeedEx) setWhaleFeedEx(saved.whaleFeedEx as string);
+    // ── HL settings ──
+    if (saved.hlScannerEnabled !== undefined) setHlScannerEnabled(saved.hlScannerEnabled as boolean);
+    if (saved.hlMegaTxUsd) setHlMegaTxUsd(saved.hlMegaTxUsd as number);
+    // Supabase URL/key stored in separate localStorage keys (mirrors hlFetch)
+    const sbUrl = localStorage.getItem('wr_supabase_url') ?? '';
+    const sbKey = localStorage.getItem('wr_supabase_anon_key') ?? '';
+    if (sbUrl) setSupabaseUrl(sbUrl);
+    if (sbKey) setSupabaseAnonKey(sbKey);
 
     // Issue #6: Restore autoScan but preserve paused state — don't auto-resume
     if (saved.autoScan) {
@@ -159,12 +173,14 @@ export default function WhaleRadarApp() {
         vmcapThr, pchgThr, whaleThr, soundOn, scanHistory: scanHistory.slice(-CFG.HISTORY_MAX),
         prevVolumes, aggressiveMode, watchlistOnly, bybitEnabled, whaleFeedEx,
         autoScan, autoPaused, // Issue #6: persist auto scan + paused state
+        hlScannerEnabled, hlMegaTxUsd,
       });
     }, 500);
     return () => clearTimeout(timer);
   }, [theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
     vmcapThr, pchgThr, whaleThr, soundOn, scanHistory, prevVolumes, aggressiveMode,
-    watchlistOnly, bybitEnabled, whaleFeedEx, autoScan, autoPaused]);
+    watchlistOnly, bybitEnabled, whaleFeedEx, autoScan, autoPaused,
+    hlScannerEnabled, hlMegaTxUsd]);
 
   // ══ THEME ═════════════════════════════════════════════════════════════════
   useEffect(() => {
@@ -245,7 +261,7 @@ export default function WhaleRadarApp() {
   }, []);  // birdKeyRef is a ref — no dep needed
 
   // ── Data source status ──────────────────────────────────────────────────────
-  const [dataSource, setDataSource] = useState<'live' | 'cached'>('live');
+  const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
 
   const triggerScan = useCallback(async () => {
     if (scanning) return;
@@ -259,7 +275,7 @@ export default function WhaleRadarApp() {
 
     try {
       let scanData: unknown[] | null = null;
-      let source: 'live' | 'cached' = 'live';
+      let source: 'live' | 'cached' | 'fallback' = 'live';
 
       // Strategy 1: Try backend proxy first (handles rate limits server-side).
       // NOTE: do NOT gate this on isRateLimited() — the proxy has its own
@@ -323,7 +339,7 @@ export default function WhaleRadarApp() {
       setDataSource(source);
       setApiCallCount(c => c + (source === 'live' ? 1 : 0));
       const mapped = processData(scanData);
-      setScanBadge(source === 'live' ? 'LIVE' : 'CACHED');
+      setScanBadge(source === 'live' ? 'LIVE' : source === 'cached' ? 'CACHED' : 'DEGRADED');
       setLastScanTs(Date.now());
 
       // Persist + enrich (fire-and-forget)
@@ -331,6 +347,7 @@ export default function WhaleRadarApp() {
       enrichCoins(mapped).catch(() => {});
     } catch (e: unknown) {
       setScanBadge('ERROR');
+      setDataSource('fallback');
       addAlert('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
     } finally {
       setScanning(false);
@@ -544,7 +561,15 @@ export default function WhaleRadarApp() {
     <div className="min-h-screen flex flex-col">
       {showOnboarding && <WROnboarding onFinish={finishOnboarding} />}
 
+      {/* HL setup banner — shown only when Supabase is not configured */}
+      <HLConfigBanner onOpenSettings={() => setSettingsOpen(true)} />
+
       {/* Degraded mode banner */}
+      {dataSource === 'fallback' && (
+        <div className="bg-wr-red/20 border-b-2 border-wr-red/60 px-4 py-2 text-center text-[10px] text-wr-red tracking-widest">
+          ⚠ RUNNING IN DEGRADED MODE — Showing simulated whale activity. Live data temporarily unavailable.
+        </div>
+      )}
       {dataSource === 'cached' && scanBadge === 'CACHED' && (
         <div className="bg-wr-amber/15 border-b border-wr-amber/40 px-4 py-1 text-center text-[8px] text-wr-amber tracking-widest">
           📦 Serving cached data — API rate limited or slow
@@ -599,6 +624,22 @@ export default function WhaleRadarApp() {
           theme={theme} onThemeChange={setTheme}
           aggressiveMode={aggressiveMode} onAggressiveModeChange={setAggressiveMode}
           whaleThr={whaleThr} onWhaleThrChange={setWhaleThr}
+          hlScannerEnabled={hlScannerEnabled}
+          onHlScannerEnabledChange={setHlScannerEnabled}
+          hlMegaTxUsd={hlMegaTxUsd}
+          onHlMegaTxUsdChange={setHlMegaTxUsd}
+          supabaseUrl={supabaseUrl}
+          onSupabaseUrlChange={(v) => {
+            setSupabaseUrl(v);
+            if (v.startsWith('https://')) localStorage.setItem('wr_supabase_url', v);
+            else localStorage.removeItem('wr_supabase_url');
+          }}
+          supabaseAnonKey={supabaseAnonKey}
+          onSupabaseAnonKeyChange={(v) => {
+            setSupabaseAnonKey(v);
+            if (v.length > 20) localStorage.setItem('wr_supabase_anon_key', v);
+            else localStorage.removeItem('wr_supabase_anon_key');
+          }}
         />
       )}
 
@@ -631,6 +672,8 @@ export default function WhaleRadarApp() {
           onAdvancedFiltersChange={setAdvancedFilters}
           page={scanPage}
           onPageChange={setScanPage}
+          hlScannerEnabled={hlScannerEnabled}
+          hlMegaTxUsd={hlMegaTxUsd}
         />
 
         <WRRightPanel

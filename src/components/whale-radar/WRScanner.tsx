@@ -4,6 +4,7 @@ import { CoinData, TrackedToken, PortfolioEntry, fmtN, fmtP, calcSizing } from '
 import { analyzeToken } from '@/lib/analyzeToken';
 import type { AlertItem } from '@/lib/whaleRadarState';
 import { WRAdvancedFilters, type WhaleFilters } from './WRAdvancedFilters';
+import { HLManipulationScanner } from '@/components/hyperliquid/HLManipulationScanner';
 
 // ══ CEO SIGNAL ENGINE v1.0 ════════════════════════════════════════════════
 function getCeoSignal(score: number, threat: string, category: string, vmcap: number) {
@@ -53,6 +54,9 @@ interface WRScannerProps {
   onAdvancedFiltersChange: (f: WhaleFilters) => void;
   page: number;
   onPageChange: (p: number) => void;
+  // ── Hyperliquid ──
+  hlScannerEnabled?: boolean;
+  hlMegaTxUsd?: number;
 }
 
 interface AiRowData {
@@ -67,6 +71,7 @@ export function WRScanner({
   onScan, onToggleAuto, onTogglePause, onToggleWatchlist, onTrack, onUntrack,
   onVmcapChange, onPchgChange, onOpenModal, onAddAlert,
   advancedFilters, onAdvancedFiltersChange, page, onPageChange,
+  hlScannerEnabled = true, hlMegaTxUsd,
 }: WRScannerProps) {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<string>('score');
@@ -391,6 +396,16 @@ export function WRScanner({
           </div>
         </div>
       )}
+
+      {/* ── Hyperliquid On-Chain Scanner ───────────────────────────────── */}
+      <HLManipulationScanner
+        collapsed
+        enabled={hlScannerEnabled}
+        megaTxUsd={hlMegaTxUsd}
+        onGlobalAlert={(alert) =>
+          onAddAlert(alert.level, alert.tag, alert.text)
+        }
+      />
     </div>
   );
 }

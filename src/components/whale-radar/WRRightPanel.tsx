@@ -1,8 +1,10 @@
 /* ══ WHALE RADAR v9 — RIGHT PANEL ════════════════════════════════════════════
  *  Virtual-scrolled whale feed (max 50 DOM nodes) + alerts panel.
+ *  v9.1: Added Hyperliquid Explorer sub-tab (server-cached, 300ms poll).
  * ═══════════════════════════════════════════════════════════════════════════ */
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { AlertItem, WhaleTrade, WalletEntry, fmtN } from '@/lib/whaleRadarState';
+import { HLExplorer } from '@/components/hyperliquid/HLExplorer';
 
 const VROW_H = 28;       // virtual row height in px
 const MAX_DOM_ROWS = 50;  // cap rendered DOM nodes
@@ -30,7 +32,7 @@ export function WRRightPanel({
 }: WRRightPanelProps) {
   const [walletInput, setWalletInput] = useState('');
   const [walletLabel, setWalletLabel] = useState('');
-  const [activeTab, setActiveTab] = useState<'whales' | 'wallets'>('whales');
+  const [activeTab, setActiveTab] = useState<'whales' | 'wallets' | 'hl'>('whales');
 
   const handleAddWallet = () => {
     const addr = walletInput.trim();
@@ -77,7 +79,7 @@ export function WRRightPanel({
 
   return (
     <div className="flex flex-col border-l border-wr-border bg-wr-bg2 wr-right-panel min-h-0">
-      {/* Whale Trades / Wallet Tracker tabs */}
+      {/* Whale Trades / Wallet Tracker / Hyperliquid tabs */}
       <div className="flex border-b border-wr-border bg-wr-bg">
         <button
           className={`flex-1 py-1.5 text-[8px] tracking-[2px] text-center cursor-pointer border-b-2 transition-all font-mono
@@ -91,10 +93,26 @@ export function WRRightPanel({
             ${activeTab === 'wallets' ? 'text-wr-sol border-wr-sol' : 'text-wr-muted border-transparent'}`}
           onClick={() => setActiveTab('wallets')}
         >
-          🐳 WALLET TRACKER <span className="pro-badge">PRO</span>
+          🐳 WALLETS <span className="pro-badge">PRO</span>
+        </button>
+        <button
+          className={`flex-1 py-1.5 text-[8px] tracking-[2px] text-center cursor-pointer border-b-2 transition-all font-mono
+            ${activeTab === 'hl' ? 'text-wr-cyan border-wr-cyan' : 'text-wr-muted border-transparent'}`}
+          onClick={() => setActiveTab('hl')}
+        >
+          🔗 HL
         </button>
       </div>
 
+      {/* ── Hyperliquid Explorer (full panel, no alerts below) ── */}
+      {activeTab === 'hl' && (
+        <div className="flex-1 overflow-hidden flex flex-col">
+          <HLExplorer isActive />
+        </div>
+      )}
+
+      {activeTab !== 'hl' && (
+        <>
       {activeTab === 'whales' ? (
         <div className="border-b border-wr-border">
           <div className="wr-panel-header">
@@ -274,6 +292,8 @@ export function WRRightPanel({
           )}
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }
