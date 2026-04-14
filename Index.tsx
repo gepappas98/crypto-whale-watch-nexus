@@ -30,6 +30,12 @@ import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
 import { startPerfMonitoring } from '@/lib/perfBudget';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
+import { WRInsiderRiskScanner } from '@/components/whale-radar/WRInsiderRiskScanner';
+import { WRInsiderRiskSettings } from '@/components/whale-radar/WRInsiderRiskSettings';
+import type { InsiderRiskSettings } from '@/types/insiderRisk';
+import { DEFAULT_CEX_ADDRESSES } from '@/types/insiderRisk';
+import { calculateRiskScore, fetchEtherscanTokenHolders, fetchEtherscanTransfers } from '@/lib/insiderRiskUtils';
+import type { InsiderRiskData } from '@/types/insiderRisk';
 
 // ── CEO Signal label (mirrors WRScanner getCeoSignal) ─────────────────────────
 // Kept here so processData can record signal outcomes without importing WRScanner.
@@ -97,6 +103,20 @@ export default function WhaleRadarApp() {
   const [aiCallCount, setAiCallCount] = useState(0);
   const [nextScan, setNextScan] = useState('—');
   const [lastScanTs, setLastScanTs] = useState(0);
+
+  // Tabs
+  const [activeTab, setActiveTab] = useState<'scanner' | 'insider'>('scanner');
+
+  // Insider Risk Scanner
+  const [insiderSettings, setInsiderSettings] = useState<InsiderRiskSettings>({
+    etherscanApiKey: localStorage.getItem('wr_etherscan_key') || '',
+    birdeyeApiKey: localStorage.getItem('wr_birdeye_key') || '',
+    enableAutoScan: localStorage.getItem('wr_insider_auto') !== 'false',
+    scanInterval: 300000,
+    cexAddresses: DEFAULT_CEX_ADDRESSES,
+  });
+  const [insiderData, setInsiderData] = useState<InsiderRiskData[]>([]);
+  const [isInsiderScanning, setIsInsiderScanning] = useState(false);
 
   // Modals
   const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -262,6 +282,67 @@ export default function WhaleRadarApp() {
 
   // ── Data source status ──────────────────────────────────────────────────────
   const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
+
+  // ── Insider Risk Scan ────────────────────────────────────────────────────────
+  const runInsiderRiskScan = async () => {
+    if (isInsiderScanning) return;
+    setIsInsiderScanning(true);
+    try {
+      const analyzed: InsiderRiskData[] = [];
+      for (const coin of coins) {
+        const isSol = coin.isSol;
+        let riskData: Partial<InsiderRiskData> = {
+          id: coin.symbol,
+          symbol: coin.symbol,
+          name: coin.name,
+          chain: isSol ? 'solana' : 'ethereum',
+          address: '',
+          totalSupply: 0,
+          circulatingSupply: 0,
+          circulatingPercentage: 0,
+        };
+        if (!isSol && insiderSettings.etherscanApiKey && riskData.address) {
+          try {
+            const holders = await fetchEtherscanTokenHolders(riskData.address, insiderSettings.etherscanApiKey);
+            riskData.holders = holders;
+            riskData.top10Concentration = holders.reduce((sum: number, h: { percentage: number }) => sum + h.percentage, 0);
+            if (holders[0]?.address) {
+              riskData.deployerAddress = holders[0].address;
+              const transfers = await fetchEtherscanTransfers(riskData.address, riskData.deployerAddress, insiderSettings.etherscanApiKey);
+              riskData.largeTransfers = transfers.filter((t: { value: number }) => t.value > 500000);
+              riskData.cexTransfers24h = transfers.filter((t: { value: number; timestamp: number }) => {
+                const hoursAgo = (Date.now() / 1000 - t.timestamp) / 3600;
+                return hoursAgo < 24 && t.value > 500000;
+              }).length;
+            }
+          } catch (err) {
+            console.error('Etherscan fetch error:', err);
+          }
+        }
+        const { score, level, flags } = calculateRiskScore(riskData);
+        analyzed.push({
+          ...riskData as InsiderRiskData,
+          riskScore: score,
+          riskLevel: level,
+          flags,
+          lastUpdated: Date.now(),
+          scanStatus: 'completed',
+        });
+      }
+      setInsiderData(analyzed);
+    } catch (err) {
+      console.error('Insider scan error:', err);
+    } finally {
+      setIsInsiderScanning(false);
+    }
+  };
+
+  const handleInsiderSettingsSave = (s: InsiderRiskSettings) => {
+    setInsiderSettings(s);
+    localStorage.setItem('wr_etherscan_key', s.etherscanApiKey);
+    localStorage.setItem('wr_birdeye_key', s.birdeyeApiKey);
+    localStorage.setItem('wr_insider_auto', s.enableAutoScan.toString());
+  };
 
   const triggerScan = useCallback(async () => {
     if (scanning) return;
@@ -683,54 +764,113 @@ export default function WhaleRadarApp() {
         />
       )}
 
+      {settingsOpen && (
+        <WRInsiderRiskSettings
+          settings={insiderSettings}
+          onSave={handleInsiderSettingsSave}
+        />
+      )}
+
       <WRTicker coins={coins.slice(0, 30)} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] flex-1 min-h-0">
-        <WRScanner
-          coins={filteredCoins}
-          scanBadge={scanBadge}
-          scanning={scanning}
-          autoScan={autoScan}
-          autoPaused={autoPaused}
-          watchlistOnly={watchlistOnly}
-          tracked={tracked}
-          portfolio={portfolio}
-          aiKey={aiKey}
-          vmcapThr={vmcapThr}
-          pchgThr={pchgThr}
-          onScan={triggerScan}
-          onToggleAuto={handleToggleAuto}
-          onTogglePause={handleTogglePause}
-          onToggleWatchlist={() => setWatchlistOnly(p => !p)}
-          onTrack={trackToken}
-          onUntrack={untrackToken}
-          onVmcapChange={setVmcapThr}
-          onPchgChange={setPchgThr}
-          onOpenModal={setActiveModal}
-          onAddAlert={addAlert}
-          advancedFilters={advancedFilters}
-          onAdvancedFiltersChange={setAdvancedFilters}
-          page={scanPage}
-          onPageChange={setScanPage}
-          hlScannerEnabled={hlScannerEnabled}
-          hlMegaTxUsd={hlMegaTxUsd}
-        />
+      {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-1 border-b border-wr-border px-4 bg-wr-bg2 shrink-0">
+        <button
+          onClick={() => setActiveTab('scanner')}
+          className={`px-4 py-2 text-[11px] font-medium tracking-wider transition-colors relative ${
+            activeTab === 'scanner'
+              ? 'text-wr-green'
+              : 'text-wr-muted hover:text-white'
+          }`}
+        >
+          WHALE RADAR
+          {activeTab === 'scanner' && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-wr-green" />
+          )}
+        </button>
 
-        <WRRightPanel
-          whaleFeed={whaleFeed}
-          alerts={filteredAlerts}
-          alertFilter={alertFilter}
-          onAlertFilterChange={setAlertFilter}
-          wallets={wallets}
-          onAddWallet={(w) => setWallets(prev => [...prev, w])}
-          onRemoveWallet={(addr) => setWallets(prev => prev.filter(w => w.address !== addr))}
-          onTogglePin={(idx) => setAlerts(prev => prev.map((a, i) => i === idx ? { ...a, pinned: !a.pinned } : a))}
-          onClearAlerts={() => setAlerts([])}
-          bybitEnabled={bybitEnabled}
-          onToggleBybit={handleToggleBybit}
-          whaleFeedEx={whaleFeedEx}
-          onWhaleFeedExChange={setWhaleFeedEx}
-        />
+        <button
+          onClick={() => setActiveTab('insider')}
+          className={`px-4 py-2 text-[11px] font-medium tracking-wider transition-colors relative ${
+            activeTab === 'insider'
+              ? 'text-[hsl(var(--wr-pink,330_100%_71%))]'
+              : 'text-wr-muted hover:text-white'
+          }`}
+        >
+          <span className="flex items-center gap-1.5">
+            INSIDER RISK SCANNER
+            {insiderData.some(d => d.riskLevel === 'CRITICAL') && (
+              <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--wr-pink,330_100%_71%))] animate-pulse" />
+            )}
+          </span>
+          {activeTab === 'insider' && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[hsl(var(--wr-pink,330_100%_71%))]" />
+          )}
+        </button>
+      </div>
+
+      {/* ── Tab content ──────────────────────────────────────────────────────── */}
+      <div className="flex-1 min-h-0">
+        {activeTab === 'scanner' && (
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] h-full min-h-0">
+            <WRScanner
+              coins={filteredCoins}
+              scanBadge={scanBadge}
+              scanning={scanning}
+              autoScan={autoScan}
+              autoPaused={autoPaused}
+              watchlistOnly={watchlistOnly}
+              tracked={tracked}
+              portfolio={portfolio}
+              aiKey={aiKey}
+              vmcapThr={vmcapThr}
+              pchgThr={pchgThr}
+              onScan={triggerScan}
+              onToggleAuto={handleToggleAuto}
+              onTogglePause={handleTogglePause}
+              onToggleWatchlist={() => setWatchlistOnly(p => !p)}
+              onTrack={trackToken}
+              onUntrack={untrackToken}
+              onVmcapChange={setVmcapThr}
+              onPchgChange={setPchgThr}
+              onOpenModal={setActiveModal}
+              onAddAlert={addAlert}
+              advancedFilters={advancedFilters}
+              onAdvancedFiltersChange={setAdvancedFilters}
+              page={scanPage}
+              onPageChange={setScanPage}
+              hlScannerEnabled={hlScannerEnabled}
+              hlMegaTxUsd={hlMegaTxUsd}
+            />
+
+            <WRRightPanel
+              whaleFeed={whaleFeed}
+              alerts={filteredAlerts}
+              alertFilter={alertFilter}
+              onAlertFilterChange={setAlertFilter}
+              wallets={wallets}
+              onAddWallet={(w) => setWallets(prev => [...prev, w])}
+              onRemoveWallet={(addr) => setWallets(prev => prev.filter(w => w.address !== addr))}
+              onTogglePin={(idx) => setAlerts(prev => prev.map((a, i) => i === idx ? { ...a, pinned: !a.pinned } : a))}
+              onClearAlerts={() => setAlerts([])}
+              bybitEnabled={bybitEnabled}
+              onToggleBybit={handleToggleBybit}
+              whaleFeedEx={whaleFeedEx}
+              onWhaleFeedExChange={setWhaleFeedEx}
+            />
+          </div>
+        )}
+
+        {activeTab === 'insider' && (
+          <WRInsiderRiskScanner
+            coins={coins}
+            isScanning={isInsiderScanning}
+            etherscanKey={insiderSettings.etherscanApiKey}
+            birdeyeKey={insiderSettings.birdeyeApiKey}
+            onRefresh={runInsiderRiskScan}
+            lastScanTime={Date.now()}
+          />
+        )}
       </div>
 
       <WRStatsBar
