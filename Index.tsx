@@ -703,6 +703,39 @@ export default function WhaleRadarApp() {
           ⚠ RECONNECTING… (attempt {wsReconnects}) — Data may be delayed
         </div>
       )}
+      {/* Tab bar */}
+<div className="flex items-center gap-1 border-b border-wr-border px-4 bg-wr-bg2">
+  <button onClick={() => setActiveTab('scanner')} className={`px-4 py-2 text-[11px] font-medium tracking-wider transition-colors relative ${activeTab === 'scanner' ? 'text-wr-green' : 'text-wr-muted hover:text-white'}`}>
+    WHALE RADAR
+    {activeTab === 'scanner' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-wr-green" />}
+  </button>
+  <button onClick={() => setActiveTab('insider')} className={`px-4 py-2 text-[11px] font-medium tracking-wider transition-colors relative ${activeTab === 'insider' ? 'text-[hsl(var(--wr-pink))]' : 'text-wr-muted hover:text-white'}`}>
+    <span className="flex items-center gap-1.5">
+      INSIDER RISK SCANNER
+      {insiderData.some(d => d.riskLevel === 'CRITICAL') && <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--wr-pink))] animate-pulse" />}
+    </span>
+    {activeTab === 'insider' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[hsl(var(--wr-pink))]" />}
+  </button>
+</div>
+
+<div className="flex-1 min-h-0">
+  {activeTab === 'scanner' && (
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] h-full">
+      <WRScanner ... /> {/* keep existing WRScanner block */}
+      <WRRightPanel ... /> {/* keep existing WRRightPanel block */}
+    </div>
+  )}
+  {activeTab === 'insider' && (
+    <WRInsiderRiskScanner
+      coins={coins}
+      isScanning={isInsiderScanning}
+      etherscanKey={insiderSettings.etherscanApiKey}
+      birdeyeKey={insiderSettings.birdeyeApiKey}
+      onRefresh={runInsiderRiskScan}
+      lastScanTime={Date.now()}
+    />
+  )}
+</div>
 
       {/* WS Status indicator */}
       <div className="flex items-center gap-2 px-4 py-0.5 bg-wr-bg3 border-b border-wr-border/50 text-[8px] tracking-widest">
