@@ -102,8 +102,7 @@ function purgeStaleRows(): void {
     .from('hyperliquid_cache')
     .delete()
     .lt('fetched_at', cutoff)
-    .then(() => {})
-    .catch(() => {});
+    .then(() => {}, () => {});
 }
 
 // ── Hypurrscan fetchers ───────────────────────────────────────────────────────
@@ -230,18 +229,16 @@ serve(async (req: Request) => {
   const staleWindow = ttl * 3;
   if (cached && cached.age_ms < staleWindow) {
     // Return stale immediately, revalidate in the background
-    EdgeRuntime.waitUntil(
-      (async () => {
-        try {
-          const rl = await checkRateLimit();
-          if (!rl.allowed) return;
-          const fresh = await fetchFresh(type, addr);
-          await writeCache(key, fresh, ttl);
-        } catch (e) {
-          console.error('[HLCache] Background revalidation failed:', e);
-        }
-      })(),
-    );
+    (async () => {
+      try {
+        const rl = await checkRateLimit();
+        if (!rl.allowed) return;
+        const fresh = await fetchFresh(type, addr);
+        await writeCache(key, fresh, ttl);
+      } catch (e) {
+        console.error('[HLCache] Background revalidation failed:', e);
+      }
+    })();
 
     return jsonResponse(
       { data: cached.payload, cached: true, stale: true, age_ms: cached.age_ms, ts: now },
@@ -271,7 +268,7 @@ serve(async (req: Request) => {
     const fetchMs = Date.now() - fetchStart;
 
     // Write to cache (non-blocking path: fire and continue)
-    EdgeRuntime.waitUntil(writeCache(key, freshData, ttl));
+    writeCache(key, freshData, ttl).catch((e) => console.error('[HLCache] writeCache failed:', e));
     purgeStaleRows();
 
     return jsonResponse(

@@ -151,7 +151,7 @@ export function HLBlockTable({ onBlockClick }: HLBlockTableProps) {
 // ── Tx Table ──────────────────────────────────────────────────────────────────
 
 export function HLTxTable() {
-  const { txs, age_ms: _age, cached, stale, isFirstLoad, error } = useHLTxs();
+  const { txs, age_ms: _age, cached, isFirstLoad, error } = useHLTxs();
   const serverTs = txs.length > 0 ? Date.now() - (_age ?? 0) : undefined;
 
   const statusColor = (s: HLTx['status']) =>
