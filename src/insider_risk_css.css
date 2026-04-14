@@ -1,0 +1,236 @@
+
+/* ── Insider Risk Scanner v10 Styles ───────────────────────── */
+
+/* Risk Score Animations */
+@keyframes risk-pulse {
+  0%, 100% { 
+    box-shadow: 0 0 0 0 hsl(var(--wr-pink) / 0.4);
+  }
+  50% { 
+    box-shadow: 0 0 0 8px hsl(var(--wr-pink) / 0);
+  }
+}
+
+@keyframes glow-red {
+  0%, 100% { 
+    border-color: hsl(var(--wr-pink) / 0.4);
+    box-shadow: 0 0 8px hsl(var(--wr-pink) / 0.2);
+  }
+  50% { 
+    border-color: hsl(var(--wr-pink) / 0.8);
+    box-shadow: 0 0 16px hsl(var(--wr-pink) / 0.4);
+  }
+}
+
+@keyframes slide-in-expand {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-risk-pulse {
+  animation: risk-pulse 2s ease-out infinite;
+}
+
+.animate-glow-red {
+  animation: glow-red 2s ease-in-out infinite;
+}
+
+.animate-slide-in-expand {
+  animation: slide-in-expand 0.2s ease-out forwards;
+}
+
+/* Risk Level Badges */
+.risk-badge-critical {
+  @apply bg-[hsl(var(--wr-pink))]/20 border-[hsl(var(--wr-pink))] text-[hsl(var(--wr-pink))];
+  box-shadow: 0 0 12px hsl(var(--wr-pink) / 0.3);
+}
+
+.risk-badge-high {
+  @apply bg-[hsl(var(--wr-amber))]/20 border-[hsl(var(--wr-amber))] text-[hsl(var(--wr-amber))];
+}
+
+.risk-badge-medium {
+  @apply bg-[hsl(var(--wr-cyan))]/15 border-[hsl(var(--wr-cyan))]/60 text-[hsl(var(--wr-cyan))];
+}
+
+.risk-badge-low {
+  @apply bg-[hsl(var(--wr-green))]/10 border-[hsl(var(--wr-green))]/40 text-[hsl(var(--wr-green))];
+}
+
+/* Flag Badges */
+.flag-low-circulating {
+  @apply bg-[hsl(var(--wr-red))]/10 border-[hsl(var(--wr-red))]/40 text-[hsl(var(--wr-red))];
+}
+
+.flag-extreme-control {
+  @apply bg-[hsl(var(--wr-pink))]/20 border-[hsl(var(--wr-pink))]/60 text-[hsl(var(--wr-pink))];
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.flag-pre-pump {
+  @apply bg-[hsl(var(--wr-pink))]/30 border-[hsl(var(--wr-pink))] text-[hsl(var(--wr-pink))];
+  animation: risk-pulse 1.5s ease-out infinite;
+}
+
+/* Wallet Type Indicators */
+.wallet-gnosis {
+  @apply text-[hsl(var(--wr-purple))];
+}
+
+.wallet-multisig {
+  @apply text-[hsl(var(--wr-purple))]/80;
+}
+
+.wallet-eoa {
+  @apply text-[hsl(var(--wr-muted))];
+}
+
+/* Progress Bar Overrides for Risk */
+.risk-progress-critical::-webkit-progress-value {
+  background: hsl(var(--wr-pink));
+  box-shadow: 0 0 8px hsl(var(--wr-pink));
+}
+
+.risk-progress-high::-webkit-progress-value {
+  background: hsl(var(--wr-amber));
+}
+
+.risk-progress-medium::-webkit-progress-value {
+  background: hsl(var(--wr-cyan));
+}
+
+.risk-progress-low::-webkit-progress-value {
+  background: hsl(var(--wr-green));
+}
+
+/* Chain Indicators */
+.chain-ethereum {
+  @apply bg-[hsl(var(--wr-cyan))]/20 text-[hsl(var(--wr-cyan))] border-[hsl(var(--wr-cyan))]/40;
+}
+
+.chain-solana {
+  @apply bg-[hsl(var(--wr-purple))]/20 text-[hsl(var(--wr-purple))] border-[hsl(var(--wr-purple))]/40;
+}
+
+/* Table Row Hover Effects */
+.insider-row-critical:hover {
+  background: linear-gradient(90deg, hsl(var(--wr-pink) / 0.1) 0%, transparent 100%);
+}
+
+.insider-row-high:hover {
+  background: linear-gradient(90deg, hsl(var(--wr-amber) / 0.1) 0%, transparent 100%);
+}
+
+/* Expandable Row Animation */
+.insider-details-enter {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: all 0.3s ease-out;
+}
+
+.insider-details-enter-active {
+  max-height: 500px;
+  opacity: 1;
+}
+
+/* Scanner Status Indicators */
+.scan-status-pulse {
+  @apply relative;
+}
+
+.scan-status-pulse::before {
+  content: '';
+  @apply absolute inset-0 rounded-full bg-[hsl(var(--wr-green))];
+  animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+  opacity: 0.4;
+}
+
+/* API Status Badges */
+.api-status-online {
+  @apply bg-[hsl(var(--wr-green))]/20 text-[hsl(var(--wr-green))] border-[hsl(var(--wr-green))]/40;
+}
+
+.api-status-offline {
+  @apply bg-[hsl(var(--wr-red))]/20 text-[hsl(var(--wr-red))] border-[hsl(var(--wr-red))]/40;
+}
+
+.api-status-limited {
+  @apply bg-[hsl(var(--wr-amber))]/20 text-[hsl(var(--wr-amber))] border-[hsl(var(--wr-amber))]/40;
+}
+
+/* Export Button Glow */
+.export-btn-glow {
+  @apply relative overflow-hidden;
+}
+
+.export-btn-glow::before {
+  content: '';
+  @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent;
+  transform: translateX(-100%);
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Pre-pump Alert Animation */
+.pre-pump-alert {
+  @apply relative;
+}
+
+.pre-pump-alert::after {
+  content: '🔥';
+  @apply absolute -top-1 -right-1 text-xs animate-bounce;
+}
+
+/* Tab Badge Pulse */
+.tab-badge-pulse {
+  @apply relative;
+}
+
+.tab-badge-pulse::before {
+  content: '';
+  @apply absolute w-full h-full rounded-full bg-[hsl(var(--wr-pink))];
+  animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+  opacity: 0.4;
+  z-index: -1;
+}
+
+/* Risk Meter Gradient */
+.risk-meter-critical {
+  background: linear-gradient(90deg, hsl(var(--wr-pink)) 0%, hsl(var(--wr-red)) 100%);
+}
+
+.risk-meter-high {
+  background: linear-gradient(90deg, hsl(var(--wr-amber)) 0%, hsl(var(--wr-pink)) 100%);
+}
+
+.risk-meter-medium {
+  background: linear-gradient(90deg, hsl(var(--wr-cyan)) 0%, hsl(var(--wr-amber)) 100%);
+}
+
+.risk-meter-low {
+  background: linear-gradient(90deg, hsl(var(--wr-green)) 0%, hsl(var(--wr-cyan)) 100%);
+}
+
+/* Mobile Optimizations */
+@media (max-width: 768px) {
+  .insider-table th,
+  .insider-table td {
+    @apply px-2 py-1;
+  }
+
+  .insider-badge {
+    @apply text-[8px] px-1 py-0;
+  }
+}
