@@ -151,7 +151,7 @@ export function HLBlockTable({ onBlockClick }: HLBlockTableProps) {
 // ── Tx Table ──────────────────────────────────────────────────────────────────
 
 export function HLTxTable() {
-  const { txs, age_ms: _age, cached, stale, isFirstLoad, error } = useHLTxs();
+  const { txs, age_ms: _age, cached, isFirstLoad, error } = useHLTxs();
   const serverTs = txs.length > 0 ? Date.now() - (_age ?? 0) : undefined;
 
   const statusColor = (s: HLTx['status']) =>
@@ -164,7 +164,7 @@ export function HLTxTable() {
           <span className="w-1.5 h-1.5 rounded-full bg-wr-cyan animate-blink inline-block" />
           📋 RECENT TXS
         </span>
-        <AgeBadge serverTs={serverTs} cached={cached} stale={stale} />
+        <AgeBadge serverTs={serverTs} cached={cached} stale={false} />
       </div>
 
       <div className="px-3 py-1 border-b border-wr-border bg-wr-bg3 grid grid-cols-[90px_1fr_60px_50px] gap-2 text-[7px] text-wr-muted tracking-[2px]">
