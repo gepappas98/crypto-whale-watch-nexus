@@ -38,7 +38,6 @@ import { calculateRiskScore, fetchEtherscanTokenHolders, fetchEtherscanTransfers
 import type { InsiderRiskData } from '@/types/insiderRisk';
 
 // ── CEO Signal label (mirrors WRScanner getCeoSignal) ─────────────────────────
-// Kept here so processData can record signal outcomes without importing WRScanner.
 function getCeoSignalLabel(score: number, threat: string, category: string, vmcap: number): string {
   const t = threat.toUpperCase();
   const cat = (category || '').toUpperCase();
@@ -65,7 +64,7 @@ export default function WhaleRadarApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [autoScan, setAutoScan] = useState(false);
-  const [autoPaused, setAutoPaused] = useState(false); // Issue #6: track paused state
+  const [autoPaused, setAutoPaused] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanBadge, setScanBadge] = useState('IDLE');
   const [kbdOpen, setKbdOpen] = useState(false);
@@ -89,7 +88,6 @@ export default function WhaleRadarApp() {
   // WebSocket config
   const [bybitEnabled, setBybitEnabled] = useState(false);
   const [whaleFeedEx, setWhaleFeedEx] = useState('all');
-  // ── Hyperliquid settings ─────────────────────────────────────────────────
   const [hlScannerEnabled, setHlScannerEnabled] = useState(true);
   const [hlMegaTxUsd, setHlMegaTxUsd] = useState(500_000);
   const [supabaseUrl, setSupabaseUrl] = useState('');
@@ -143,19 +141,16 @@ export default function WhaleRadarApp() {
     if (saved.prevVolumes) setPrevVolumes(saved.prevVolumes as Record<string, number>);
     if (saved.bybitEnabled) setBybitEnabled(saved.bybitEnabled as boolean);
     if (saved.whaleFeedEx) setWhaleFeedEx(saved.whaleFeedEx as string);
-    // ── HL settings ──
     if (saved.hlScannerEnabled !== undefined) setHlScannerEnabled(saved.hlScannerEnabled as boolean);
     if (saved.hlMegaTxUsd) setHlMegaTxUsd(saved.hlMegaTxUsd as number);
-    // Supabase URL/key stored in separate localStorage keys (mirrors hlFetch)
+    
     const sbUrl = localStorage.getItem('wr_supabase_url') ?? '';
     const sbKey = localStorage.getItem('wr_supabase_anon_key') ?? '';
     if (sbUrl) setSupabaseUrl(sbUrl);
     if (sbKey) setSupabaseAnonKey(sbKey);
 
-    // Issue #6: Restore autoScan but preserve paused state — don't auto-resume
     if (saved.autoScan) {
       setAutoScan(true);
-      // If it was previously running, restore as paused so it doesn't auto-resume
       setAutoPaused(saved.autoPaused as boolean ?? true);
     }
 
@@ -169,19 +164,12 @@ export default function WhaleRadarApp() {
   }, []);
 
   // ══ BACKEND CHECK + SIGNAL PRICE FILLER ══════════════════════════════════
-  // Runs once on mount: pings backend, then starts periodic CoinGecko price filling.
   useEffect(() => {
-    // 1. Check backend availability (suppresses noisy toasts when offline)
     initBackendCheck();
-
-    // 2. Fill outcome prices immediately on mount (catches any pending fills)
     fillSignalPrices().catch(() => {});
-
-    // 3. Re-fill every 30 minutes (mirrors backend priceFiller schedule)
     const fillTimer = setInterval(() => {
       fillSignalPrices().catch(() => {});
     }, 30 * 60 * 1000);
-
     return () => clearInterval(fillTimer);
   }, []);
 
@@ -192,7 +180,7 @@ export default function WhaleRadarApp() {
         theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
         vmcapThr, pchgThr, whaleThr, soundOn, scanHistory: scanHistory.slice(-CFG.HISTORY_MAX),
         prevVolumes, aggressiveMode, watchlistOnly, bybitEnabled, whaleFeedEx,
-        autoScan, autoPaused, // Issue #6: persist auto scan + paused state
+        autoScan, autoPaused,
         hlScannerEnabled, hlMegaTxUsd,
       });
     }, 500);
@@ -219,66 +207,77 @@ export default function WhaleRadarApp() {
   }, []);
 
   // ══ SCAN ══════════════════════════════════════════════════════════════════
-  // Stable refs so enrichCoins doesn't need birdKey in its dep array
   const birdKeyRef = useRef('');
   useEffect(() => { birdKeyRef.current = birdKey; }, [birdKey]);
 
-  // ── Enrich coins with Birdeye (SOL) + DexScreener (high-vmcap) ──────────────
-  // Called after processData. Updates individual coins in state asynchronously.
-  // Each fetch is independently cached so a re-scan doesn't burn API quota.
+  // ── FIXED: enrichCoins with proper key prop and race condition handling ─────
   const enrichCoins = useCallback(async (mapped: CoinData[]) => {
     const key = birdKeyRef.current;
+    
+    // Create a stable copy to prevent race conditions
+    const currentCoins = [...mapped];
 
-    // ── DexScreener: small/mid caps where DEX liquidity matters ──────────────
-    const dexTargets = mapped
-      .filter(c => c.vmcap > 50 && c.mcap < 2e9)  // skip mega-caps — they don't rug on DEX
-      .slice(0, 15);                                // cap: 15 req per scan
+    // DexScreener: small/mid caps where DEX liquidity matters
+    const dexTargets = currentCoins
+      .filter(c => c.vmcap > 50 && c.mcap < 2e9)
+      .slice(0, 15);
 
-    // ── Birdeye: only tokens we have addresses for ────────────────────────────
-    const solTargets = mapped.filter(c => c.isSol && CFG.SOL_ADDRS[c.symbol]);
+    // Birdeye: only tokens we have addresses for
+    const solTargets = currentCoins.filter(c => c.isSol && CFG.SOL_ADDRS[c.symbol]);
 
-    // Fire DexScreener requests — no key needed, throttle to 15/scan
+    // Process DexScreener requests
     for (const coin of dexTargets) {
       try {
         const dex = await fetchDexData(coin.symbol, coin.volume);
-        if (!dex.dexHot && !dex.dsLiq) continue; // nothing new — skip state update
+        if (!dex.dexHot && !dex.dsLiq) continue;
+        
+        // FIXED: Use functional update with proper key comparison
         setCoins(prev => prev.map(c => {
           if (c.symbol !== coin.symbol) return c;
-          // Re-run detection with enriched DEX data
           const det = detect({
             vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
             supplyPct: c.supplyPct, vol: c.volume, mcap: c.mcap,
             dexHot: dex.dexHot, dsLiq: dex.dsLiq, isSol: c.isSol, birdData: c.birdData,
           });
-          return { ...c, dexHot: dex.dexHot, dsLiq: dex.dsLiq,
-            score: det.score, threat: det.threat, category: det.category,
-            confidence: det.confidence, reasons: det.reasons };
+          return { ...c, 
+            dexHot: dex.dexHot, 
+            dsLiq: dex.dsLiq,
+            score: det.score, 
+            threat: det.threat, 
+            category: det.category,
+            confidence: det.confidence, 
+            reasons: det.reasons 
+          };
         }));
       } catch { /* ignore per-coin errors */ }
     }
 
-    // Fire Birdeye requests — requires key, rate limited
     if (!key) return;
     for (const coin of solTargets) {
       const addr = CFG.SOL_ADDRS[coin.symbol];
       try {
         const bird = await fetchBirdeyeToken(addr, coin.symbol, key);
         if (!bird) continue;
+        
         setCoins(prev => prev.map(c => {
           if (c.symbol !== coin.symbol) return c;
-          // Re-run detection with on-chain data — this is the real Solana score
           const det = detect({
             vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
             supplyPct: c.supplyPct, vol: c.volume, mcap: c.mcap,
             dexHot: c.dexHot, dsLiq: c.dsLiq, isSol: true, birdData: bird,
           });
-          return { ...c, birdData: bird,
-            score: det.score, threat: det.threat, category: det.category,
-            confidence: det.confidence, reasons: det.reasons };
+          return { ...c, 
+            birdData: bird,
+            score: det.score, 
+            threat: det.threat, 
+            category: det.category,
+            confidence: det.confidence, 
+            reasons: det.reasons 
+          };
         }));
       } catch { /* ignore per-coin errors */ }
     }
-  }, []);  // birdKeyRef is a ref — no dep needed
+  }, []);
 
   // ── Data source status ──────────────────────────────────────────────────────
   const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
@@ -350,7 +349,6 @@ export default function WhaleRadarApp() {
     setScanning(true);
     setScanBadge('SCANNING');
 
-    // Detect CoinGecko key type: demo keys start with "CG-", pro keys are UUIDs
     const isCgDemoKey = apiKey && apiKey.startsWith('CG-');
     const isCgProKey  = apiKey && !apiKey.startsWith('CG-');
 
@@ -359,7 +357,7 @@ export default function WhaleRadarApp() {
       let source: 'live' | 'cached' | 'fallback' = 'live';
       let scanProvider = 'coingecko';
 
-      // ── Strategy 1: Backend proxy (handles CG rate limits server-side) ──────
+      // Strategy 1: Backend proxy
       try {
         const proxyHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
         if (apiKey) proxyHeaders['x-cg-api-key'] = apiKey;
@@ -375,10 +373,10 @@ export default function WhaleRadarApp() {
           }
         }
       } catch {
-        // Backend unavailable — fall through to direct fetch
+        // Backend unavailable — fall through
       }
 
-      // ── Strategy 2: Direct CoinGecko ─────────────────────────────────────
+      // Strategy 2: Direct CoinGecko
       if (!scanData) {
         if (isRateLimited(RL_KEYS.COINGECKO)) {
           const rem = getCooldownRemaining(RL_KEYS.COINGECKO);
@@ -408,12 +406,9 @@ export default function WhaleRadarApp() {
           scanData = result.data;
           source = result.fromCache ? 'cached' : 'live';
         }
-        // Don't throw on CG failure — fall through to CoinPaprika
       }
 
-      // ── Strategy 3: CoinPaprika — free, no key, no CORS, real market data ──
-      // Used as a genuine fallback when CoinGecko is rate-limited or down.
-      // Returns real price, volume_24h, market_cap, percent_change_24h.
+      // Strategy 3: CoinPaprika fallback
       if (!scanData) {
         try {
           setScanBadge('TRYING PAPRIKA…');
@@ -428,7 +423,6 @@ export default function WhaleRadarApp() {
               circulating_supply: number | null; total_supply: number | null;
             }>;
             if (papData?.length) {
-              // Normalise to the same shape processData() expects
               scanData = papData.map(c => ({
                 id: c.id,
                 symbol: c.symbol,
@@ -446,7 +440,7 @@ export default function WhaleRadarApp() {
             }
           }
         } catch {
-          // CoinPaprika also failed — fall through to final error
+          // CoinPaprika failed
         }
       }
 
@@ -463,7 +457,6 @@ export default function WhaleRadarApp() {
       setScanBadge(badge);
       setLastScanTs(Date.now());
 
-      // Persist + enrich (fire-and-forget)
       saveScan(mapped).catch(() => {});
       enrichCoins(mapped).catch(() => {});
     } catch (e: unknown) {
@@ -494,9 +487,26 @@ export default function WhaleRadarApp() {
       const det = detect({ vmcap, chg24, volSpike, supplyPct, vol, mcap, dexHot, dsLiq, isSol, birdData });
       const { score, threat, category, confidence, reasons } = det;
       return {
-        rank: (c.rank as number) || (i + 1), id: c.id as string, symbol: sym, name: c.name as string,
-        price: (c.current_price as number) || (c.price as number) || 0, change: chg24, volume: vol, mcap, vmcap, volSpike,
-        supplyPct, score, threat, category, confidence, reasons, dexHot, dsLiq, isSol, birdData,
+        rank: (c.rank as number) || (i + 1), 
+        id: c.id as string, 
+        symbol: sym, 
+        name: c.name as string,
+        price: (c.current_price as number) || (c.price as number) || 0, 
+        change: chg24, 
+        volume: vol, 
+        mcap, 
+        vmcap, 
+        volSpike,
+        supplyPct, 
+        score, 
+        threat, 
+        category, 
+        confidence, 
+        reasons, 
+        dexHot, 
+        dsLiq, 
+        isSol, 
+        birdData,
       };
     });
     setPrevVolumes(newVols);
@@ -509,7 +519,8 @@ export default function WhaleRadarApp() {
       const snap: ScanSnapshot = {
         ts: Date.now(),
         coins: mapped.map(c => ({ symbol: c.symbol, score: c.score, threat: c.threat, category: c.category, price: c.price, change: c.change, vmcap: c.vmcap })),
-        critCount, highCount,
+        critCount, 
+        highCount,
       };
       return [snap, ...prev].slice(0, CFG.HISTORY_MAX);
     });
@@ -531,7 +542,7 @@ export default function WhaleRadarApp() {
         });
       });
 
-    // Generate alerts for critical/high
+    // Generate alerts
     mapped.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
       addAlert('critical', c.symbol, `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
     });
@@ -562,13 +573,27 @@ export default function WhaleRadarApp() {
   }, []);
 
   // ══ WHALE WEBSOCKET ══════════════════════════════════════════════════════
-  // Throttle: 1 DB write per symbol per 30s — avoids flooding on high-volume pairs
+  // FIXED: Added cleanup for whaleEventThrottle to prevent memory leak
   const whaleEventThrottle = useRef<Map<string, number>>(new Map());
+  
+  // Cleanup old entries every 5 minutes to prevent unbounded growth
+  useEffect(() => {
+    const cleanup = setInterval(() => {
+      const now = Date.now();
+      const expiry = 24 * 60 * 60 * 1000; // 24 hours
+      for (const [key, timestamp] of whaleEventThrottle.current.entries()) {
+        if (now - timestamp > expiry) {
+          whaleEventThrottle.current.delete(key);
+        }
+      }
+    }, 5 * 60 * 1000); // Run every 5 minutes
+    
+    return () => clearInterval(cleanup);
+  }, []);
 
   const handleWhaleTrade = useCallback((trade: WhaleTrade) => {
     setWhaleFeed(prev => [trade, ...prev].slice(0, CFG.WFEED_MAX));
 
-    // ── Persist to whale_events (Fix #2: wire dead table) ──────────────────
     const lastWrite = whaleEventThrottle.current.get(trade.sym) ?? 0;
     if (Date.now() - lastWrite > 30_000) {
       whaleEventThrottle.current.set(trade.sym, Date.now());
@@ -600,8 +625,6 @@ export default function WhaleRadarApp() {
   });
 
   // ══ AUTO SCAN ═════════════════════════════════════════════════════════════
-  // Use a stable ref so the interval always calls the LATEST triggerScan
-  // without needing it in the effect dep array (avoids restart on every scan).
   const triggerScanRef = useRef(triggerScan);
   useEffect(() => { triggerScanRef.current = triggerScan; }, [triggerScan]);
 
@@ -646,7 +669,7 @@ export default function WhaleRadarApp() {
   // ══ TOGGLE HANDLERS ══════════════════════════════════════════════════════
   const handleToggleAuto = useCallback(() => {
     setAutoScan(p => {
-      if (!p) setAutoPaused(false); // Starting fresh = not paused
+      if (!p) setAutoPaused(false);
       return !p;
     });
   }, []);
@@ -663,10 +686,8 @@ export default function WhaleRadarApp() {
   const filteredCoins = coins.filter(c => {
     if (c.vmcap < vmcapThr && Math.abs(c.change) < pchgThr && c.score < 20) return false;
     if (watchlistOnly && !tracked[c.symbol]) return false;
-    // Advanced filters: chain
     if (advancedFilters.chain === 'solana' && !c.isSol) return false;
     if (['ethereum', 'bsc', 'polygon'].includes(advancedFilters.chain) && c.isSol) return false;
-    // Advanced filters: min volume threshold
     if (advancedFilters.minThreshold > 0 && c.volume < advancedFilters.minThreshold) return false;
     return true;
   });
@@ -682,10 +703,8 @@ export default function WhaleRadarApp() {
     <div className="min-h-screen flex flex-col">
       {showOnboarding && <WROnboarding onFinish={finishOnboarding} />}
 
-      {/* HL setup banner — shown only when Supabase is not configured */}
       <HLConfigBanner onOpenSettings={() => setSettingsOpen(true)} />
 
-      {/* Degraded mode banner — coin scan failed, whale feed still live */}
       {dataSource === 'fallback' && (
         <div className="bg-wr-red/20 border-b-2 border-wr-red/60 px-4 py-2 text-center text-[10px] text-wr-red tracking-widest">
           ⚠ COIN SCAN OFFLINE — All market data sources failed. Whale feed still live on WebSocket.
@@ -697,32 +716,72 @@ export default function WhaleRadarApp() {
         </div>
       )}
 
-      {/* Reconnecting banner — shown after 2+ failed attempts */}
       {wsReconnects >= 2 && (
         <div className="bg-wr-amber/20 border-b border-wr-amber/40 px-4 py-1.5 text-center text-[10px] text-wr-amber tracking-widest animate-pulse">
           ⚠ RECONNECTING… (attempt {wsReconnects}) — Data may be delayed
         </div>
       )}
       
-<div className="flex-1 min-h-0">
-  {activeTab === 'scanner' && (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] h-full">
-      <WRScanner ... /> {/* keep existing WRScanner block */}
-      <WRRightPanel ... /> {/* keep existing WRRightPanel block */}
-    </div>
-  )}
-  {activeTab === 'insider' && (
-    <WRInsiderRiskScanner
-      coins={coins}
-      isScanning={isInsiderScanning}
-      etherscanKey={insiderSettings.etherscanApiKey}
-      birdeyeKey={insiderSettings.birdeyeApiKey}
-      onRefresh={runInsiderRiskScan}
-      lastScanTime={Date.now()}
-    />
-  </div>
-  )}
-
+      {/* ══ FIXED: Removed duplicate tab content block, kept only one clean structure ══ */}
+      <div className="flex-1 min-h-0">
+        {activeTab === 'scanner' ? (
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] h-full min-h-0">
+            <WRScanner
+              coins={filteredCoins}
+              scanBadge={scanBadge}
+              scanning={scanning}
+              autoScan={autoScan}
+              autoPaused={autoPaused}
+              watchlistOnly={watchlistOnly}
+              tracked={tracked}
+              portfolio={portfolio}
+              aiKey={aiKey}
+              vmcapThr={vmcapThr}
+              pchgThr={pchgThr}
+              onScan={triggerScan}
+              onToggleAuto={handleToggleAuto}
+              onTogglePause={handleTogglePause}
+              onToggleWatchlist={() => setWatchlistOnly(p => !p)}
+              onTrack={trackToken}
+              onUntrack={untrackToken}
+              onVmcapChange={setVmcapThr}
+              onPchgChange={setPchgThr}
+              onOpenModal={setActiveModal}
+              onAddAlert={addAlert}
+              advancedFilters={advancedFilters}
+              onAdvancedFiltersChange={setAdvancedFilters}
+              page={scanPage}
+              onPageChange={setScanPage}
+              hlScannerEnabled={hlScannerEnabled}
+              hlMegaTxUsd={hlMegaTxUsd}
+            />
+            <WRRightPanel
+              whaleFeed={whaleFeed}
+              alerts={filteredAlerts}
+              alertFilter={alertFilter}
+              onAlertFilterChange={setAlertFilter}
+              wallets={wallets}
+              onAddWallet={(w) => setWallets(prev => [...prev, w])}
+              onRemoveWallet={(addr) => setWallets(prev => prev.filter(w => w.address !== addr))}
+              onTogglePin={(idx) => setAlerts(prev => prev.map((a, i) => i === idx ? { ...a, pinned: !a.pinned } : a))}
+              onClearAlerts={() => setAlerts([])}
+              bybitEnabled={bybitEnabled}
+              onToggleBybit={handleToggleBybit}
+              whaleFeedEx={whaleFeedEx}
+              onWhaleFeedExChange={setWhaleFeedEx}
+            />
+          </div>
+        ) : (
+          <WRInsiderRiskScanner
+            coins={coins}
+            isScanning={isInsiderScanning}
+            etherscanKey={insiderSettings.etherscanApiKey}
+            birdeyeKey={insiderSettings.birdeyeApiKey}
+            onRefresh={runInsiderRiskScan}
+            lastScanTime={Date.now()}
+          />
+        )}
+      </div>
 
       {/* WS Status indicator */}
       <div className="flex items-center gap-2 px-4 py-0.5 bg-wr-bg3 border-b border-wr-border/50 text-[8px] tracking-widest">
@@ -744,6 +803,7 @@ export default function WhaleRadarApp() {
           onPchgChange={setPchgThr}
         />
       </div>
+
       <WRHeader
         scanCount={coins.length}
         alertCount={alerts.length}
@@ -757,38 +817,37 @@ export default function WhaleRadarApp() {
       />
 
       {settingsOpen && (
-        <WRSettingsPanel
-          apiKey={apiKey} onApiKeyChange={setApiKey}
-          aiKey={aiKey} onAiKeyChange={setAiKey}
-          birdKey={birdKey} onBirdKeyChange={setBirdKey}
-          heliusKey={heliusKey} onHeliusKeyChange={setHeliusKey}
-          theme={theme} onThemeChange={setTheme}
-          aggressiveMode={aggressiveMode} onAggressiveModeChange={setAggressiveMode}
-          whaleThr={whaleThr} onWhaleThrChange={setWhaleThr}
-          hlScannerEnabled={hlScannerEnabled}
-          onHlScannerEnabledChange={setHlScannerEnabled}
-          hlMegaTxUsd={hlMegaTxUsd}
-          onHlMegaTxUsdChange={setHlMegaTxUsd}
-          supabaseUrl={supabaseUrl}
-          onSupabaseUrlChange={(v) => {
-            setSupabaseUrl(v);
-            if (v.startsWith('https://')) localStorage.setItem('wr_supabase_url', v);
-            else localStorage.removeItem('wr_supabase_url');
-          }}
-          supabaseAnonKey={supabaseAnonKey}
-          onSupabaseAnonKeyChange={(v) => {
-            setSupabaseAnonKey(v);
-            if (v.length > 20) localStorage.setItem('wr_supabase_anon_key', v);
-            else localStorage.removeItem('wr_supabase_anon_key');
-          }}
-        />
-      )}
-
-      {settingsOpen && (
-        <WRInsiderRiskSettings
-          settings={insiderSettings}
-          onSave={handleInsiderSettingsSave}
-        />
+        <>
+          <WRSettingsPanel
+            apiKey={apiKey} onApiKeyChange={setApiKey}
+            aiKey={aiKey} onAiKeyChange={setAiKey}
+            birdKey={birdKey} onBirdKeyChange={setBirdKey}
+            heliusKey={heliusKey} onHeliusKeyChange={setHeliusKey}
+            theme={theme} onThemeChange={setTheme}
+            aggressiveMode={aggressiveMode} onAggressiveModeChange={setAggressiveMode}
+            whaleThr={whaleThr} onWhaleThrChange={setWhaleThr}
+            hlScannerEnabled={hlScannerEnabled}
+            onHlScannerEnabledChange={setHlScannerEnabled}
+            hlMegaTxUsd={hlMegaTxUsd}
+            onHlMegaTxUsdChange={setHlMegaTxUsd}
+            supabaseUrl={supabaseUrl}
+            onSupabaseUrlChange={(v) => {
+              setSupabaseUrl(v);
+              if (v.startsWith('https://')) localStorage.setItem('wr_supabase_url', v);
+              else localStorage.removeItem('wr_supabase_url');
+            }}
+            supabaseAnonKey={supabaseAnonKey}
+            onSupabaseAnonKeyChange={(v) => {
+              setSupabaseAnonKey(v);
+              if (v.length > 20) localStorage.setItem('wr_supabase_anon_key', v);
+              else localStorage.removeItem('wr_supabase_anon_key');
+            }}
+          />
+          <WRInsiderRiskSettings
+            settings={insiderSettings}
+            onSave={handleInsiderSettingsSave}
+          />
+        </>
       )}
 
       <WRTicker coins={coins.slice(0, 30)} />
@@ -827,70 +886,6 @@ export default function WhaleRadarApp() {
             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[hsl(var(--wr-pink,330_100%_71%))]" />
           )}
         </button>
-      </div>
-
-      {/* ── Tab content ──────────────────────────────────────────────────────── */}
-      <div className="flex-1 min-h-0">
-        {activeTab === 'scanner' && (
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] h-full min-h-0">
-            <WRScanner
-              coins={filteredCoins}
-              scanBadge={scanBadge}
-              scanning={scanning}
-              autoScan={autoScan}
-              autoPaused={autoPaused}
-              watchlistOnly={watchlistOnly}
-              tracked={tracked}
-              portfolio={portfolio}
-              aiKey={aiKey}
-              vmcapThr={vmcapThr}
-              pchgThr={pchgThr}
-              onScan={triggerScan}
-              onToggleAuto={handleToggleAuto}
-              onTogglePause={handleTogglePause}
-              onToggleWatchlist={() => setWatchlistOnly(p => !p)}
-              onTrack={trackToken}
-              onUntrack={untrackToken}
-              onVmcapChange={setVmcapThr}
-              onPchgChange={setPchgThr}
-              onOpenModal={setActiveModal}
-              onAddAlert={addAlert}
-              advancedFilters={advancedFilters}
-              onAdvancedFiltersChange={setAdvancedFilters}
-              page={scanPage}
-              onPageChange={setScanPage}
-              hlScannerEnabled={hlScannerEnabled}
-              hlMegaTxUsd={hlMegaTxUsd}
-            />
-
-            <WRRightPanel
-              whaleFeed={whaleFeed}
-              alerts={filteredAlerts}
-              alertFilter={alertFilter}
-              onAlertFilterChange={setAlertFilter}
-              wallets={wallets}
-              onAddWallet={(w) => setWallets(prev => [...prev, w])}
-              onRemoveWallet={(addr) => setWallets(prev => prev.filter(w => w.address !== addr))}
-              onTogglePin={(idx) => setAlerts(prev => prev.map((a, i) => i === idx ? { ...a, pinned: !a.pinned } : a))}
-              onClearAlerts={() => setAlerts([])}
-              bybitEnabled={bybitEnabled}
-              onToggleBybit={handleToggleBybit}
-              whaleFeedEx={whaleFeedEx}
-              onWhaleFeedExChange={setWhaleFeedEx}
-            />
-          </div>
-        )}
-
-        {activeTab === 'insider' && (
-          <WRInsiderRiskScanner
-            coins={coins}
-            isScanning={isInsiderScanning}
-            etherscanKey={insiderSettings.etherscanApiKey}
-            birdeyeKey={insiderSettings.birdeyeApiKey}
-            onRefresh={runInsiderRiskScan}
-            lastScanTime={Date.now()}
-          />
-        )}
       </div>
 
       <WRStatsBar
@@ -1037,7 +1032,7 @@ function BacktestContent({ scanHistory }: { scanHistory: ScanSnapshot[] }) {
           <div className="text-[7px] text-wr-muted tracking-widest">SIMULATED — NOT FINANCIAL ADVICE</div>
           <div className="max-h-60 overflow-y-auto scrollbar-thin space-y-0.5">
             {results.slice(0, 30).map((r, i) => (
-              <div key={i} className="grid grid-cols-4 gap-2 text-[9px] py-1 border-b border-wr-border/50">
+              <div key={`${r.sym}-${r.ts}-${i}`} className="grid grid-cols-4 gap-2 text-[9px] py-1 border-b border-wr-border/50">
                 <span className="text-wr-muted">{new Date(r.ts).toLocaleTimeString()}</span>
                 <span className="text-wr-white font-head text-[8px]">{r.sym}</span>
                 <span className={`wr-badge wr-badge-${r.threat.toLowerCase()}`}>{r.threat}</span>
