@@ -1,0 +1,175 @@
+// PWA Registration and utilities for Whale Radar
+
+export interface BeforeInstallPromptEvent extends Event {
+  readonly platforms: string[];
+  readonly userChoice: Promise<{
+    outcome: 'accepted' | 'dismissed';
+    platform: string;
+  }>;
+  prompt(): Promise<void>;
+}
+
+declare global {
+  interface WindowEventMap {
+    'beforeinstallprompt': BeforeInstallPromptEvent;
+  }
+}
+
+export function registerServiceWorker(): void {
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', async () => {
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js', {
+          scope: '/',
+          updateViaCache: 'imports'
+        });
+
+        console.log('[PWA] SW registered:', registration.scope);
+
+        // Handle updates
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          if (!newWorker) return;
+
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              // New version available
+              console.log('[PWA] New version available');
+              window.dispatchEvent(new CustomEvent('sw-update-available'));
+            }
+          });
+        });
+
+        // Listen for messages from SW
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          if (event.data?.type === 'NOTIFICATION_CLICK') {
+            console.log('[PWA] Notification clicked:', event.data.payload);
+          }
+        });
+
+      } catch (error) {
+        console.error('[PWA] SW registration failed:', error);
+      }
+    });
+  }
+}
+
+// Request notification permission
+export async function requestNotificationPermission(): Promise<boolean> {
+  if (!('Notification' in window)) {
+    console.log('[PWA] Notifications not supported');
+    return false;
+  }
+
+  const permission = await Notification.requestPermission();
+  return permission === 'granted';
+}
+
+// Subscribe to push notifications
+export async function subscribeToPush(publicKey: string): Promise<PushSubscription | null> {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return null;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey)
+    });
+
+    return subscription;
+  } catch (err) {
+    console.error('[PWA] Push subscription failed:', err);
+    return null;
+  }
+}
+
+// Background sync for offline alerts
+export async function triggerBackgroundSync(tag: string = 'whale-sync'): Promise<void> {
+  if (!('serviceWorker' in navigator) || !('sync' in registration)) {
+    console.log('[PWA] Background sync not supported');
+    return;
+  }
+
+  const registration = await navigator.serviceWorker.ready;
+  
+  try {
+    await (registration as any).sync.register(tag);
+    console.log('[PWA] Background sync registered:', tag);
+  } catch (err) {
+    console.error('[PWA] Background sync failed:', err);
+  }
+}
+
+// Add to home screen prompt
+export function setupInstallPrompt(callback: (event: BeforeInstallPromptEvent) => void): void {
+  let deferredPrompt: BeforeInstallPromptEvent | null = null;
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    callback(e);
+  });
+
+  // Expose install function
+  (window as any).installPWA = async () => {
+    if (!deferredPrompt) return;
+    
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    
+    if (outcome === 'accepted') {
+      console.log('[PWA] User accepted install');
+    }
+    
+    deferredPrompt = null;
+  };
+}
+
+// Check if app is installed
+export function isStandalone(): boolean {
+  return window.matchMedia('(display-mode: standalone)').matches ||
+         (window.navigator as any).standalone === true;
+}
+
+// Helper: Convert base64 to Uint8Array for VAPID
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/\-/g, '+')
+    .replace(/_/g, '/');
+
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  
+  return outputArray;
+}
+
+// Cache management
+export async function clearAppCache(): Promise<void> {
+  if (!('serviceWorker' in navigator)) return;
+  
+  const registration = await navigator.serviceWorker.ready;
+  
+  const channel = new MessageChannel();
+  
+  return new Promise((resolve, reject) => {
+    channel.port1.onmessage = (event) => {
+      if (event.data?.cleared) {
+        resolve();
+      } else {
+        reject(new Error('Failed to clear cache'));
+      }
+    };
+    
+    registration.active?.postMessage(
+      { type: 'CLEAR_CACHE' },
+      [channel.port2]
+    );
+  });
+}
