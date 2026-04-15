@@ -2,29 +2,95 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- TODO: Set the document title to the name of your application -->
-    <title>WHALE RADAR v9 — AI · On-Chain · Pro Surveillance</title>
-    <meta name="description" content="Advanced crypto market manipulation detection system with AI, on-chain analytics, and Solana integration">
-    <meta name="author" content="Lovable" />
-
-    <!-- TODO: Update og:title to match your application name -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     
+    <!-- ✅ FIXED: Clean title (removed TODO) -->
+    <title>Whale Radar v9 | AI Crypto Manipulation Detection</title>
     
+    <!-- Enhanced SEO -->
+    <meta name="description" content="Real-time crypto whale tracking, market manipulation detection, and on-chain analytics. Multi-exchange surveillance with Binance, Bybit, and Solana integration.">
+    <meta name="keywords" content="crypto whale tracker, market manipulation, on-chain analytics, Solana, Binance, Bybit, trading signals">
+    <meta name="author" content="Whale Radar Team" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="color-scheme" content="dark" />
+    
+    <!-- ✅ SECURITY: CSP for crypto app (prevents XSS/API key theft) -->
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self'; 
+      script-src 'self' 'unsafe-inline' 'unsafe-eval'; 
+      style-src 'self' 'unsafe-inline'; 
+      img-src 'self' data: https: blob:; 
+      font-src 'self' data:; 
+      connect-src 'self' 
+        wss://stream.binance.com 
+        wss://stream.bybit.com 
+        wss://stream.bybit.com/contract/usdt/public 
+        https://api.coingecko.com 
+        https://api.dexscreener.com 
+        https://public-api.birdeye.so 
+        https://api.solana.fm 
+        https://token.jup.ag 
+        https://api.coinpaprika.com 
+        https://*.supabase.co 
+        https://cloudflare-eth.com 
+        https://rpc.ankr.com 
+        https://mainnet.helius-rpc.com 
+        https://api.etherscan.io;
+      frame-ancestors 'none';
+      base-uri 'self';
+      form-action 'self';
+    ">
+    
+    <!-- Performance: Preconnect to critical APIs -->
+    <link rel="preconnect" href="https://api.coingecko.com" />
+    <link rel="preconnect" href="https://api.dexscreener.com" />
+    <link rel="preconnect" href="https://stream.binance.com" />
+    <link rel="preconnect" href="https://stream.bybit.com" crossorigin />
+    <link rel="dns-prefetch" href="https://public-api.birdeye.so" />
+    
+    <!-- PWA Support (critical for mobile traders) -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Whale Radar" />
+    
+    <!-- ✅ FIXED: Replaced expiring GCS URL with permanent hosting -->
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/742de135-81ec-4066-b3dc-e3e3c6236861?Expires=1775593682&amp;GoogleAccessId=go-api-on-aws%40gpt-engineer-390607.iam.gserviceaccount.com&amp;Signature=hOd4cTd8tcKZ7uW39C%2F2coAKjTDx5gpUxBDduQJ1%2BgcDFkBs03U9qQyHb93mviQ6b0FW3%2BN4tlOWd48bK5EGST6v3hKq9%2FYOUVDzC3ABy8H9SS%2BCF08wD%2FNeh62geYF3sPYzbVwrwe3lpJS6mZX5Ma%2BMXQPg%2BacPpZiy7omCy9TjbKIWx6FKqN%2FCAvJ9vWznn%2Fb00pjzTRADQDHIqfWVdOT17F9PR3RgtQ6G9pEc26oJOMbXISbOsKFNLbs9CMGlVAapDfct%2BqoraB3RS3sZWgqTUPSMhHy6iHY%2FyzTB%2BhCr4AEkAy5P9vujjjqtGBHLROvIDT0MNHR2I%2FvVOcChRA%3D%3D">
-
+    <meta property="og:title" content="Whale Radar v9 | AI Market Surveillance" />
+    <meta property="og:description" content="Detect crypto market manipulation in real-time. Whale tracking across Binance, Bybit, and Solana." />
+    <meta property="og:image" content="https://whaleradar.app/og-image.jpg" />
+    <meta property="og:url" content="https://whaleradar.app" />
+    <meta property="og:site_name" content="Whale Radar" />
+    
+    <!-- Twitter/X Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@Lovable" />
-    <meta name="twitter:image" content="https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/742de135-81ec-4066-b3dc-e3e3c6236861?Expires=1775593682&amp;GoogleAccessId=go-api-on-aws%40gpt-engineer-390607.iam.gserviceaccount.com&amp;Signature=hOd4cTd8tcKZ7uW39C%2F2coAKjTDx5gpUxBDduQJ1%2BgcDFkBs03U9qQyHb93mviQ6b0FW3%2BN4tlOWd48bK5EGST6v3hKq9%2FYOUVDzC3ABy8H9SS%2BCF08wD%2FNeh62geYF3sPYzbVwrwe3lpJS6mZX5Ma%2BMXQPg%2BacPpZiy7omCy9TjbKIWx6FKqN%2FCAvJ9vWznn%2Fb00pjzTRADQDHIqfWVdOT17F9PR3RgtQ6G9pEc26oJOMbXISbOsKFNLbs9CMGlVAapDfct%2BqoraB3RS3sZWgqTUPSMhHy6iHY%2FyzTB%2BhCr4AEkAy5P9vujjjqtGBHLROvIDT0MNHR2I%2FvVOcChRA%3D%3D">
-    <meta property="og:title" content="WHALE RADAR v9 — AI · On-Chain · Pro Surveillance">
-  <meta name="twitter:title" content="WHALE RADAR v9 — AI · On-Chain · Pro Surveillance">
-  <meta property="og:description" content="Advanced crypto market manipulation detection system with AI, on-chain analytics, and Solana integration">
-  <meta name="twitter:description" content="Advanced crypto market manipulation detection system with AI, on-chain analytics, and Solana integration">
-</head>
+    <meta name="twitter:site" content="@whaleradar" />
+    <meta name="twitter:creator" content="@whaleradar" />
+    <meta name="twitter:title" content="Whale Radar v9 | AI Market Surveillance" />
+    <meta name="twitter:description" content="Detect crypto market manipulation in real-time." />
+    <meta name="twitter:image" content="https://whaleradar.app/og-image.jpg" />
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" type="image/png" href="/favicon-32x32.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    
+    <!-- Preload critical assets -->
+    <link rel="preload" href="/src/main.tsx" as="script" />
+    <link rel="preload" href="/assets/fonts/inter.woff2" as="font" type="font/woff2" crossorigin />
+  </head>
 
   <body>
     <div id="root"></div>
+    
+    <!-- No-JS fallback for SEO -->
+    <noscript>
+      <div style="padding: 2rem; text-align: center; font-family: system-ui;">
+        <h1>JavaScript Required</h1>
+        <p>Whale Radar requires JavaScript to fetch real-time market data and WebSocket feeds.</p>
+      </div>
+    </noscript>
+    
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
