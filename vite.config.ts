@@ -2,65 +2,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
+import { VitePWA } from "vite-plugin-pwa";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  // Dynamically import PWA plugin only if available
-  const plugins = [react(), mode === "development" && componentTagger()].filter(Boolean);
-  
-  // Try to add PWA plugin in production
-  if (mode === "production") {
-    try {
-      const { VitePWA } = require("vite-plugin-pwa");
-      plugins.push(
-        VitePWA({
-          registerType: "autoUpdate",
-          strategies: "injectManifest",
-          srcDir: "public",
-          filename: "sw.js",
-          manifest: false,
-          injectManifest: {
-            globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
-            globIgnores: ["**/node_modules/**/*", "**/sw.js"],
-          },
-          workbox: {
-            maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
-            runtimeCaching: [
-              {
-                urlPattern: /^https:\/\/api\.coingecko\.com\/.*/i,
-                handler: "NetworkFirst",
-                options: {
-                  cacheName: "coingecko-cache",
-                  expiration: { maxEntries: 50, maxAgeSeconds: 300 },
-                },
-              },
-              {
-                urlPattern: /^https:\/\/api\.coinpaprika\.com\/.*/i,
-                handler: "NetworkFirst",
-                options: {
-                  cacheName: "paprika-cache",
-                  expiration: { maxEntries: 50, maxAgeSeconds: 300 },
-                },
-              },
-              {
-                urlPattern: /^https:\/\/api\.dexscreener\.com\/.*/i,
-                handler: "NetworkFirst",
-                options: {
-                  cacheName: "dexscreener-cache",
-                  expiration: { maxEntries: 100, maxAgeSeconds: 120 },
-                },
-              },
-            ],
-          },
-          devOptions: { enabled: false },
-        })
-      );
-      console.log("✅ PWA plugin loaded");
-    } catch (e) {
-      console.warn("⚠️  PWA plugin not found, building without service worker");
-    }
-  }
-
   return {
     server: {
       host: "::",
@@ -74,7 +19,38 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
-    plugins,
+    plugins: [
+      react(),
+      mode === "development" && componentTagger(),
+
+      // ✅ PWA: injectManifest strategy — processes public/sw.js and injects
+      // the Workbox precache manifest at the self.__WB_MANIFEST placeholder.
+      VitePWA({
+        registerType: "autoUpdate",
+        strategies: "injectManifest",
+        srcDir: "public",
+        filename: "sw.js",
+
+        // We manage manifest.json ourselves in /public, so disable auto-gen.
+        manifest: false,
+
+        injectManifest: {
+          // Which built assets to precache
+          globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
+          // Don't try to precache the SW itself
+          globIgnores: ["**/node_modules/**/*", "**/sw.js"],
+          // Allow larger chunks (default is 2 MiB)
+          maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+        },
+
+        devOptions: {
+          // Enable in dev so you can debug the SW without a production build
+          enabled: true,
+          type: "module",
+        },
+      }),
+    ].filter(Boolean),
+
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
