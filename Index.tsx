@@ -720,8 +720,9 @@ export default function WhaleRadarApp() {
       onRefresh={runInsiderRiskScan}
       lastScanTime={Date.now()}
     />
+  </div>
   )}
-</div>
+
 
       {/* WS Status indicator */}
       <div className="flex items-center gap-2 px-4 py-0.5 bg-wr-bg3 border-b border-wr-border/50 text-[8px] tracking-widest">
