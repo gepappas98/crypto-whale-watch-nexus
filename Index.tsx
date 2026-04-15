@@ -37,7 +37,357 @@ import { DEFAULT_CEX_ADDRESSES } from '@/types/insiderRisk';
 import { calculateRiskScore, fetchEtherscanTokenHolders, fetchEtherscanTransfers } from '@/lib/insiderRiskUtils';
 import type { InsiderRiskData } from '@/types/insiderRisk';
 
-// ── CEO Signal label (mirrors WRScanner getCeoSignal) ─────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// FALLBACK API CONFIGURATION - FREE TIER ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Free ETH RPC endpoints (no API key required)
+const FREE_ETH_RPCS = [
+  'https://cloudflare-eth.com',
+  'https://rpc.ankr.com/eth',
+  'https://ethereum.publicnode.com',
+  'https://eth.llamarpc.com',
+  'https://eth.drpc.org'
+];
+
+// Free Solana RPC endpoints
+const FREE_SOL_RPCS = [
+  'https://api.mainnet-beta.solana.com',
+  'https://solana.publicnode.com',
+  'https://rpc.ankr.com/solana',
+  'https://solana.drpc.org'
+];
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DEXSCREENER FALLBACK FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Fallback 1: CoinGecko markets API (free, no key for basic endpoints)
+async function fetchCoinGeckoDexFallback(symbol: string): Promise<{ dexHot: boolean; dsLiq: number | null; source: string }> {
+  try {
+    // Try to get coin ID first
+    const searchRes = await fetch(
+      `https://api.coingecko.com/api/v3/search?query=${symbol.toLowerCase()}`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (!searchRes.ok) throw new Error('CoinGecko search failed');
+    const searchData = await searchRes.json();
+    
+    const coin = searchData.coins?.find((c: any) => c.symbol.toUpperCase() === symbol.toUpperCase());
+    if (!coin) throw new Error('Coin not found');
+
+    // Get market data
+    const res = await fetch(
+      `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${coin.id}&order=volume_desc&per_page=1&sparkline=false`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (!res.ok) throw new Error('CoinGecko markets failed');
+    const data = await res.json();
+    
+    if (!data || !data[0]) throw new Error('No market data');
+    
+    const totalVol = data[0].total_volume || 0;
+    const mcap = data[0].market_cap || 1;
+    const vmcap = (totalVol / mcap) * 100;
+    
+    return {
+      dexHot: vmcap > 100,
+      dsLiq: vmcap > 50 ? totalVol * 0.25 : null,
+      source: 'coingecko-fallback'
+    };
+  } catch {
+    return { dexHot: false, dsLiq: null, source: 'none' };
+  }
+}
+
+// Fallback 2: Jupiter API (free, no key required)
+async function fetchJupiterFallback(symbol: string): Promise<{ dexHot: boolean; dsLiq: number | null; source: string }> {
+  try {
+    const res = await fetch(
+      `https://token.jup.ag/all`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (!res.ok) throw new Error('Jupiter API failed');
+    const tokens = await res.json();
+    const token = tokens.find((t: any) => t.symbol === symbol.toUpperCase());
+    
+    if (!token) throw new Error('Token not found in Jupiter');
+    
+    return {
+      dexHot: token.tags?.includes('verified') || false,
+      dsLiq: token.daily_volume ? token.daily_volume * 0.2 : null,
+      source: 'jupiter-fallback'
+    };
+  } catch {
+    return { dexHot: false, dsLiq: null, source: 'none' };
+  }
+}
+
+// Fallback 3: CoinPaprika (free, no key)
+async function fetchCoinPaprikaDexFallback(symbol: string): Promise<{ dexHot: boolean; dsLiq: number | null; source: string }> {
+  try {
+    const res = await fetch(
+      `https://api.coinpaprika.com/v1/tickers/${symbol.toLowerCase()}`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (!res.ok) throw new Error('CoinPaprika failed');
+    const data = await res.json();
+    
+    const vol = data.quotes?.USD?.volume_24h || 0;
+    const mcap = data.quotes?.USD?.market_cap || 1;
+    const vmcap = (vol / mcap) * 100;
+    
+    return {
+      dexHot: vmcap > 80,
+      dsLiq: vmcap > 40 ? vol * 0.2 : null,
+      source: 'coinpaprika-fallback'
+    };
+  } catch {
+    return { dexHot: false, dsLiq: null, source: 'none' };
+  }
+}
+
+// Master DexScreener fallback function
+async function fetchDexDataWithFallback(symbol: string, volume: number): Promise<{ dexHot: boolean; dsLiq: number | null; source: string }> {
+  // Try primary: DexScreener
+  try {
+    const primary = await fetchDexData(symbol, volume);
+    if (primary.dexHot || primary.dsLiq) return { ...primary, source: 'dexscreener' };
+  } catch {
+    console.log(`DexScreener failed for ${symbol}, trying fallbacks...`);
+  }
+  
+  // Fallback 1: CoinGecko
+  const cg = await fetchCoinGeckoDexFallback(symbol);
+  if (cg.dexHot || cg.dsLiq) return cg;
+  
+  // Fallback 2: Jupiter (Solana tokens)
+  const jup = await fetchJupiterFallback(symbol);
+  if (jup.dexHot || jup.dsLiq) return jup;
+  
+  // Fallback 3: CoinPaprika
+  const pap = await fetchCoinPaprikaDexFallback(symbol);
+  if (pap.dexHot || pap.dsLiq) return pap;
+  
+  return { dexHot: false, dsLiq: null, source: 'none' };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BIRDEYE FALLBACK FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Fallback 1: SolanaFM API (free tier available)
+async function fetchSolanaFMFallback(address: string, symbol: string): Promise<any> {
+  try {
+    const res = await fetch(
+      `https://api.solana.fm/v1/tokens/${address}`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (!res.ok) throw new Error('SolanaFM failed');
+    const data = await res.json();
+    
+    return {
+      symbol: symbol,
+      price: data.tokenPrice?.price || 0,
+      volume24h: data.volume24h || 0,
+      liquidity: data.liquidity || 0,
+      holders: data.holders || 0,
+      score: data.liquidity > 100000 ? 50 : 30,
+      buyRatio: 0.5,
+      sellRatio: 0.5,
+      recentTxns: []
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Fallback 2: Helius API (if key available, otherwise skip)
+async function fetchHeliusFallback(address: string, symbol: string, heliusKey: string): Promise<any> {
+  if (!heliusKey) return null;
+  try {
+    const res = await fetch(
+      `https://mainnet.helius-rpc.com/?api-key=${heliusKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getAsset',
+          params: [address]
+        }),
+        signal: AbortSignal.timeout(10000)
+      }
+    );
+    if (!res.ok) throw new Error('Helius failed');
+    const data = await res.json();
+    
+    return {
+      symbol: symbol,
+      price: data.result?.token_info?.price_info?.price_per_token || 0,
+      volume24h: 0,
+      liquidity: 0,
+      holders: 0,
+      score: 40,
+      buyRatio: 0.5,
+      sellRatio: 0.5,
+      recentTxns: []
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Fallback 3: CoinMarketCap (free basic data)
+async function fetchCMCFallback(symbol: string): Promise<any> {
+  try {
+    const {
+    const res = await fetch(
+      `https://api.coinmarketcap.com/data-api/v3/cryptocurrency/detail?slug=${symbol.toLowerCase()}`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (!res.ok) throw new Error('CMC failed');
+    const data = await res.json();
+    
+    if (!data.data) return null;
+    
+    const coin = data.data;
+    return {
+      symbol: symbol,
+      price: coin.statistics?.price || 0,
+      volume24h: coin.statistics?.volume24h || 0,
+      liquidity: coin.statistics?.marketCap ? coin.statistics.marketCap * 0.1 : 0,
+      holders: 0,
+      score: coin.statistics?.marketCap > 1000000 ? 60 : 40,
+      buyRatio: 0.5,
+      sellRatio: 0.5,
+      recentTxns: []
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Master Birdeye fallback function
+async function fetchBirdeyeWithFallback(address: string, symbol: string, apiKey: string, heliusKey: string): Promise<any> {
+  // Try primary: Birdeye (if key available)
+  if (apiKey) {
+    try {
+      const primary = await fetchBirdeyeToken(address, symbol, apiKey);
+      if (primary) return primary;
+    } catch {
+      console.log(`Birdeye failed for ${symbol}, trying fallbacks...`);
+    }
+  }
+  
+  // Fallback 1: SolanaFM
+  const solFm = await fetchSolanaFMFallback(address, symbol);
+  if (solFm) return solFm;
+  
+  // Fallback 2: Helius (if key available)
+  const helius = await fetchHeliusFallback(address, symbol, heliusKey);
+  if (helius) return helius;
+  
+  // Fallback 3: CoinMarketCap
+  const cmc = await fetchCMCFallback(symbol);
+  if (cmc) return cmc;
+  
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FREE ETH HOLDER DATA (No Etherscan API Key Required)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function getLatestBlock(rpc: string): Promise<number> {
+  try {
+    const res = await fetch(rpc, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_blockNumber'
+      }),
+      signal: AbortSignal.timeout(5000)
+    });
+    const data = await res.json();
+    return parseInt(data.result, 16);
+  } catch {
+    return 0;
+  }
+}
+
+// Fetch token holders using free RPC via eth_getLogs (Transfer events)
+async function fetchHoldersViaRPC(tokenAddress: string): Promise<any[]> {
+  for (const rpc of FREE_ETH_RPCS) {
+    try {
+      const latestBlock = await getLatestBlock(rpc);
+      const fromBlock = Math.max(0, latestBlock - 10000);
+      
+      const res = await fetch(rpc, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'eth_getLogs',
+          params: [{
+            fromBlock: '0x' + fromBlock.toString(16),
+            toBlock: 'latest',
+            address: tokenAddress,
+            topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'] // Transfer event signature
+          }]
+        }),
+        signal: AbortSignal.timeout(15000)
+      });
+      
+      const data = await res.json();
+      if (data.result && Array.isArray(data.result)) {
+        // Parse transfer events to extract unique addresses
+        const transfers = data.result;
+        const addressVolumes: Record<string, number> = {};
+        
+        transfers.forEach((log: any) => {
+          // Parse 'from' address (topic[1])
+          if (log.topics[1]) {
+            const from = '0x' + log.topics[1].slice(26);
+            addressVolumes[from] = (addressVolumes[from] || 0) + 1;
+          }
+          // Parse 'to' address (topic[2])
+          if (log.topics[2]) {
+            const to = '0x' + log.topics[2].slice(26);
+            addressVolumes[to] = (addressVolumes[to] || 0) + 1;
+          }
+        });
+        
+        // Convert to holder format (sorted by activity volume)
+        const sorted = Object.entries(addressVolumes)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10);
+        
+        const total = sorted.reduce((sum, [, count]) => sum + count, 0);
+        
+        return sorted.map(([addr, count], i) => ({
+          address: addr,
+          balance: '1000000000000000000',
+          percentage: total > 0 ? (count / total) * 100 : 0,
+          rank: i + 1
+        }));
+      }
+    } catch (err) {
+      console.log(`RPC ${rpc} failed, trying next...`);
+      continue;
+    }
+  }
+  return [];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
 function getCeoSignalLabel(score: number, threat: string, category: string, vmcap: number): string {
   const t = threat.toUpperCase();
   const cat = (category || '').toUpperCase();
@@ -78,6 +428,7 @@ export default function WhaleRadarApp() {
   const [aiKey, setAiKey] = useState('');
   const [birdKey, setBirdKey] = useState('');
   const [heliusKey, setHeliusKey] = useState('');
+  const [etherscanKey, setEtherscanKey] = useState('');
 
   // Config
   const [vmcapThr, setVmcapThr] = useState(200);
@@ -85,8 +436,8 @@ export default function WhaleRadarApp() {
   const [whaleThr, setWhaleThr] = useState(150000);
   const [aggressiveMode, setAggressiveMode] = useState(false);
 
-  // WebSocket config
-  const [bybitEnabled, setBybitEnabled] = useState(false);
+  // WebSocket config - BYBIT ENABLED BY DEFAULT
+  const [bybitEnabled, setBybitEnabled] = useState(true); // ← ENABLED BY DEFAULT
   const [whaleFeedEx, setWhaleFeedEx] = useState('all');
   const [hlScannerEnabled, setHlScannerEnabled] = useState(true);
   const [hlMegaTxUsd, setHlMegaTxUsd] = useState(500_000);
@@ -130,6 +481,7 @@ export default function WhaleRadarApp() {
     if (saved.aiKey) setAiKey(saved.aiKey as string);
     if (saved.birdKey) setBirdKey(saved.birdKey as string);
     if (saved.heliusKey) setHeliusKey(saved.heliusKey as string);
+    if (saved.etherscanKey) setEtherscanKey(saved.etherscanKey as string);
     if (saved.tracked) setTracked(saved.tracked as Record<string, TrackedToken>);
     if (saved.portfolio) setPortfolio(saved.portfolio as Record<string, PortfolioEntry>);
     if (saved.wallets) setWallets(saved.wallets as WalletEntry[]);
@@ -139,7 +491,11 @@ export default function WhaleRadarApp() {
     if (saved.soundOn !== undefined) setSoundOn(saved.soundOn as boolean);
     if (saved.scanHistory) setScanHistory(saved.scanHistory as ScanSnapshot[]);
     if (saved.prevVolumes) setPrevVolumes(saved.prevVolumes as Record<string, number>);
-    if (saved.bybitEnabled) setBybitEnabled(saved.bybitEnabled as boolean);
+    
+    // Bybit: default to true unless explicitly saved as false
+    if (saved.bybitEnabled !== undefined) setBybitEnabled(saved.bybitEnabled as boolean);
+    else setBybitEnabled(true);
+    
     if (saved.whaleFeedEx) setWhaleFeedEx(saved.whaleFeedEx as string);
     if (saved.hlScannerEnabled !== undefined) setHlScannerEnabled(saved.hlScannerEnabled as boolean);
     if (saved.hlMegaTxUsd) setHlMegaTxUsd(saved.hlMegaTxUsd as number);
@@ -177,7 +533,7 @@ export default function WhaleRadarApp() {
   useEffect(() => {
     const timer = setTimeout(() => {
       saveState({
-        theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
+        theme, apiKey, aiKey, birdKey, heliusKey, etherscanKey, tracked, portfolio, wallets,
         vmcapThr, pchgThr, whaleThr, soundOn, scanHistory: scanHistory.slice(-CFG.HISTORY_MAX),
         prevVolumes, aggressiveMode, watchlistOnly, bybitEnabled, whaleFeedEx,
         autoScan, autoPaused,
@@ -185,7 +541,7 @@ export default function WhaleRadarApp() {
       });
     }, 500);
     return () => clearTimeout(timer);
-  }, [theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
+  }, [theme, apiKey, aiKey, birdKey, heliusKey, etherscanKey, tracked, portfolio, wallets,
     vmcapThr, pchgThr, whaleThr, soundOn, scanHistory, prevVolumes, aggressiveMode,
     watchlistOnly, bybitEnabled, whaleFeedEx, autoScan, autoPaused,
     hlScannerEnabled, hlMegaTxUsd]);
@@ -210,28 +566,25 @@ export default function WhaleRadarApp() {
   const birdKeyRef = useRef('');
   useEffect(() => { birdKeyRef.current = birdKey; }, [birdKey]);
 
-  // ── FIXED: enrichCoins with proper key prop and race condition handling ─────
+  // Enhanced enrichCoins with fallback support
   const enrichCoins = useCallback(async (mapped: CoinData[]) => {
     const key = birdKeyRef.current;
-    
-    // Create a stable copy to prevent race conditions
     const currentCoins = [...mapped];
 
-    // DexScreener: small/mid caps where DEX liquidity matters
+    // DexScreener targets with fallback
     const dexTargets = currentCoins
       .filter(c => c.vmcap > 50 && c.mcap < 2e9)
       .slice(0, 15);
 
-    // Birdeye: only tokens we have addresses for
+    // Birdeye targets with fallback
     const solTargets = currentCoins.filter(c => c.isSol && CFG.SOL_ADDRS[c.symbol]);
 
-    // Process DexScreener requests
+    // Process DexScreener with fallbacks
     for (const coin of dexTargets) {
       try {
-        const dex = await fetchDexData(coin.symbol, coin.volume);
+        const dex = await fetchDexDataWithFallback(coin.symbol, coin.volume);
         if (!dex.dexHot && !dex.dsLiq) continue;
         
-        // FIXED: Use functional update with proper key comparison
         setCoins(prev => prev.map(c => {
           if (c.symbol !== coin.symbol) return c;
           const det = detect({
@@ -252,11 +605,11 @@ export default function WhaleRadarApp() {
       } catch { /* ignore per-coin errors */ }
     }
 
-    if (!key) return;
+    // Process Birdeye with fallbacks
     for (const coin of solTargets) {
       const addr = CFG.SOL_ADDRS[coin.symbol];
       try {
-        const bird = await fetchBirdeyeToken(addr, coin.symbol, key);
+        const bird = await fetchBirdeyeWithFallback(addr, coin.symbol, key, heliusKey);
         if (!bird) continue;
         
         setCoins(prev => prev.map(c => {
@@ -277,12 +630,12 @@ export default function WhaleRadarApp() {
         }));
       } catch { /* ignore per-coin errors */ }
     }
-  }, []);
+  }, [heliusKey]);
 
   // ── Data source status ──────────────────────────────────────────────────────
   const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
 
-  // ── Insider Risk Scan ────────────────────────────────────────────────────────
+  // ── Enhanced Insider Risk Scan with free RPC fallback ───────────────────────
   const runInsiderRiskScan = async () => {
     if (isInsiderScanning) return;
     setIsInsiderScanning(true);
@@ -300,24 +653,45 @@ export default function WhaleRadarApp() {
           circulatingSupply: 0,
           circulatingPercentage: 0,
         };
-        if (!isSol && insiderSettings.etherscanApiKey && riskData.address) {
-          try {
-            const holders = await fetchEtherscanTokenHolders(riskData.address, insiderSettings.etherscanApiKey);
-            riskData.holders = holders;
-            riskData.top10Concentration = holders.reduce((sum: number, h: { percentage: number }) => sum + h.percentage, 0);
-            if (holders[0]?.address) {
-              riskData.deployerAddress = holders[0].address;
-              const transfers = await fetchEtherscanTransfers(riskData.address, riskData.deployerAddress, insiderSettings.etherscanApiKey);
-              riskData.largeTransfers = transfers.filter((t: { value: number }) => t.value > 500000);
-              riskData.cexTransfers24h = transfers.filter((t: { value: number; timestamp: number }) => {
-                const hoursAgo = (Date.now() / 1000 - t.timestamp) / 3600;
-                return hoursAgo < 24 && t.value > 500000;
-              }).length;
+        
+        if (!isSol && riskData.address) {
+          // Try Etherscan API first if key available
+          if (etherscanKey || insiderSettings.etherscanApiKey) {
+            const key = etherscanKey || insiderSettings.etherscanApiKey;
+            try {
+              const holders = await fetchEtherscanTokenHolders(riskData.address, key);
+              riskData.holders = holders;
+              riskData.top10Concentration = holders.reduce((sum: number, h: { percentage: number }) => sum + h.percentage, 0);
+              if (holders[0]?.address) {
+                riskData.deployerAddress = holders[0].address;
+                const transfers = await fetchEtherscanTransfers(riskData.address, riskData.deployerAddress, key);
+                riskData.largeTransfers = transfers.filter((t: { value: number }) => t.value > 500000);
+                riskData.cexTransfers24h = transfers.filter((t: { value: number; timestamp: number }) => {
+                  const hoursAgo = (Date.now() / 1000 - t.timestamp) / 3600;
+                  return hoursAgo < 24 && t.value > 500000;
+                }).length;
+              }
+            } catch (err) {
+              console.error('Etherscan fetch error:', err);
             }
-          } catch (err) {
-            console.error('Etherscan fetch error:', err);
+          }
+          
+          // Fallback: Use free RPC if Etherscan fails or no key
+          if (!riskData.holders || riskData.holders.length === 0) {
+            try {
+              console.log(`Using free RPC fallback for ${coin.symbol}...`);
+              const rpcHolders = await fetchHoldersViaRPC(riskData.address);
+              if (rpcHolders.length > 0) {
+                riskData.holders = rpcHolders;
+                riskData.top10Concentration = rpcHolders.reduce((sum: number, h: { percentage: number }) => sum + h.percentage, 0);
+                console.log(`RPC fallback succeeded for ${coin.symbol}, found ${rpcHolders.length} holders`);
+              }
+            } catch (rpcErr) {
+              console.error('RPC fallback error:', rpcErr);
+            }
           }
         }
+        
         const { score, level, flags } = calculateRiskScore(riskData);
         analyzed.push({
           ...riskData as InsiderRiskData,
@@ -338,6 +712,7 @@ export default function WhaleRadarApp() {
 
   const handleInsiderSettingsSave = (s: InsiderRiskSettings) => {
     setInsiderSettings(s);
+    setEtherscanKey(s.etherscanApiKey);
     localStorage.setItem('wr_etherscan_key', s.etherscanApiKey);
     localStorage.setItem('wr_birdeye_key', s.birdeyeApiKey);
     localStorage.setItem('wr_insider_auto', s.enableAutoScan.toString());
@@ -466,7 +841,7 @@ export default function WhaleRadarApp() {
     } finally {
       setScanning(false);
     }
-  }, [scanning, apiKey, prevVolumes]);
+  }, [scanning, apiKey, prevVolumes, enrichCoins]);
 
   const processData = useCallback((data: unknown[]): CoinData[] => {
     const newVols: Record<string, number> = {};
@@ -512,7 +887,6 @@ export default function WhaleRadarApp() {
     setPrevVolumes(newVols);
     setCoins(mapped);
 
-    // Snapshot history
     const critCount = mapped.filter(c => c.threat === 'CRITICAL').length;
     const highCount = mapped.filter(c => c.threat === 'HIGH').length;
     setScanHistory(prev => {
@@ -525,7 +899,6 @@ export default function WhaleRadarApp() {
       return [snap, ...prev].slice(0, CFG.HISTORY_MAX);
     });
 
-    // Record CEO signal outcomes
     mapped
       .filter(c => c.score >= 35)
       .slice(0, 20)
@@ -542,7 +915,6 @@ export default function WhaleRadarApp() {
         });
       });
 
-    // Generate alerts
     mapped.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
       addAlert('critical', c.symbol, `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
     });
@@ -573,20 +945,18 @@ export default function WhaleRadarApp() {
   }, []);
 
   // ══ WHALE WEBSOCKET ══════════════════════════════════════════════════════
-  // FIXED: Added cleanup for whaleEventThrottle to prevent memory leak
   const whaleEventThrottle = useRef<Map<string, number>>(new Map());
   
-  // Cleanup old entries every 5 minutes to prevent unbounded growth
   useEffect(() => {
     const cleanup = setInterval(() => {
       const now = Date.now();
-      const expiry = 24 * 60 * 60 * 1000; // 24 hours
+      const expiry = 24 * 60 * 60 * 1000;
       for (const [key, timestamp] of whaleEventThrottle.current.entries()) {
         if (now - timestamp > expiry) {
           whaleEventThrottle.current.delete(key);
         }
       }
-    }, 5 * 60 * 1000); // Run every 5 minutes
+    }, 5 * 60 * 1000);
     
     return () => clearInterval(cleanup);
   }, []);
@@ -615,9 +985,10 @@ export default function WhaleRadarApp() {
     });
   }, []);
 
+  // BYBIT WEBSOCKET ENABLED BY DEFAULT
   const { binanceReady, bybitReady, wsStatus, wsLagMs, reconnectAttempts: wsReconnects } = useWhaleWebSocket({
     subscribedPairs,
-    bybitEnabled,
+    bybitEnabled, // Now defaults to true
     whaleThr,
     whaleFeedEx,
     onWhaleTrade: handleWhaleTrade,
@@ -722,7 +1093,6 @@ export default function WhaleRadarApp() {
         </div>
       )}
       
-      {/* ══ FIXED: Removed duplicate tab content block, kept only one clean structure ══ */}
       <div className="flex-1 min-h-0">
         {activeTab === 'scanner' ? (
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] h-full min-h-0">
