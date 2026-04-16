@@ -28,6 +28,7 @@ import { fetchBirdeyeToken } from '@/lib/birdeye';
 import { fetchDexData } from '@/lib/dexscreener';
 import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
 import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
+import CrystalBallPro from '@/components/CrystalBallPro';
 import { startPerfMonitoring } from '@/lib/perfBudget';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
@@ -47,6 +48,9 @@ function getCeoSignalLabel(score: number, threat: string, category: string, vmca
 
 export default function WhaleRadarApp() {
   // ══ CORE STATE ═══════════════════════════════════════════════════════════
+  // Tabs
+  const [activeTab, setActiveTab] = useState<'scanner' | 'alerts' | 'crystal'>('scanner');
+
   const [coins, setCoins] = useState<CoinData[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [whaleFeed, setWhaleFeed] = useState<WhaleTrade[]>([]);
@@ -647,7 +651,42 @@ export default function WhaleRadarApp() {
 
       <WRTicker coins={coins.slice(0, 30)} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] flex-1 min-h-0">
+      {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-1 border-b border-wr-border px-4 bg-wr-bg2 shrink-0">
+        <button
+          onClick={() => setActiveTab('scanner')}
+          className={`px-4 py-2 text-[11px] font-medium tracking-wider transition-colors relative ${
+            activeTab === 'scanner' ? 'text-wr-green' : 'text-wr-muted hover:text-white'
+          }`}
+        >
+          SCANNER
+          {activeTab === 'scanner' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-wr-green" />}
+        </button>
+        <button
+          onClick={() => setActiveTab('alerts')}
+          className={`px-4 py-2 text-[11px] font-medium tracking-wider transition-colors relative ${
+            activeTab === 'alerts' ? 'text-wr-cyan' : 'text-wr-muted hover:text-white'
+          }`}
+        >
+          ALERTS
+          {activeTab === 'alerts' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-wr-cyan" />}
+        </button>
+        <button
+          onClick={() => setActiveTab('crystal')}
+          className={activeTab === 'crystal' ? 'text-purple-400 px-4 py-2 text-[11px] font-medium tracking-wider transition-colors relative' : 'text-slate-400 px-4 py-2 text-[11px] font-medium tracking-wider transition-colors relative hover:text-white'}
+        >
+          <span className="flex items-center gap-1.5">🔮 CRYSTAL BALL</span>
+          {activeTab === 'crystal' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-400" />}
+        </button>
+      </div>
+
+      {activeTab === 'crystal' && (
+        <div className="max-w-4xl mx-auto w-full p-4">
+          <CrystalBallPro />
+        </div>
+      )}
+
+      <div className={`grid grid-cols-1 lg:grid-cols-[1fr_360px] flex-1 min-h-0 ${activeTab !== 'scanner' && activeTab !== 'alerts' ? 'hidden' : ''}`}>
         <WRScanner
           coins={filteredCoins}
           scanBadge={scanBadge}
