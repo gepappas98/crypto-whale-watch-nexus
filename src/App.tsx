@@ -1,17 +1,37 @@
-import CrystalBallPro from './components/CrystalBallPro'
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { Toaster } from "@/components/ui/toaster";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import Index from "./pages/Index.tsx";
+import NotFound from "./pages/NotFound.tsx";
 
-function App() {
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-200">
-      <main className="container mx-auto px-4 py-8 max-w-5xl">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold text-purple-400 mb-2">Whale Radar</h1>
-          <p className="text-slate-400 text-sm">AI-powered crypto forecasting with Kronos</p>
-        </header>
-        <CrystalBallPro />
-      </main>
-    </div>
-  )
-}
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Global defaults — per-hook overrides take precedence.
+      // Keeps the HL 300ms polls from thrashing on window focus.
+      refetchOnWindowFocus: false,
+      retry: 2,
+      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
+    },
+  },
+});
 
-export default App
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Index />} />
+          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </BrowserRouter>
+    </TooltipProvider>
+  </QueryClientProvider>
+);
+
+export default App;
