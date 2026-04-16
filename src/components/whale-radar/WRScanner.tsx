@@ -174,6 +174,10 @@ export function WRScanner({
           style={{ borderColor: 'hsl(var(--wr-cyan) / 0.4)', color: 'hsl(var(--wr-cyan))' }}>
           📈 EVAL
         </button>
+        <button className="wr-btn ai" onClick={() => onOpenModal('crystal-ball')} title="Crystal Ball PRO — AI Forecast [C]"
+          style={{ borderColor: 'rgba(139,92,246,0.5)', color: '#a78bfa' }}>
+          🔮 CBP <span className="pro-badge">AI</span>
+        </button>
 
         <button
           className={`wr-btn text-[8px] hidden lg:inline-flex ${showAdvFilters ? 'active' : ''}`}
