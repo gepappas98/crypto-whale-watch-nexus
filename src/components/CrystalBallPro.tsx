@@ -61,7 +61,7 @@ export default function CrystalBallPro() {
   const Icon = sig?.icon || Activity;
 
   return (
-    <div className="glass-panel rounded-2xl p-6 space-y-6">
+    <div className="glass-panel rounded-2xl p-6 space-y-6 bg-slate-900/50 border border-slate-800">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
