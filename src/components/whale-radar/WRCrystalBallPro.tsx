@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { TrendingUp, TrendingDown, Minus, Loader2, Activity, BarChart3, TrendingFlat, Zap } from "lucide-react";
-// ==================== COIN LIST ====================
+
 // ==================== COIN LIST ====================
 const COIN_LIST = [
   { symbol: "BTC", id: "bitcoin", name: "Bitcoin" },
@@ -139,7 +139,6 @@ const COIN_LIST = [
   { symbol: "KILT", id: "kilt-protocol", name: "KILT Protocol" },
   { symbol: "RING", id: "darwinia-network", name: "Darwinia Network" },
 ];
-
 
 const TIMEFRAMES = [
   { label: "1h", binanceInterval: "1h", days: 1, interval: "hourly" },
@@ -305,22 +304,39 @@ export default function WRCrystalBallPro() {
   const [error, setError] = useState<string | null>(null);
   const [coinSearch, setCoinSearch] = useState("");
 
+  // Refs to abort stale requests and prevent race conditions
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const backtestControllerRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef(0);
+  const backtestRequestIdRef = useRef(0);
+
   const filteredCoins = COIN_LIST.filter(c =>
     c.symbol.toLowerCase().includes(coinSearch.toLowerCase()) ||
     c.name.toLowerCase().includes(coinSearch.toLowerCase())
   );
 
-  const fetchCoinData = async () => {
+  const fetchCoinData = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+
+    // Abort any previous request
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
     setError(null);
     setData(null);
     setBacktestData(null);
 
     try {
+      // CoinGecko fetch with manual timeout
+      const cgController = new AbortController();
+      const cgTimeout = setTimeout(() => cgController.abort(), 15000);
       const coinGeckoRes = await fetch(
         `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${selectedCoin.id}&price_change_percentage=24h,7d&include_24hr_high=true&include_24hr_low=true`,
-        { signal: AbortSignal.timeout(15000) }
+        { signal: cgController.signal }
       );
+      clearTimeout(cgTimeout);
       
       if (coinGeckoRes.status === 429) {
         throw new Error("CoinGecko rate limit exceeded. Please wait 30 seconds.");
@@ -341,145 +357,179 @@ export default function WRCrystalBallPro() {
       const low24h = coin.low_24h || currentPrice;
 
       const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
+      
+      // Binance fetch with manual timeout
+      const bnController = new AbortController();
+      const bnTimeout = setTimeout(() => bnController.abort(), 12000);
       const klinesRes = await fetch(
         `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${timeframe.binanceInterval}&limit=500`,
-        { signal: AbortSignal.timeout(12000) }
+        { signal: bnController.signal }
       );
+      clearTimeout(bnTimeout);
 
       let signal = "NEUTRAL";
       let confidence = 45;
       let reasons: string[] = [];
-      let rsiVal = 50, macdHist = 0, bbPos = 50, atrVal = currentPrice * 0.02, stochK = 50, stochD = 50, obvTrend = "flat";
+      let hasTA = false;
+      let rsiVal = 50;
+      let macdHist = 0;
+      let bbPos = 50;
+      let atrVal = currentPrice * 0.02;
+      let stochK = 50;
+      let stochD = 50;
+      let obvTrend = "flat";
       let divergence = { bullish: false, bearish: false, strength: "" };
+      let predictions: any[] = [];
+      let monteCarlo: any = null;
+      let projectedChange = 0;
 
       if (klinesRes.ok) {
         const klines = await klinesRes.json();
-        if (!Array.isArray(klines) || klines.length === 0) {
-          throw new Error("Invalid data from Binance");
+        if (Array.isArray(klines) && klines.length > 0) {
+          hasTA = true;
+          
+          const closes = klines.map((k: any) => parseFloat(k[4]));
+          const highs = klines.map((k: any) => parseFloat(k[2]));
+          const lows = klines.map((k: any) => parseFloat(k[3]));
+          const volumes = klines.map((k: any) => parseFloat(k[5]));
+
+          const rsiValues = calculateRSI(closes);
+          rsiVal = rsiValues[rsiValues.length - 1] || 50;
+
+          const macd = calculateMACD(closes);
+          macdHist = macd.histogram[macd.histogram.length - 1] || 0;
+
+          const bb = calculateBollingerBands(closes);
+          const latestBB = bb[bb.length - 1];
+          bbPos = latestBB ? ((currentPrice - latestBB.lower) / (latestBB.upper - latestBB.lower)) * 100 : 50;
+
+          const atrValues = calculateATR(highs, lows, closes);
+          atrVal = atrValues[atrValues.length - 1] || (currentPrice * 0.02);
+
+          const stoch = calculateStochastic(highs, lows, closes);
+          stochK = stoch.k[stoch.k.length - 1] || 50;
+          stochD = stoch.d[stoch.d.length - 1] || 50;
+
+          const obv = calculateOBV(closes, volumes);
+          const obvRecent = obv.slice(-10);
+          obvTrend = obvRecent[obvRecent.length - 1] > obvRecent[0] ? "rising" : obvRecent[obvRecent.length - 1] < obvRecent[0] ? "falling" : "flat";
+
+          divergence = detectRSIDivergence(closes, rsiValues);
+
+          const ema12 = calculateEMA(closes, 12);
+          const emaBullish = currentPrice > (ema12[ema12.length - 1] || 0);
+
+          if (change24h > 8 && change7d > 15) { signal = "STRONG_BULL"; confidence = 72; reasons.push("Strong price action"); }
+          else if (change24h < -8 && change7d < -15) { signal = "STRONG_BEAR"; confidence = 72; reasons.push("Strong price action"); }
+
+          if (rsiVal < 32 && stochK < 25 && emaBullish) {
+            confidence += 22; reasons.push(`RSI/Stoch oversold (${rsiVal.toFixed(0)}/${stochK.toFixed(0)})`);
+            if (signal === "NEUTRAL") signal = "BULLISH";
+          } else if (rsiVal > 68 && stochK > 75 && !emaBullish) {
+            confidence += 22; reasons.push(`RSI/Stoch overbought (${rsiVal.toFixed(0)}/${stochK.toFixed(0)})`);
+            if (signal === "NEUTRAL") signal = "BEARISH";
+          }
+
+          if (macdHist > 0 && obvTrend === "rising") {
+            confidence += 16; reasons.push("MACD + OBV bullish");
+            if (signal.includes("BULL") || signal === "NEUTRAL") signal = "STRONG_BULL";
+          } else if (macdHist < 0 && obvTrend === "falling") {
+            confidence += 16; reasons.push("MACD + OBV bearish");
+            if (signal.includes("BEAR") || signal === "NEUTRAL") signal = "STRONG_BEAR";
+          }
+
+          if (bbPos < 20 && divergence.bullish) {
+            confidence += 14; reasons.push(`Bullish RSI divergence @ lower BB`);
+          } else if (bbPos > 80 && divergence.bearish) {
+            confidence += 14; reasons.push(`Bearish RSI divergence @ upper BB`);
+          }
+
+          const volRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
+          if (volRatio > 9) confidence = Math.min(97, confidence + 9);
+          const volatilityPct = (atrVal / currentPrice) * 100;
+          if (volatilityPct > 22) confidence = Math.max(38, confidence - 14);
+
+          if (confidence > 84 && signal === "BULLISH") signal = "STRONG_BULL";
+          if (confidence > 84 && signal === "BEARISH") signal = "STRONG_BEAR";
+
+          confidence = Math.min(97, Math.max(38, Math.round(confidence)));
+
+          // Only generate predictions when real TA data exists
+          const drift = macdHist > 0 ? 0.0045 : macdHist < 0 ? -0.0045 : 0;
+          let projectedPrice = currentPrice;
+          const stepVol = (atrVal / currentPrice) * 1.7;
+          
+          for (let i = 1; i <= 12; i++) {
+            const randomFactor = (Math.random() - 0.5) * stepVol * 2;
+            projectedPrice *= (1 + drift + randomFactor);
+            const timeLabel = timeframe.label === "1h" ? `+${i}h` : timeframe.label === "4h" ? `+${i * 4}h` : timeframe.label === "1d" ? `+${i}d` : `+${i} periods`;
+            predictions.push({ time: timeLabel, price: projectedPrice, change: ((projectedPrice - currentPrice) / currentPrice) * 100 });
+          }
+
+          monteCarlo = runMonteCarlo(currentPrice, drift, atrVal, 12, 800);
+          projectedChange = ((predictions[predictions.length - 1].price - currentPrice) / currentPrice) * 100;
         }
-        
-        const closes = klines.map((k: any) => parseFloat(k[4]));
-        const highs = klines.map((k: any) => parseFloat(k[2]));
-        const lows = klines.map((k: any) => parseFloat(k[3]));
-        const volumes = klines.map((k: any) => parseFloat(k[5]));
-
-        const rsiValues = calculateRSI(closes);
-        rsiVal = rsiValues[rsiValues.length - 1] || 50;
-
-        const macd = calculateMACD(closes);
-        macdHist = macd.histogram[macd.histogram.length - 1] || 0;
-
-        const bb = calculateBollingerBands(closes);
-        const latestBB = bb[bb.length - 1];
-        bbPos = latestBB ? ((currentPrice - latestBB.lower) / (latestBB.upper - latestBB.lower)) * 100 : 50;
-
-        const atrValues = calculateATR(highs, lows, closes);
-        atrVal = atrValues[atrValues.length - 1] || (currentPrice * 0.02);
-
-        const stoch = calculateStochastic(highs, lows, closes);
-        stochK = stoch.k[stoch.k.length - 1] || 50;
-        stochD = stoch.d[stoch.d.length - 1] || 50;
-
-        const obv = calculateOBV(closes, volumes);
-        const obvRecent = obv.slice(-10);
-        obvTrend = obvRecent[obvRecent.length - 1] > obvRecent[0] ? "rising" : obvRecent[obvRecent.length - 1] < obvRecent[0] ? "falling" : "flat";
-
-        divergence = detectRSIDivergence(closes, rsiValues);
-
-        const ema12 = calculateEMA(closes, 12);
-        const emaBullish = currentPrice > (ema12[ema12.length - 1] || 0);
-
-        if (change24h > 8 && change7d > 15) { signal = "STRONG_BULL"; confidence = 72; reasons.push("Strong price action"); }
-        else if (change24h < -8 && change7d < -15) { signal = "STRONG_BEAR"; confidence = 72; reasons.push("Strong price action"); }
-
-        if (rsiVal < 32 && stochK < 25 && emaBullish) {
-          confidence += 22; reasons.push(`RSI/Stoch oversold (${rsiVal.toFixed(0)}/${stochK.toFixed(0)})`);
-          if (signal === "NEUTRAL") signal = "BULLISH";
-        } else if (rsiVal > 68 && stochK > 75 && !emaBullish) {
-          confidence += 22; reasons.push(`RSI/Stoch overbought (${rsiVal.toFixed(0)}/${stochK.toFixed(0)})`);
-          if (signal === "NEUTRAL") signal = "BEARISH";
-        }
-
-        if (macdHist > 0 && obvTrend === "rising") {
-          confidence += 16; reasons.push("MACD + OBV bullish");
-          if (signal.includes("BULL") || signal === "NEUTRAL") signal = "STRONG_BULL";
-        } else if (macdHist < 0 && obvTrend === "falling") {
-          confidence += 16; reasons.push("MACD + OBV bearish");
-          if (signal.includes("BEAR") || signal === "NEUTRAL") signal = "STRONG_BEAR";
-        }
-
-        if (bbPos < 20 && divergence.bullish) {
-          confidence += 14; reasons.push(`Bullish RSI divergence @ lower BB`);
-        } else if (bbPos > 80 && divergence.bearish) {
-          confidence += 14; reasons.push(`Bearish RSI divergence @ upper BB`);
-        }
-
-        const volRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
-        if (volRatio > 9) confidence = Math.min(97, confidence + 9);
-        const volatilityPct = (atrVal / currentPrice) * 100;
-        if (volatilityPct > 22) confidence = Math.max(38, confidence - 14);
-
-        if (confidence > 84 && signal === "BULLISH") signal = "STRONG_BULL";
-        if (confidence > 84 && signal === "BEARISH") signal = "STRONG_BEAR";
-
-        confidence = Math.min(97, Math.max(38, Math.round(confidence)));
       }
 
-      const drift = macdHist > 0 ? 0.0045 : macdHist < 0 ? -0.0045 : 0;
-      const predictions: any[] = [];
-      let projectedPrice = currentPrice;
-      const stepVol = (atrVal / currentPrice) * 1.7;
-      
-      for (let i = 1; i <= 12; i++) {
-        const randomFactor = (Math.random() - 0.5) * stepVol * 2;
-        projectedPrice *= (1 + drift + randomFactor);
-        const timeLabel = timeframe.label === "1h" ? `+${i}h` : timeframe.label === "4h" ? `+${i * 4}h` : timeframe.label === "1d" ? `+${i}d` : `+${i} periods`;
-        predictions.push({ time: timeLabel, price: projectedPrice, change: ((projectedPrice - currentPrice) / currentPrice) * 100 });
+      // Prevent stale requests from overwriting newer data
+      if (requestId === requestIdRef.current) {
+        setData({
+          signal,
+          confidence,
+          reasons,
+          changePct: change24h,
+          projectedChange,
+          currentPrice,
+          volume,
+          marketCap,
+          high24h,
+          low24h,
+          volatility: (atrVal / currentPrice * 100).toFixed(1),
+          rsi: Math.round(rsiVal),
+          macdHist: macdHist.toFixed(4),
+          bbPosition: bbPos.toFixed(0),
+          stochK: stochK.toFixed(0),
+          stochD: stochD.toFixed(0),
+          obvTrend,
+          divergence,
+          predictions,
+          monteCarlo,
+          hasTA,
+        });
       }
-
-      const mc = runMonteCarlo(currentPrice, drift, atrVal, 12, 800);
-      const finalChange = ((predictions[predictions.length - 1].price - currentPrice) / currentPrice) * 100;
-
-      setData({
-        signal,
-        confidence,
-        reasons,
-        changePct: change24h,
-        projectedChange: finalChange,
-        currentPrice,
-        volume,
-        marketCap,
-        high24h,
-        low24h,
-        volatility: (atrVal / currentPrice * 100).toFixed(1),
-        rsi: Math.round(rsiVal),
-        macdHist: macdHist.toFixed(4),
-        bbPosition: bbPos.toFixed(0),
-        stochK: stochK.toFixed(0),
-        stochD: stochD.toFixed(0),
-        obvTrend,
-        divergence,
-        predictions,
-        monteCarlo: mc,
-        hasTA: true,
-      });
     } catch (e: any) {
+      if (e.name === 'AbortError') return;
+      if (requestId !== requestIdRef.current) return;
       setError(e.message || "Failed to load advanced analysis");
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [selectedCoin, timeframe]);
 
-  const runBacktest = async () => {
+  const runBacktest = useCallback(async () => {
     if (!data || !data.hasTA) return;
+
+    const requestId = ++backtestRequestIdRef.current;
+
+    // Abort any previous backtest
+    backtestControllerRef.current?.abort();
+    const controller = new AbortController();
+    backtestControllerRef.current = controller;
+
     setLoading(true);
 
     try {
       const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
+      
+      const bnController = new AbortController();
+      const bnTimeout = setTimeout(() => bnController.abort(), 15000);
       const klinesRes = await fetch(
         `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${timeframe.binanceInterval}&limit=800`,
-        { signal: AbortSignal.timeout(15000) }
+        { signal: bnController.signal }
       );
+      clearTimeout(bnTimeout);
       
       if (klinesRes.status === 429) {
         throw new Error("Binance rate limit hit - please wait");
@@ -532,22 +582,31 @@ export default function WRCrystalBallPro() {
       const winRate = totalTrades > 0 ? (wins / totalTrades * 100) : 0;
       const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
 
-      setBacktestData({
-        winRate: winRate.toFixed(1),
-        totalTrades,
-        avgReturn: avgReturn.toFixed(2),
-        timeframe: timeframe.label,
-      });
+      if (requestId === backtestRequestIdRef.current) {
+        setBacktestData({
+          winRate: winRate.toFixed(1),
+          totalTrades,
+          avgReturn: avgReturn.toFixed(2),
+          timeframe: timeframe.label,
+        });
+      }
     } catch (e: any) {
+      if (e.name === 'AbortError') return;
+      if (requestId !== backtestRequestIdRef.current) return;
       setError(e.message || "Backtest failed");
     } finally {
-      setLoading(false);
+      if (requestId === backtestRequestIdRef.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [data, selectedCoin, timeframe]);
 
   useEffect(() => { 
-    fetchCoinData(); 
-  }, [selectedCoin.id, timeframe.label]);
+    fetchCoinData();
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, [fetchCoinData]);
 
   const SIGNAL_META: any = {
     STRONG_BULL: { color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20", icon: TrendingUp, label: "STRONG BUY" },
@@ -650,18 +709,20 @@ export default function WRCrystalBallPro() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4 text-[10px] bg-slate-800/30 rounded p-3">
-            <div>RSI: <span className={data.rsi < 35 ? "text-emerald-400" : data.rsi > 65 ? "text-rose-400" : ""}>{data.rsi}</span></div>
-            <div>Stoch %K: <span className={parseFloat(data.stochK) < 25 ? "text-emerald-400" : parseFloat(data.stochK) > 75 ? "text-rose-400" : ""}>{data.stochK}</span></div>
-            <div>MACD Hist: <span className={parseFloat(data.macdHist) > 0 ? "text-emerald-400" : "text-rose-400"}>{data.macdHist}</span></div>
-            <div>BB Pos: {data.bbPosition}%</div>
-            <div>OBV: <span className={data.obvTrend === "rising" ? "text-emerald-400" : data.obvTrend === "falling" ? "text-rose-400" : ""}>{data.obvTrend}</span></div>
-            <div>Divergence: 
-              {data.divergence.bullish && <span className="text-emerald-400"> BULLISH {data.divergence.strength}</span>}
-              {data.divergence.bearish && <span className="text-rose-400"> BEARISH {data.divergence.strength}</span>}
-              {!data.divergence.bullish && !data.divergence.bearish && "none"}
+          {data.hasTA && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4 text-[10px] bg-slate-800/30 rounded p-3">
+              <div>RSI: <span className={data.rsi < 35 ? "text-emerald-400" : data.rsi > 65 ? "text-rose-400" : ""}>{data.rsi}</span></div>
+              <div>Stoch %K: <span className={parseFloat(data.stochK) < 25 ? "text-emerald-400" : parseFloat(data.stochK) > 75 ? "text-rose-400" : ""}>{data.stochK}</span></div>
+              <div>MACD Hist: <span className={parseFloat(data.macdHist) > 0 ? "text-emerald-400" : "text-rose-400"}>{data.macdHist}</span></div>
+              <div>BB Pos: {data.bbPosition}%</div>
+              <div>OBV: <span className={data.obvTrend === "rising" ? "text-emerald-400" : data.obvTrend === "falling" ? "text-rose-400" : ""}>{data.obvTrend}</span></div>
+              <div>Divergence: 
+                {data.divergence.bullish && <span className="text-emerald-400"> BULLISH {data.divergence.strength}</span>}
+                {data.divergence.bearish && <span className="text-rose-400"> BEARISH {data.divergence.strength}</span>}
+                {!data.divergence.bullish && !data.divergence.bearish && "none"}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2 mb-3">
             <div className="bg-slate-800/50 rounded p-2">
@@ -684,62 +745,66 @@ export default function WRCrystalBallPro() {
             </div>
           </div>
 
-          <div className="bg-slate-800/30 rounded-lg p-3 mb-4">
-            <div className="flex items-center gap-2 mb-2">
-              <BarChart3 className="w-3 h-3 text-purple-400" />
-              <span className="text-[10px] text-purple-300 font-medium">12-Period Projection (ATR + MACD Drift)</span>
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {data.predictions.map((p: any, i: number) => (
-                <div key={i} className="bg-slate-900/50 rounded p-2 text-center">
-                  <div className="text-[9px] text-slate-500">{p.time}</div>
-                  <div className="text-[11px] font-mono">${p.price.toFixed(4)}</div>
-                  <div className={`text-[9px] ${p.change >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{p.change.toFixed(1)}%</div>
+          {data.hasTA && (
+            <>
+              <div className="bg-slate-800/30 rounded-lg p-3 mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <BarChart3 className="w-3 h-3 text-purple-400" />
+                  <span className="text-[10px] text-purple-300 font-medium">12-Period Projection (ATR + MACD Drift)</span>
                 </div>
-              ))}
-            </div>
-          </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {data.predictions.map((p: any, i: number) => (
+                    <div key={i} className="bg-slate-900/50 rounded p-2 text-center">
+                      <div className="text-[9px] text-slate-500">{p.time}</div>
+                      <div className="text-[11px] font-mono">${p.price.toFixed(4)}</div>
+                      <div className={`text-[9px] ${p.change >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{p.change.toFixed(1)}%</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
-          <div className="bg-slate-800/30 rounded-lg p-3 mb-4">
-            <div className="flex items-center gap-2 mb-2">
-              <BarChart3 className="w-3 h-3 text-amber-400" />
-              <span className="text-[10px] text-amber-300 font-medium">Monte Carlo Range (800 simulations • 12 periods)</span>
-            </div>
-            <div className="grid grid-cols-5 gap-2 text-center text-xs">
-              <div className="bg-slate-900/50 rounded p-2">
-                <div className="text-slate-500 text-[10px]">Bearish (25%)</div>
-                <div className="font-mono text-rose-400">${data.monteCarlo.p25.toFixed(2)}</div>
+              <div className="bg-slate-800/30 rounded-lg p-3 mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <BarChart3 className="w-3 h-3 text-amber-400" />
+                  <span className="text-[10px] text-amber-300 font-medium">Monte Carlo Range (800 simulations • 12 periods)</span>
+                </div>
+                <div className="grid grid-cols-5 gap-2 text-center text-xs">
+                  <div className="bg-slate-900/50 rounded p-2">
+                    <div className="text-slate-500 text-[10px]">Bearish (25%)</div>
+                    <div className="font-mono text-rose-400">${data.monteCarlo.p25.toFixed(2)}</div>
+                  </div>
+                  <div className="bg-slate-900/50 rounded p-2">
+                    <div className="text-slate-500 text-[10px]">Minimum</div>
+                    <div className="font-mono text-rose-400">${data.monteCarlo.min.toFixed(2)}</div>
+                  </div>
+                  <div className="bg-slate-900/50 rounded p-2 border border-purple-400">
+                    <div className="text-slate-500 text-[10px]">Median</div>
+                    <div className="font-mono text-purple-300">${data.monteCarlo.median.toFixed(2)}</div>
+                  </div>
+                  <div className="bg-slate-900/50 rounded p-2">
+                    <div className="text-slate-500 text-[10px]">Maximum</div>
+                    <div className="font-mono text-emerald-400">${data.monteCarlo.max.toFixed(2)}</div>
+                  </div>
+                  <div className="bg-slate-900/50 rounded p-2">
+                    <div className="text-slate-500 text-[10px]">Bullish (75%)</div>
+                    <div className="font-mono text-emerald-400">${data.monteCarlo.p75.toFixed(2)}</div>
+                  </div>
+                </div>
+                <div className="text-center text-[10px] text-slate-400 mt-2">
+                  80% of simulated paths fall between ${data.monteCarlo.p25.toFixed(2)} – ${data.monteCarlo.p75.toFixed(2)}
+                </div>
               </div>
-              <div className="bg-slate-900/50 rounded p-2">
-                <div className="text-slate-500 text-[10px]">Minimum</div>
-                <div className="font-mono text-rose-400">${data.monteCarlo.min.toFixed(2)}</div>
-              </div>
-              <div className="bg-slate-900/50 rounded p-2 border border-purple-400">
-                <div className="text-slate-500 text-[10px]">Median</div>
-                <div className="font-mono text-purple-300">${data.monteCarlo.median.toFixed(2)}</div>
-              </div>
-              <div className="bg-slate-900/50 rounded p-2">
-                <div className="text-slate-500 text-[10px]">Maximum</div>
-                <div className="font-mono text-emerald-400">${data.monteCarlo.max.toFixed(2)}</div>
-              </div>
-              <div className="bg-slate-900/50 rounded p-2">
-                <div className="text-slate-500 text-[10px]">Bullish (75%)</div>
-                <div className="font-mono text-emerald-400">${data.monteCarlo.p75.toFixed(2)}</div>
-              </div>
-            </div>
-            <div className="text-center text-[10px] text-slate-400 mt-2">
-              80% of simulated paths fall between ${data.monteCarlo.p25.toFixed(2)} – ${data.monteCarlo.p75.toFixed(2)}
-            </div>
-          </div>
 
-          <button 
-            onClick={runBacktest} 
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
-          >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingFlat className="w-4 h-4" />}
-            {loading ? "Running historical backtest..." : "Run Backtest (800 candles)"}
-          </button>
+              <button 
+                onClick={runBacktest} 
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingFlat className="w-4 h-4" />}
+                {loading ? "Running historical backtest..." : "Run Backtest (800 candles)"}
+              </button>
+            </>
+          )}
 
           {backtestData && (
             <div className="mt-3 bg-emerald-900/20 border border-emerald-500/30 rounded-lg p-3 text-xs">
