@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { TrendingUp, TrendingDown, Minus, Loader2, Activity, BarChart3, TrendingFlat, Zap } from "lucide-react";
 // ==================== COIN LIST ====================
+// ==================== COIN LIST ====================
 const COIN_LIST = [
   { symbol: "BTC", id: "bitcoin", name: "Bitcoin" },
   { symbol: "ETH", id: "ethereum", name: "Ethereum" },
