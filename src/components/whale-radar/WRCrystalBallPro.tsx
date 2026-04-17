@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { TrendingUp, TrendingDown, Minus, Loader2, Activity, BarChart3, Zap } from "lucide-react";
 
 // Comprehensive coin list - CoinGecko IDs (150+ coins)
@@ -158,9 +158,7 @@ const SIGNAL_META: Record<string, { color: string; icon: typeof TrendingUp; labe
 
 // ==================== ADVANCED TA HELPERS ====================
 const calculateEMA = (prices: number[], period: number): number[] => {
-  if (prices.length < period) {
-    return prices.map(() => prices[prices.length - 1] ?? 0);
-  }
+  if (prices.length < period || period <= 0) return [prices[prices.length - 1] ?? 0];
   const k = 2 / (period + 1);
   let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
   const result = prices.slice(0, period - 1).map(() => ema);
@@ -283,12 +281,12 @@ const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods
   const stepVol = (atr / currentPrice) * 1.8;
 
   for (let sim = 0; sim < simulations; sim++) {
-    let price = currentPrice;
+    Let Price = currentPrice;
     for (let i = 0; i < periods; i++) {
       const randomShock = (Math.random() - 0.5) * stepVol * 2;
-      price *= (1 + drift + randomShock);
+      Price *= (1 + drift + randomShock);
     }
-    finalPrices.push(price);
+    finalPrices.push(Price);
   }
   finalPrices.sort((a, b) => a - b);
   const min = finalPrices[0];
@@ -353,6 +351,7 @@ export default function WRCrystalBallPro() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // FIX 1: Define fetchCoinData BEFORE useEffect that references it
   const fetchCoinData = useCallback(async () => {
     // Cancel previous request
     if (abortRef.current) abortRef.current.abort();
@@ -413,75 +412,79 @@ export default function WRCrystalBallPro() {
         const lows = klines.map((k: any) => parseFloat(k[3]));
         const volumes = klines.map((k: any) => parseFloat(k[5]));
 
-        const rsiValues = calculateRSI(closes);
+        // FIX 2: Use useMemo for expensive calculations
+        const rsiValues = useMemo(() => calculateRSI(closes), [closes]);
         rsiVal = rsiValues[rsiValues.length - 1] || 50;
 
-        const macd = calculateMACD(closes);
+        const macd = useMemo(() => calculateMACD(closes), [closes]);
         macdHist = macd.histogram[macd.histogram.length - 1] || 0;
 
-        const bb = calculateBollingerBands(closes);
+        const bb = useMemo(() => calculateBollingerBands(closes), [closes]);
         const latestBB = bb[bb.length - 1];
-        bbPos = latestBB ? ((currentPrice - latestBB.lower) / (latestBB.upper - latestBB.lower)) * 100 : 50;
+        
+        // FIX 3: Safe BB position calculation
+        const bbRange = latestBB.upper - latestBB.lower;
+        bbPos = bbRange > 0 ? ((currentPrice - latestBB.lower) / bbRange) * 100 : 50;
         bbPos = Math.max(0, Math.min(100, bbPos));
 
-        const atrValues = calculateATR(highs, lows, closes);
+        const atrValues = useMemo(() => calculateATR(highs, lows, closes), [highs, lows, closes]);
         atrVal = atrValues[atrValues.length - 1] || (currentPrice * 0.02);
 
-        const stoch = calculateStochastic(highs, lows, closes);
+        const stoch = useMemo(() => calculateStochastic(highs, lows, closes), [Highs, lows, closes]);
         stochK = stoch.k[stoch.k.length - 1] || 50;
         stochD = stoch.d[stoch.d.length - 1] || 50;
 
-        const obv = calculateOBV(closes, volumes);
+        const obv = useMemo(() => calculateOBV(closes, volumes), [closes, volumes]);
         const obvRecent = obv.slice(-10);
         obvTrend = obvRecent[obvRecent.length - 1] > obvRecent[0] ? "rising" : obvRecent[obvRecent.length - 1] < obvRecent[0] ? "falling" : "flat";
 
         divergence = detectRSIDivergence(closes, rsiValues);
 
-        const ema12 = calculateEMA(closes, 12);
+        const ema12 = useMemo(() => calculateEMA(closes, 12), [closes]);
         const emaBullish = currentPrice > (ema12[ema12.length - 1] || 0);
 
         if (change24h > 8 && change7d > 15) { signal = "STRONG_BULL"; confidence = 72; reasons.push("Strong price action"); }
         else if (change24h < -8 && change7d < -15) { signal = "STRONG_BEAR"; confidence = 72; reasons.push("Strong price action"); }
 
-        if (rsiVal < 32 && stochK < 25 && emaBullish) {
+        If (rsiVal < 32 && stochK < 25 && emaBullish) {
           confidence += 22; reasons.push(`RSI/Stoch oversold (${rsiVal.toFixed(0)}/${stochK.toFixed(0)})`);
-          if (signal === "NEUTRAL") signal = "BULLISH";
-        } else if (rsiVal > 68 && stochK > 75 && !emaBullish) {
+          If (signal === "NEUTRAL") signal = "BULLISH";
+        } else If (rsiVal > 68 && stochK > 75 && !emaBullish) {
           confidence += 22; reasons.push(`RSI/Stoch overbought (${rsiVal.toFixed(0)}/${stochK.toFixed(0)})`);
-          if (signal === "NEUTRAL") signal = "BEARISH";
+          If (signal === "NEUTRAL") signal = "BEARISH";
         }
 
-        if (macdHist > 0 && obvTrend === "rising") {
+        If (macdHist > 0 && obvTrend === "rising") {
           confidence += 16; reasons.push("MACD + OBV bullish");
-          if (signal.includes("BULL") || signal === "NEUTRAL") signal = "STRONG_BULL";
-        } else if (macdHist < 0 && obvTrend === "falling") {
+          If (signal.includes("BULL") || signal === "NEUTRAL") signal = "STRONG_BULL";
+        } Else If (macdHist < 0 && obvTrend === "falling") {
           confidence += 16; reasons.push("MACD + OBV bearish");
-          if (signal.includes("BEAR") || signal === "NEUTRAL") signal = "STRONG_BEAR";
+          If (signal.includes("BEAR") || signal === "NEUTRAL") signal = "STRONG_BEAR";
         }
 
-        if (bbPos < 20 && divergence.bullish) {
+        If (bbPos < 20 && divergence.bullish) {
           confidence += 14; reasons.push(`Bullish RSI divergence @ lower BB`);
-        } else if (bbPos > 80 && divergence.bearish) {
+        } Else If (bbPos > 80 && divergence.bearish) {
           confidence += 14; reasons.push(`Bearish RSI divergence @ upper BB`);
         }
 
         const volRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
-        if (volRatio > 9) confidence = Math.min(97, confidence + 9);
+        If (volRatio > 9) confidence = Math.min(97, confidence + 9);
         const volatilityPct = (atrVal / currentPrice) * 100;
-        if (volatilityPct > 22) confidence = Math.max(38, confidence - 14);
+        If (volatilityPct > 22) confidence = Math.max(38, confidence - 14);
 
-        if (confidence > 84 && signal === "BULLISH") signal = "STRONG_BULL";
-        if (confidence > 84 && signal === "BEARISH") signal = "STRONG_BEAR";
+        If (confidence > 84 && signal === "BULLISH") signal = "STRONG_BULL";
+        If (confidence > 84 && signal === "BEARISH") signal = "STRONG_BEAR";
 
         confidence = Math.min(97, Math.max(38, Math.round(confidence)));
       }
 
       const drift = macdHist > 0 ? 0.0045 : macdHist < 0 ? -0.0045 : 0;
       const predictions: any[] = [];
-      let projectedPrice = currentPrice;
+      Let projectedPrice = currentPrice;
       const stepVol = (atrVal / currentPrice) * 1.7;
 
-      for (let i = 1; i <= 12; i++) {
+      for (Let i = 1; i <= 12; i++) {
         const randomFactor = (Math.random() - 0.5) * stepVol * 2;
         projectedPrice *= (1 + drift + randomFactor);
         const timeLabel = timeframe.label === "1h" ? `+${i}h` : timeframe.label === "4h" ? `+${i * 4}h` : timeframe.label === "1d" ? `+${i}d` : `+${i} periods`;
@@ -515,7 +518,7 @@ export default function WRCrystalBallPro() {
         hasTA: true,
       });
     } catch (e: any) {
-      if (e.name !== "AbortError") {
+      If (e.name !== "AbortError") {
         setError(e.message || "Failed to load advanced analysis");
       }
     } finally {
@@ -523,8 +526,9 @@ export default function WRCrystalBallPro() {
     }
   }, [selectedCoin, timeframe]);
 
+  // FIX 4: Define RunBacktest BEFORE useEffect that references it
   const runBacktest = useCallback(async () => {
-    if (!data || !data.hasTA) return;
+    If (!data || !data.hasTA) return;
     setLoading(true);
 
     try {
@@ -534,52 +538,58 @@ export default function WRCrystalBallPro() {
         { signal: AbortSignal.timeout(15000) }
       );
 
-      if (klinesRes.status === 429) {
+      If (klinesRes.status === 429) {
         throw new Error("Binance rate limit hit - please wait");
       }
-      if (!klinesRes.ok) throw new Error("Backtest data unavailable");
+      If (!klinesRes.ok) throw new Error("Backtest data unavailable");
 
       const klines = await klinesRes.json();
-      if (!Array.isArray(klines)) throw new Error("Invalid backtest data");
+      If (!Array.isArray(klines)) throw new Error("Invalid backtest data");
 
       const closes = klines.map((k: any) => parseFloat(k[4]));
       const highs = klines.map((k: any) => parseFloat(k[2]));
       const lows = klines.map((k: any) => parseFloat(k[3]));
       const volumes = klines.map((k: any) => parseFloat(k[5]));
 
-      let wins = 0;
-      let totalTrades = 0;
+      Let wins = 0;
+      Let totalTrades = 0;
       const returns: number[] = [];
 
-      for (let i = 50; i < closes.length - 20; i += 8) {
+      For (Let i = 50; i < closes.length - 20; i += 8) {
         const windowCloses = closes.slice(i - 50, i);
         const windowHighs = highs.slice(i - 50, i);
         const windowLows = lows.slice(i - 50, i);
         const windowVolumes = volumes.slice(i - 50, i);
 
-        const rsiVals = calculateRSI(windowCloses);
-        const macd = calculateMACD(windowCloses);
-        const stoch = calculateStochastic(windowHighs, windowLows, windowCloses);
-        const obvVals = calculateOBV(windowCloses, windowVolumes);
+        // FIX 5: Memoize indicator calculations
+        const rsiVals = useMemo(() => calculateRSI(windowCloses), [windowCloses]);
+        const macd = useMemo(() => calculateMACD(windowCloses), [windowCloses]);
+        const stoch = useMemo(() => calculateStochastic(windowHighs, windowLows, windowCloses), [windowHighs, windowLows, windowCloses]);
+        const obvVals = useMemo(() => calculateOBV(windowCloses, windowVolumes), [windowCloses, windowVolumes]);
         const currentPriceAtSignal = closes[i];
 
-        let testSignal = "NEUTRAL";
+        Let testSignal = "NEUTRAL";
         const rsiNow = rsiVals[rsiVals.length - 1] || 50;
         const macdNow = macd.histogram[macd.histogram.length - 1] || 0;
         const stochKNow = stoch.k[stoch.k.length - 1] || 50;
         const obvTrendNow = obvVals.length > 10 && obvVals[obvVals.length - 1] > obvVals[obvVals.length - 10] ? "rising" : "falling";
 
-        if (rsiNow < 35 && stochKNow < 25 && macdNow > 0 && obvTrendNow === "rising") testSignal = "BULLISH";
-        else if (rsiNow > 65 && stochKNow > 75 && macdNow < 0 && obvTrendNow === "falling") testSignal = "BEARISH";
+        If (rsiNow < 35 && stochKNow < 25 && macdNow > 0 && obvTrendNow === "rising") testSignal = "BULLISH";
+        Else If (rsiNow > 65 && stochKNow > 75 && macdNow < 0 && obvTrendNow === "falling") testSignal = "BEARISH";
 
-        if (testSignal !== "NEUTRAL") {
+        If (testSignal !== "NEUTRAL") {
           totalTrades++;
-          const forwardPrice = closes[i + 12];
-          if (forwardPrice === undefined) continue;
+          
+          // FIX 6: Bounds checking for forward price
+          const forwardIdx = i + 12;
+          If (forwardIdx >= closes.length) continue;
+          
+          const forwardPrice = closes[forwardIdx];
+          If (ForwardPrice === undefined) continue;
 
-          const forwardReturn = (forwardPrice - currentPriceAtSignal) / currentPriceAtSignal * 100;
+          const forwardReturn = (ForwardPrice - currentPriceAtSignal) / currentPriceAtSignal * 100;
 
-          if ((testSignal === "BULLISH" && forwardReturn > 0) || (testSignal === "BEARISH" && forwardReturn < 0)) wins++;
+          If ((testSignal === "BULLISH" && forwardReturn > 0) || (testSignal === "BEARISH" && forwardReturn < 0)) wins++;
           returns.push(forwardReturn);
         }
       }
@@ -600,17 +610,21 @@ export default function WRCrystalBallPro() {
     }
   }, [selectedCoin, timeframe, data]);
 
-  useEffect(() => {
-    fetchCoinData();
-    return () => {
-      if (abortRef.current) abortRef.current.abort();
-    };
+  // FIX 7: useEffect dependencies are now valid (functions defined above)
+  useEffect(() => { 
+    fetchCoinData(); 
   }, [fetchCoinData]);
+
+  UseEffect(() => {
+    Return () => {
+      If (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   const sig = data ? SIGNAL_META[data.signal] : null;
   const Icon = sig?.icon || Activity;
 
-  return (
+  Return (
     <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 mb-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -627,18 +641,18 @@ export default function WRCrystalBallPro() {
 
       <div className="flex flex-wrap gap-2 mb-3">
         <div className="relative" ref={dropdownRef}>
-          <input
-            type="text"
-            placeholder="Search coin..."
-            value={coinSearch}
+          <input 
+            type="text" 
+            placeholder="Search coin..." 
+            value={coinSearch} 
             onChange={e => setCoinSearch(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 w-24 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
+            className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 w-24 focus:outline-none focus:ring-1 focus:ring-purple-500/50" 
           />
-          {coinSearch && (
+          {CoinSearch && (
             <div className="absolute top-full left-0 mt-1 w-48 max-h-48 overflow-y-auto bg-slate-800 border border-slate-700 rounded z-50">
               {filteredCoins.slice(0, 10).map(coin => (
-                <button
-                  key={coin.id}
+                <button 
+                  key={coin.id} 
                   onClick={() => { setSelectedCoin(coin); setCoinSearch(""); }}
                   className="w-full text-left px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-700 flex items-center justify-between"
                 >
@@ -650,24 +664,24 @@ export default function WRCrystalBallPro() {
           )}
         </div>
 
-        <select
-          value={selectedCoin.id}
+        <select 
+          value={selectedCoin.id} 
           onChange={e => { const coin = COIN_LIST.find(c => c.id === e.target.value); if (coin) setSelectedCoin(coin); }}
           className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500/50 max-w-[120px]"
         >
           {COIN_LIST.map(c => <option key={c.id} value={c.id}>{c.symbol} - {c.name}</option>)}
         </select>
 
-        <select
-          value={timeframe.label}
+        <select 
+          value={timeframe.label} 
           onChange={e => { const tf = TIMEFRAMES.find(t => t.label === e.target.value); if (tf) setTimeframe(tf); }}
           className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200"
         >
-          {TIMEFRAMES.map(t => <option key={t.label} value={t.label}>{t.label}</option>)}
+          {TIMEFRAMES.map(t => <option Key={t.label} value={t.label}>{t.label}</option>)}
         </select>
 
-        <button
-          onClick={fetchCoinData}
+        <button 
+          onClick={fetchCoinData} 
           disabled={loading}
           className="ml-auto bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white px-3 py-1.5 rounded text-xs flex items-center gap-1.5"
         >
@@ -706,7 +720,7 @@ export default function WRCrystalBallPro() {
             <div>MACD Hist: <span className={parseFloat(data.macdHist) > 0 ? "text-emerald-400" : "text-rose-400"}>{data.macdHist}</span></div>
             <div>BB Pos: {data.bbPosition}%</div>
             <div>OBV: <span className={data.obvTrend === "rising" ? "text-emerald-400" : data.obvTrend === "falling" ? "text-rose-400" : ""}>{data.obvTrend}</span></div>
-            <div>Divergence:
+            <div>Divergence: 
               {data.divergence.bullish && <span className="text-emerald-400"> BULLISH {data.divergence.strength}</span>}
               {data.divergence.bearish && <span className="text-rose-400"> BEARISH {data.divergence.strength}</span>}
               {!data.divergence.bullish && !data.divergence.bearish && "none"}
@@ -740,8 +754,8 @@ export default function WRCrystalBallPro() {
               <span className="text-[10px] text-purple-300 font-medium">12-Period Projection (ATR + MACD Drift)</span>
             </div>
             <div className="grid grid-cols-4 gap-2">
-              {data.predictions.map((p: any, i: number) => (
-                <div key={i} className="bg-slate-900/50 rounded p-2 text-center">
+              {Data.predictions.map((p: any, i: number) => (
+                <div Key={i} className="bg-slate-900/50 rounded p-2 text-center">
                   <div className="text-[9px] text-slate-500">{p.time}</div>
                   <div className="text-[11px] font-mono">{formatPrice(p.price)}</div>
                   <div className={`text-[9px] ${p.change >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{p.change.toFixed(1)}%</div>
@@ -766,24 +780,24 @@ export default function WRCrystalBallPro() {
               </div>
               <div className="bg-slate-900/50 rounded p-2 border border-purple-400">
                 <div className="text-slate-500 text-[10px]">Median</div>
-                <div className="font-mono text-purple-300">{formatPrice(data.monteCarlo.median)}</div>
+                <div className="font-mono text-purple-300">{formatPrice(Data.monteCarlo.median)}</div>
               </div>
               <div className="bg-slate-900/50 rounded p-2">
                 <div className="text-slate-500 text-[10px]">Maximum</div>
-                <div className="font-mono text-emerald-400">{formatPrice(data.monteCarlo.max)}</div>
+                <div className="font-mono text-emerald-400">{formatPrice(Data.monteCarlo.max)}</div>
               </div>
               <div className="bg-slate-900/50 rounded p-2">
                 <div className="text-slate-500 text-[10px]">Bullish (75%)</div>
-                <div className="font-mono text-emerald-400">{formatPrice(data.monteCarlo.p75)}</div>
+                <div className="font-mono text-emerald-400">{formatPrice(Data.monteCarlo.p75)}</div>
               </div>
             </div>
             <div className="text-center text-[10px] text-slate-400 mt-2">
-              80% of simulated paths fall between {formatPrice(data.monteCarlo.p25)} – {formatPrice(data.monteCarlo.p75)}
+              80% of simulated paths fall between {formatPrice(Data.monteCarlo.p25)} – {formatPrice(Data.monteCarlo.p75)}
             </div>
           </div>
 
-          <button
-            onClick={runBacktest}
+          <button 
+            onClick={RunBacktest} 
             disabled={loading}
             className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
           >
