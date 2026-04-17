@@ -1,7 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { TrendingUp, TrendingDown, Minus, Loader2, Activity, BarChart3, Zap } from "lucide-react";
-// FIX 1: Removed non-existent "TrendingFlat" from lucide-react import.
-//         Added "useCallback" to React imports for FIX 2.
 
 // Comprehensive coin list - CoinGecko IDs (150+ coins)
 const COIN_LIST = [
@@ -150,13 +148,24 @@ const TIMEFRAMES = [
   { label: "30d", binanceInterval: "1d", days: 30, interval: "daily" },
 ];
 
+const SIGNAL_META: Record<string, { color: string; icon: typeof TrendingUp; label: string }> = {
+  STRONG_BULL: { color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20", icon: TrendingUp, label: "STRONG BUY" },
+  BULLISH: { color: "text-green-400 bg-green-500/10 border-green-500/20", icon: TrendingUp, label: "BUY" },
+  NEUTRAL: { color: "text-slate-400 bg-slate-500/10 border-slate-500/20", icon: Minus, label: "HOLD" },
+  BEARISH: { color: "text-rose-400 bg-rose-500/10 border-rose-500/20", icon: TrendingDown, label: "SELL" },
+  STRONG_BEAR: { color: "text-red-500 bg-red-500/10 border-red-500/20", icon: TrendingDown, label: "STRONG SELL" },
+};
+
 // ==================== ADVANCED TA HELPERS ====================
 const calculateEMA = (prices: number[], period: number): number[] => {
+  if (prices.length < period) {
+    return prices.map(() => prices[prices.length - 1] ?? 0);
+  }
   const k = 2 / (period + 1);
   let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
   const result = prices.slice(0, period - 1).map(() => ema);
   result.push(ema);
-  
+
   for (let i = period; i < prices.length; i++) {
     ema = prices[i] * k + ema * (1 - k);
     result.push(ema);
@@ -171,15 +180,12 @@ const calculateRSI = (prices: number[], period: number = 14): number[] => {
   const losses = changes.map(c => Math.max(-c, 0));
 
   let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  // FIX 3: Use Math.max to guarantee avgLoss is never 0 (avoids division-by-zero
-  //         and the previous "|| 0.0001" which had wrong operator precedence).
   let avgLoss = Math.max(losses.slice(0, period).reduce((a, b) => a + b, 0) / period, 0.0001);
 
   const rsi: number[] = [100 - 100 / (1 + avgGain / avgLoss)];
 
   for (let i = period; i < gains.length; i++) {
     avgGain = (avgGain * (period - 1) + gains[i]) / period;
-    // FIX 3 (continued): Same fix applied to the rolling avgLoss update.
     avgLoss = Math.max((avgLoss * (period - 1) + losses[i]) / period, 0.0001);
     rsi.push(100 - 100 / (1 + avgGain / avgLoss));
   }
@@ -196,16 +202,10 @@ const calculateMACD = (prices: number[], fast = 12, slow = 26, signalPeriod = 9)
 };
 
 const calculateBollingerBands = (prices: number[], period = 20, stdDev = 2) => {
-  const sma = [];
-  for (let i = period - 1; i < prices.length; i++) {
-    const slice = prices.slice(i - period + 1, i + 1);
-    sma.push(slice.reduce((a, b) => a + b, 0) / period);
-  }
-  
   const bands: { upper: number; middle: number; lower: number }[] = [];
   for (let i = period - 1; i < prices.length; i++) {
     const slice = prices.slice(i - period + 1, i + 1);
-    const mean = sma[i - (period - 1)];
+    const mean = slice.reduce((a, b) => a + b, 0) / period;
     const variance = slice.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / period;
     const std = Math.sqrt(variance);
     bands.push({ upper: mean + stdDev * std, middle: mean, lower: mean - stdDev * std });
@@ -218,8 +218,8 @@ const calculateATR = (highs: number[], lows: number[], closes: number[], period 
   const tr: number[] = [];
   for (let i = 1; i < highs.length; i++) {
     const trueRange = Math.max(
-      highs[i] - lows[i], 
-      Math.abs(highs[i] - closes[i - 1]), 
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
       Math.abs(lows[i] - closes[i - 1])
     );
     tr.push(trueRange);
@@ -300,6 +300,29 @@ const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods
   return { min, p25, median, p75, max, simulations };
 };
 
+// ==================== PRICE FORMATTING ====================
+const formatPrice = (price: number | null | undefined): string => {
+  if (price === null || price === undefined || isNaN(price)) return "—";
+  if (price === 0) return "$0.00";
+
+  if (price < 0.00001) {
+    return `$${price.toExponential(4)}`;
+  }
+  if (price < 0.01) {
+    return `$${price.toFixed(8).replace(/\.?0+$/, "")}`;
+  }
+  if (price < 1) {
+    return `$${price.toFixed(6).replace(/\.?0+$/, "")}`;
+  }
+  if (price < 100) {
+    return `$${price.toFixed(4).replace(/\.?0+$/, "")}`;
+  }
+  if (price < 10000) {
+    return `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  return `$${price.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+};
+
 export default function WRCrystalBallPro() {
   const [selectedCoin, setSelectedCoin] = useState(COIN_LIST[0]);
   const [timeframe, setTimeframe] = useState(TIMEFRAMES[2]);
@@ -308,15 +331,34 @@ export default function WRCrystalBallPro() {
   const [backtestData, setBacktestData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [coinSearch, setCoinSearch] = useState("");
+  const abortRef = useRef<AbortController | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const filteredCoins = COIN_LIST.filter(c =>
-    c.symbol.toLowerCase().includes(coinSearch.toLowerCase()) ||
-    c.name.toLowerCase().includes(coinSearch.toLowerCase())
+  const filteredCoins = useMemo(() =>
+    COIN_LIST.filter(c =>
+      c.symbol.toLowerCase().includes(coinSearch.toLowerCase()) ||
+      c.name.toLowerCase().includes(coinSearch.toLowerCase())
+    ),
+    [coinSearch]
   );
 
-  // FIX 2: Wrapped fetchCoinData in useCallback so the useEffect dependency array
-  //         can safely include it, preventing stale closure bugs.
+  // Click outside to close search dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setCoinSearch("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const fetchCoinData = useCallback(async () => {
+    // Cancel previous request
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
+
     setLoading(true);
     setError(null);
     setData(null);
@@ -325,20 +367,22 @@ export default function WRCrystalBallPro() {
     try {
       const coinGeckoRes = await fetch(
         `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${selectedCoin.id}&price_change_percentage=24h,7d&include_24hr_high=true&include_24hr_low=true`,
-        { signal: AbortSignal.timeout(15000) }
+        { signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : signal }
       );
-      
+
       if (coinGeckoRes.status === 429) {
         throw new Error("CoinGecko rate limit exceeded. Please wait 30 seconds.");
       }
       if (!coinGeckoRes.ok) throw new Error(`CoinGecko error: ${coinGeckoRes.status}`);
-      
+
       const json = await coinGeckoRes.json();
       if (!json || json.length === 0) throw new Error("No data returned from CoinGecko");
-      
+
       const coin = json[0];
 
-      const currentPrice = coin.current_price;
+      const currentPrice = coin.current_price ?? 0;
+      if (currentPrice === 0) throw new Error("Invalid price data from CoinGecko");
+
       const change24h = coin.price_change_percentage_24h || 0;
       const change7d = coin.price_change_percentage_7d_in_currency || 0;
       const volume = coin.total_volume || 0;
@@ -349,7 +393,7 @@ export default function WRCrystalBallPro() {
       const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
       const klinesRes = await fetch(
         `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${timeframe.binanceInterval}&limit=500`,
-        { signal: AbortSignal.timeout(12000) }
+        { signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(12000)]) : signal }
       );
 
       let signal = "NEUTRAL";
@@ -363,7 +407,7 @@ export default function WRCrystalBallPro() {
         if (!Array.isArray(klines) || klines.length === 0) {
           throw new Error("Invalid data from Binance");
         }
-        
+
         const closes = klines.map((k: any) => parseFloat(k[4]));
         const highs = klines.map((k: any) => parseFloat(k[2]));
         const lows = klines.map((k: any) => parseFloat(k[3]));
@@ -378,6 +422,7 @@ export default function WRCrystalBallPro() {
         const bb = calculateBollingerBands(closes);
         const latestBB = bb[bb.length - 1];
         bbPos = latestBB ? ((currentPrice - latestBB.lower) / (latestBB.upper - latestBB.lower)) * 100 : 50;
+        bbPos = Math.max(0, Math.min(100, bbPos));
 
         const atrValues = calculateATR(highs, lows, closes);
         atrVal = atrValues[atrValues.length - 1] || (currentPrice * 0.02);
@@ -435,7 +480,7 @@ export default function WRCrystalBallPro() {
       const predictions: any[] = [];
       let projectedPrice = currentPrice;
       const stepVol = (atrVal / currentPrice) * 1.7;
-      
+
       for (let i = 1; i <= 12; i++) {
         const randomFactor = (Math.random() - 0.5) * stepVol * 2;
         projectedPrice *= (1 + drift + randomFactor);
@@ -470,13 +515,14 @@ export default function WRCrystalBallPro() {
         hasTA: true,
       });
     } catch (e: any) {
-      setError(e.message || "Failed to load advanced analysis");
+      if (e.name !== "AbortError") {
+        setError(e.message || "Failed to load advanced analysis");
+      }
     } finally {
       setLoading(false);
     }
-  }, [selectedCoin, timeframe]); // FIX 2: correct deps for useCallback
+  }, [selectedCoin, timeframe]);
 
-  // FIX 2: fetchCoinData is now stable via useCallback and safe to include here.
   const runBacktest = useCallback(async () => {
     if (!data || !data.hasTA) return;
     setLoading(true);
@@ -487,7 +533,7 @@ export default function WRCrystalBallPro() {
         `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${timeframe.binanceInterval}&limit=800`,
         { signal: AbortSignal.timeout(15000) }
       );
-      
+
       if (klinesRes.status === 429) {
         throw new Error("Binance rate limit hit - please wait");
       }
@@ -495,7 +541,7 @@ export default function WRCrystalBallPro() {
 
       const klines = await klinesRes.json();
       if (!Array.isArray(klines)) throw new Error("Invalid backtest data");
-      
+
       const closes = klines.map((k: any) => parseFloat(k[4]));
       const highs = klines.map((k: any) => parseFloat(k[2]));
       const lows = klines.map((k: any) => parseFloat(k[3]));
@@ -523,12 +569,14 @@ export default function WRCrystalBallPro() {
         const stochKNow = stoch.k[stoch.k.length - 1] || 50;
         const obvTrendNow = obvVals.length > 10 && obvVals[obvVals.length - 1] > obvVals[obvVals.length - 10] ? "rising" : "falling";
 
-        if (rsiNow < 35 && stochKNow < 25 && macdNow > 0) testSignal = "BULLISH";
-        else if (rsiNow > 65 && stochKNow > 75 && macdNow < 0) testSignal = "BEARISH";
+        if (rsiNow < 35 && stochKNow < 25 && macdNow > 0 && obvTrendNow === "rising") testSignal = "BULLISH";
+        else if (rsiNow > 65 && stochKNow > 75 && macdNow < 0 && obvTrendNow === "falling") testSignal = "BEARISH";
 
         if (testSignal !== "NEUTRAL") {
           totalTrades++;
           const forwardPrice = closes[i + 12];
+          if (forwardPrice === undefined) continue;
+
           const forwardReturn = (forwardPrice - currentPriceAtSignal) / currentPriceAtSignal * 100;
 
           if ((testSignal === "BULLISH" && forwardReturn > 0) || (testSignal === "BEARISH" && forwardReturn < 0)) wins++;
@@ -552,18 +600,12 @@ export default function WRCrystalBallPro() {
     }
   }, [selectedCoin, timeframe, data]);
 
-  // FIX 2: fetchCoinData is now correctly listed as a dependency.
-  useEffect(() => { 
-    fetchCoinData(); 
+  useEffect(() => {
+    fetchCoinData();
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
   }, [fetchCoinData]);
-
-  const SIGNAL_META: any = {
-    STRONG_BULL: { color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20", icon: TrendingUp, label: "STRONG BUY" },
-    BULLISH: { color: "text-green-400 bg-green-500/10 border-green-500/20", icon: TrendingUp, label: "BUY" },
-    NEUTRAL: { color: "text-slate-400 bg-slate-500/10 border-slate-500/20", icon: Minus, label: "HOLD" },
-    BEARISH: { color: "text-rose-400 bg-rose-500/10 border-rose-500/20", icon: TrendingDown, label: "SELL" },
-    STRONG_BEAR: { color: "text-red-500 bg-red-500/10 border-red-500/20", icon: TrendingDown, label: "STRONG SELL" },
-  };
 
   const sig = data ? SIGNAL_META[data.signal] : null;
   const Icon = sig?.icon || Activity;
@@ -584,19 +626,19 @@ export default function WRCrystalBallPro() {
       </div>
 
       <div className="flex flex-wrap gap-2 mb-3">
-        <div className="relative">
-          <input 
-            type="text" 
-            placeholder="Search coin..." 
-            value={coinSearch} 
+        <div className="relative" ref={dropdownRef}>
+          <input
+            type="text"
+            placeholder="Search coin..."
+            value={coinSearch}
             onChange={e => setCoinSearch(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 w-24 focus:outline-none focus:ring-1 focus:ring-purple-500/50" 
+            className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 w-24 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
           />
           {coinSearch && (
             <div className="absolute top-full left-0 mt-1 w-48 max-h-48 overflow-y-auto bg-slate-800 border border-slate-700 rounded z-50">
               {filteredCoins.slice(0, 10).map(coin => (
-                <button 
-                  key={coin.id} 
+                <button
+                  key={coin.id}
                   onClick={() => { setSelectedCoin(coin); setCoinSearch(""); }}
                   className="w-full text-left px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-700 flex items-center justify-between"
                 >
@@ -608,24 +650,24 @@ export default function WRCrystalBallPro() {
           )}
         </div>
 
-        <select 
-          value={selectedCoin.id} 
+        <select
+          value={selectedCoin.id}
           onChange={e => { const coin = COIN_LIST.find(c => c.id === e.target.value); if (coin) setSelectedCoin(coin); }}
           className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500/50 max-w-[120px]"
         >
           {COIN_LIST.map(c => <option key={c.id} value={c.id}>{c.symbol} - {c.name}</option>)}
         </select>
 
-        <select 
-          value={timeframe.label} 
+        <select
+          value={timeframe.label}
           onChange={e => { const tf = TIMEFRAMES.find(t => t.label === e.target.value); if (tf) setTimeframe(tf); }}
           className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200"
         >
           {TIMEFRAMES.map(t => <option key={t.label} value={t.label}>{t.label}</option>)}
         </select>
 
-        <button 
-          onClick={fetchCoinData} 
+        <button
+          onClick={fetchCoinData}
           disabled={loading}
           className="ml-auto bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white px-3 py-1.5 rounded text-xs flex items-center gap-1.5"
         >
@@ -664,7 +706,7 @@ export default function WRCrystalBallPro() {
             <div>MACD Hist: <span className={parseFloat(data.macdHist) > 0 ? "text-emerald-400" : "text-rose-400"}>{data.macdHist}</span></div>
             <div>BB Pos: {data.bbPosition}%</div>
             <div>OBV: <span className={data.obvTrend === "rising" ? "text-emerald-400" : data.obvTrend === "falling" ? "text-rose-400" : ""}>{data.obvTrend}</span></div>
-            <div>Divergence: 
+            <div>Divergence:
               {data.divergence.bullish && <span className="text-emerald-400"> BULLISH {data.divergence.strength}</span>}
               {data.divergence.bearish && <span className="text-rose-400"> BEARISH {data.divergence.strength}</span>}
               {!data.divergence.bullish && !data.divergence.bearish && "none"}
@@ -674,7 +716,7 @@ export default function WRCrystalBallPro() {
           <div className="grid grid-cols-2 gap-2 mb-3">
             <div className="bg-slate-800/50 rounded p-2">
               <div className="text-[10px] text-slate-500">Current Price</div>
-              <div className="text-sm font-mono">${data.currentPrice?.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div>
+              <div className="text-sm font-mono">{formatPrice(data.currentPrice)}</div>
             </div>
             <div className="bg-slate-800/50 rounded p-2">
               <div className="text-[10px] text-slate-500">24h Change</div>
@@ -684,11 +726,11 @@ export default function WRCrystalBallPro() {
             </div>
             <div className="bg-slate-800/50 rounded p-2">
               <div className="text-[10px] text-slate-500">24h High</div>
-              <div className="text-sm font-mono">${data.high24h?.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div>
+              <div className="text-sm font-mono">{formatPrice(data.high24h)}</div>
             </div>
             <div className="bg-slate-800/50 rounded p-2">
               <div className="text-[10px] text-slate-500">24h Low</div>
-              <div className="text-sm font-mono">${data.low24h?.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div>
+              <div className="text-sm font-mono">{formatPrice(data.low24h)}</div>
             </div>
           </div>
 
@@ -701,7 +743,7 @@ export default function WRCrystalBallPro() {
               {data.predictions.map((p: any, i: number) => (
                 <div key={i} className="bg-slate-900/50 rounded p-2 text-center">
                   <div className="text-[9px] text-slate-500">{p.time}</div>
-                  <div className="text-[11px] font-mono">${p.price.toFixed(4)}</div>
+                  <div className="text-[11px] font-mono">{formatPrice(p.price)}</div>
                   <div className={`text-[9px] ${p.change >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{p.change.toFixed(1)}%</div>
                 </div>
               ))}
@@ -716,36 +758,35 @@ export default function WRCrystalBallPro() {
             <div className="grid grid-cols-5 gap-2 text-center text-xs">
               <div className="bg-slate-900/50 rounded p-2">
                 <div className="text-slate-500 text-[10px]">Bearish (25%)</div>
-                <div className="font-mono text-rose-400">${data.monteCarlo.p25.toFixed(2)}</div>
+                <div className="font-mono text-rose-400">{formatPrice(data.monteCarlo.p25)}</div>
               </div>
               <div className="bg-slate-900/50 rounded p-2">
                 <div className="text-slate-500 text-[10px]">Minimum</div>
-                <div className="font-mono text-rose-400">${data.monteCarlo.min.toFixed(2)}</div>
+                <div className="font-mono text-rose-400">{formatPrice(data.monteCarlo.min)}</div>
               </div>
               <div className="bg-slate-900/50 rounded p-2 border border-purple-400">
                 <div className="text-slate-500 text-[10px]">Median</div>
-                <div className="font-mono text-purple-300">${data.monteCarlo.median.toFixed(2)}</div>
+                <div className="font-mono text-purple-300">{formatPrice(data.monteCarlo.median)}</div>
               </div>
               <div className="bg-slate-900/50 rounded p-2">
                 <div className="text-slate-500 text-[10px]">Maximum</div>
-                <div className="font-mono text-emerald-400">${data.monteCarlo.max.toFixed(2)}</div>
+                <div className="font-mono text-emerald-400">{formatPrice(data.monteCarlo.max)}</div>
               </div>
               <div className="bg-slate-900/50 rounded p-2">
                 <div className="text-slate-500 text-[10px]">Bullish (75%)</div>
-                <div className="font-mono text-emerald-400">${data.monteCarlo.p75.toFixed(2)}</div>
+                <div className="font-mono text-emerald-400">{formatPrice(data.monteCarlo.p75)}</div>
               </div>
             </div>
             <div className="text-center text-[10px] text-slate-400 mt-2">
-              80% of simulated paths fall between ${data.monteCarlo.p25.toFixed(2)} – ${data.monteCarlo.p75.toFixed(2)}
+              80% of simulated paths fall between {formatPrice(data.monteCarlo.p25)} – {formatPrice(data.monteCarlo.p75)}
             </div>
           </div>
 
-          <button 
-            onClick={runBacktest} 
+          <button
+            onClick={runBacktest}
             disabled={loading}
             className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
           >
-            {/* FIX 1: Replaced non-existent TrendingFlat with Minus (already imported) */}
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Minus className="w-4 h-4" />}
             {loading ? "Running historical backtest..." : "Run Backtest (800 candles)"}
           </button>
