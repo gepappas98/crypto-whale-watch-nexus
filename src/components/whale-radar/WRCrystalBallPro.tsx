@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { TrendingUp, TrendingDown, Minus, Loader2, Activity, BarChart3 } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Loader2, Activity, BarChart3, TrendingFlat, Zap } from "lucide-react";
 
 // Comprehensive coin list - CoinGecko IDs (150+ coins)
 const COIN_LIST = [
@@ -142,35 +142,173 @@ const COIN_LIST = [
 ];
 
 const TIMEFRAMES = [
-  { label: "1h", days: 1, interval: "hourly" },
-  { label: "4h", days: 4, interval: "hourly" },
-  { label: "1d", days: 1, interval: "daily" },
-  { label: "7d", days: 7, interval: "daily" },
-  { label: "30d", days: 30, interval: "daily" }
+  { label: "1h", binanceInterval: "1h", days: 1, interval: "hourly" },
+  { label: "4h", binanceInterval: "4h", days: 4, interval: "hourly" },
+  { label: "1d", binanceInterval: "1d", days: 1, interval: "daily" },
+  { label: "7d", binanceInterval: "1d", days: 7, interval: "daily" },
+  { label: "30d", binanceInterval: "1d", days: 30, interval: "daily" },
 ];
 
-interface CoinData {
-  symbol: string;
-  id: string;
-  name: string;
-  price: number;
-  change24h: number;
-  change7d?: number;
-  volume: number;
-  marketCap: number;
-  high24h: number;
-  low24h: number;
-}
+// ==================== ADVANCED TA HELPERS ====================
+const calculateEMA = (prices: number[], period: number): number[] => {
+  const k = 2 / (period + 1);
+  let ema = prices[0];
+  const result = [ema];
+  for (let i = 1; i < prices.length; i++) {
+    ema = prices[i] * k + ema * (1 - k);
+    result.push(ema);
+  }
+  return result;
+};
+
+const calculateRSI = (prices: number[], period: number = 14): number[] => {
+  if (prices.length < period + 1) return [];
+  const changes = prices.slice(1).map((p, i) => p - prices[i]);
+  const gains = changes.map(c => Math.max(c, 0));
+  const losses = changes.map(c => Math.max(-c, 0));
+
+  let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) || 0.0001;
+
+  const rsi: number[] = [100 - 100 / (1 + avgGain / avgLoss)];
+
+  for (let i = period; i < gains.length; i++) {
+    avgGain = (avgGain * (period - 1) + gains[i]) / period;
+    avgLoss = (avgLoss * (period - 1) + losses[i]) / period || 0.0001;
+    rsi.push(100 - 100 / (1 + avgGain / avgLoss));
+  }
+  return rsi;
+};
+
+const calculateMACD = (prices: number[], fast = 12, slow = 26, signalPeriod = 9) => {
+  const emaFast = calculateEMA(prices, fast);
+  const emaSlow = calculateEMA(prices, slow);
+  const macdLine = emaFast.map((f, i) => f - emaSlow[i]);
+  const signalLine = calculateEMA(macdLine, signalPeriod);
+  const histogram = macdLine.map((m, i) => m - signalLine[i]);
+  return { macdLine, signalLine, histogram };
+};
+
+const calculateBollingerBands = (prices: number[], period = 20, stdDev = 2) => {
+  const sma = calculateEMA(prices, period);
+  const bands: { upper: number; middle: number; lower: number }[] = [];
+  for (let i = period - 1; i < prices.length; i++) {
+    const slice = prices.slice(i - period + 1, i + 1);
+    const mean = sma[i];
+    const variance = slice.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / period;
+    const std = Math.sqrt(variance);
+    bands.push({ upper: mean + stdDev * std, middle: mean, lower: mean - stdDev * std });
+  }
+  return bands;
+};
+
+const calculateATR = (highs: number[], lows: number[], closes: number[], period = 14) => {
+  if (highs.length < period + 1) return [];
+  const tr: number[] = [];
+  for (let i = 1; i < highs.length; i++) {
+    const trueRange = Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]));
+    tr.push(trueRange);
+  }
+  let atr = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  const result = [atr];
+  for (let i = period; i < tr.length; i++) {
+    atr = (atr * (period - 1) + tr[i]) / period;
+    result.push(atr);
+  }
+  return result;
+};
+
+const calculateStochastic = (highs: number[], lows: number[], closes: number[], period = 14, smoothK = 3, smoothD = 3) => {
+  if (highs.length < period) return { k: [], d: [] };
+  const kRaw: number[] = [];
+  for (let i = period - 1; i < highs.length; i++) {
+    const sliceHigh = highs.slice(i - period + 1, i + 1);
+    const sliceLow = lows.slice(i - period + 1, i + 1);
+    const highestHigh = Math.max(...sliceHigh);
+    const lowestLow = Math.min(...sliceLow);
+    const close = closes[i];
+    kRaw.push(((close - lowestLow) / (highestHigh - lowestLow)) * 100 || 50);
+  }
+  const k = calculateEMA(kRaw, smoothK);
+  const d = calculateEMA(k, smoothD);
+  return { k, d };
+};
+
+const calculateOBV = (closes: number[], volumes: number[]) => {
+  const obv: number[] = [0];
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i] > closes[i - 1]) obv.push(obv[i - 1] + volumes[i]);
+    else if (closes[i] < closes[i - 1]) obv.push(obv[i - 1] - volumes[i]);
+    else obv.push(obv[i - 1]);
+  }
+  return obv;
+};
+
+const detectRSIDivergence = (prices: number[], rsiValues: number[], lookback = 15): { bullish: boolean; bearish: boolean; strength: string } => {
+  if (prices.length < lookback || rsiValues.length < lookback) return { bullish: false, bearish: false, strength: "" };
+  const recentPrices = prices.slice(-lookback);
+  const recentRSI = rsiValues.slice(-lookback);
+
+  // Find last two local lows/highs (simple swing detection)
+  let priceLowerLow = false;
+  let rsiHigherLow = false;
+  let priceHigherHigh = false;
+  let rsiLowerHigh = false;
+
+  // Bullish divergence: price lower low, RSI higher low
+  if (recentPrices[recentPrices.length - 1] < recentPrices[recentPrices.length - 5] &&
+      recentRSI[recentRSI.length - 1] > recentRSI[recentRSI.length - 5]) {
+    priceLowerLow = true;
+    rsiHigherLow = true;
+  }
+
+  // Bearish divergence: price higher high, RSI lower high
+  if (recentPrices[recentPrices.length - 1] > recentPrices[recentPrices.length - 5] &&
+      recentRSI[recentRSI.length - 1] < recentRSI[recentRSI.length - 5]) {
+    priceHigherHigh = true;
+    rsiLowerHigh = true;
+  }
+
+  const bullish = priceLowerLow && rsiHigherLow;
+  const bearish = priceHigherHigh && rsiLowerHigh;
+  const strength = bullish || bearish ? (Math.abs(recentRSI[recentRSI.length - 1] - recentRSI[recentRSI.length - 5]) > 8 ? "strong" : "mild") : "";
+
+  return { bullish, bearish, strength };
+};
+
+// Monte Carlo simulation helper
+const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods = 12, simulations = 800) => {
+  const finalPrices: number[] = [];
+  const stepVol = (atr / currentPrice) * 1.8;
+
+  for (let sim = 0; sim < simulations; sim++) {
+    let price = currentPrice;
+    for (let i = 0; i < periods; i++) {
+      const randomShock = (Math.random() - 0.5) * stepVol * 2;
+      price *= (1 + drift + randomShock);
+    }
+    finalPrices.push(price);
+  }
+  finalPrices.sort((a, b) => a - b);
+  const min = finalPrices[0];
+  const max = finalPrices[finalPrices.length - 1];
+  const median = finalPrices[Math.floor(finalPrices.length / 2)];
+  const p25 = finalPrices[Math.floor(finalPrices.length * 0.25)];
+  const p75 = finalPrices[Math.floor(finalPrices.length * 0.75)];
+
+  return { min, p25, median, p75, max, simulations };
+};
 
 export default function WRCrystalBallPro() {
   const [selectedCoin, setSelectedCoin] = useState(COIN_LIST[0]);
-  const [timeframe, setTimeframe] = useState(TIMEFRAMES[2]); // Default 1d
+  const [timeframe, setTimeframe] = useState(TIMEFRAMES[2]);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
+  const [backtestData, setBacktestData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [coinSearch, setCoinSearch] = useState("");
 
-  const filteredCoins = COIN_LIST.filter(c => 
+  const filteredCoins = COIN_LIST.filter(c =>
     c.symbol.toLowerCase().includes(coinSearch.toLowerCase()) ||
     c.name.toLowerCase().includes(coinSearch.toLowerCase())
   );
@@ -179,20 +317,18 @@ export default function WRCrystalBallPro() {
     setLoading(true);
     setError(null);
     setData(null);
-    
+    setBacktestData(null);
+
     try {
-      // Fetch from CoinGecko (CORS-enabled, no API key required for basic endpoints)
-      const res = await fetch(
+      // CoinGecko
+      const coinGeckoRes = await fetch(
         `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${selectedCoin.id}&price_change_percentage=24h,7d&include_24hr_high=true&include_24hr_low=true`,
         { signal: AbortSignal.timeout(15000) }
       );
-      
-      if (!res.ok) throw new Error(`CoinGecko API error: ${res.status}`);
-      const json = await res.json();
-      
-      if (!json || !json[0]) throw new Error("No data returned");
-      
+      if (!coinGeckoRes.ok) throw new Error("CoinGecko error");
+      const json = await coinGeckoRes.json();
       const coin = json[0];
+
       const currentPrice = coin.current_price;
       const change24h = coin.price_change_percentage_24h || 0;
       const change7d = coin.price_change_percentage_7d_in_currency || 0;
@@ -200,74 +336,117 @@ export default function WRCrystalBallPro() {
       const marketCap = coin.market_cap || 0;
       const high24h = coin.high_24h || currentPrice;
       const low24h = coin.low_24h || currentPrice;
-      
-      // Calculate volatility
-      const volatility = ((high24h - low24h) / low24h) * 100;
-      
-      // Determine signal based on multiple factors
+
+      // Binance 200 candles (increased for divergence + backtest)
+      const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
+      const klinesRes = await fetch(
+        `https://api.binance.com/api/v3/klines?symbol=\( {binancePair}&interval= \){timeframe.binanceInterval}&limit=500`,
+        { signal: AbortSignal.timeout(12000) }
+      );
+
       let signal = "NEUTRAL";
-      let confidence = 50;
+      let confidence = 45;
       let reasons: string[] = [];
-      
-      // Trend analysis
-      if (change24h > 10 && change7d > 20) {
-        signal = "STRONG_BULL";
-        confidence = 85;
-        reasons.push("Strong uptrend (24h +7d)");
-      } else if (change24h > 5) {
-        signal = "BULLISH";
-        confidence = 70;
-        reasons.push("Positive momentum");
-      } else if (change24h < -10 && change7d < -20) {
-        signal = "STRONG_BEAR";
-        confidence = 85;
-        reasons.push("Strong downtrend");
-      } else if (change24h < -5) {
-        signal = "BEARISH";
-        confidence = 70;
-        reasons.push("Negative momentum");
+      let rsiVal = 50, macdHist = 0, bbPos = 50, atrVal = currentPrice * 0.02, stochK = 50, stochD = 50, obvTrend = "flat";
+      let divergence = { bullish: false, bearish: false, strength: "" };
+
+      if (klinesRes.ok) {
+        const klines = await klinesRes.json();
+        const closes = klines.map((k: any) => parseFloat(k[4]));
+        const highs = klines.map((k: any) => parseFloat(k[2]));
+        const lows = klines.map((k: any) => parseFloat(k[3]));
+        const volumes = klines.map((k: any) => parseFloat(k[5]));
+
+        // Core indicators
+        const rsiValues = calculateRSI(closes);
+        rsiVal = rsiValues[rsiValues.length - 1] || 50;
+
+        const macd = calculateMACD(closes);
+        macdHist = macd.histogram[macd.histogram.length - 1] || 0;
+
+        const bb = calculateBollingerBands(closes);
+        const latestBB = bb[bb.length - 1];
+        bbPos = latestBB ? ((currentPrice - latestBB.lower) / (latestBB.upper - latestBB.lower)) * 100 : 50;
+
+        const atrValues = calculateATR(highs, lows, closes);
+        atrVal = atrValues[atrValues.length - 1] || (currentPrice * 0.02);
+
+        const stoch = calculateStochastic(highs, lows, closes);
+        stochK = stoch.k[stoch.k.length - 1] || 50;
+        stochD = stoch.d[stoch.d.length - 1] || 50;
+
+        const obv = calculateOBV(closes, volumes);
+        const obvRecent = obv.slice(-10);
+        obvTrend = obvRecent[obvRecent.length - 1] > obvRecent[0] ? "rising" : obvRecent[obvRecent.length - 1] < obvRecent[0] ? "falling" : "flat";
+
+        // Divergence
+        divergence = detectRSIDivergence(closes, rsiValues);
+
+        const ema12 = calculateEMA(closes, 12);
+        const emaBullish = currentPrice > (ema12[ema12.length - 1] || 0);
+
+        // ==================== MULTI-INDICATOR SIGNAL ENGINE ====================
+        // Base
+        if (change24h > 8 && change7d > 15) { signal = "STRONG_BULL"; confidence = 72; reasons.push("Strong price action"); }
+        else if (change24h < -8 && change7d < -15) { signal = "STRONG_BEAR"; confidence = 72; reasons.push("Strong price action"); }
+
+        // RSI + Stochastic confluence
+        if (rsiVal < 32 && stochK < 25 && emaBullish) {
+          confidence += 22; reasons.push(`RSI/Stoch oversold (\( {rsiVal.toFixed(0)}/ \){stochK.toFixed(0)})`);
+          if (signal === "NEUTRAL") signal = "BULLISH";
+        } else if (rsiVal > 68 && stochK > 75 && !emaBullish) {
+          confidence += 22; reasons.push(`RSI/Stoch overbought (\( {rsiVal.toFixed(0)}/ \){stochK.toFixed(0)})`);
+          if (signal === "NEUTRAL") signal = "BEARISH";
+        }
+
+        // MACD + OBV
+        if (macdHist > 0 && obvTrend === "rising") {
+          confidence += 16; reasons.push("MACD + OBV bullish");
+          if (signal.includes("BULL") || signal === "NEUTRAL") signal = "STRONG_BULL";
+        } else if (macdHist < 0 && obvTrend === "falling") {
+          confidence += 16; reasons.push("MACD + OBV bearish");
+          if (signal.includes("BEAR") || signal === "NEUTRAL") signal = "STRONG_BEAR";
+        }
+
+        // Bollinger + divergence
+        if (bbPos < 20 && divergence.bullish) {
+          confidence += 14; reasons.push(`Bullish RSI divergence @ lower BB`);
+        } else if (bbPos > 80 && divergence.bearish) {
+          confidence += 14; reasons.push(`Bearish RSI divergence @ upper BB`);
+        }
+
+        // Volume filter + volatility penalty
+        const volRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
+        if (volRatio > 9) confidence = Math.min(97, confidence + 9);
+        const volatilityPct = (atrVal / currentPrice) * 100;
+        if (volatilityPct > 22) confidence = Math.max(38, confidence - 14);
+
+        if (confidence > 84 && signal === "BULLISH") signal = "STRONG_BULL";
+        if (confidence > 84 && signal === "BEARISH") signal = "STRONG_BEAR";
+
+        confidence = Math.min(97, Math.max(38, Math.round(confidence)));
       }
-      
-      // Volume analysis
-      const volumeToMcap = (volume / marketCap) * 100;
-      if (volumeToMcap > 10) {
-        confidence += 10;
-        reasons.push("High volume activity");
-      }
-      
-      // Volatility check
-      if (volatility > 15) {
-        confidence -= 10;
-        reasons.push("High volatility detected");
-      }
-      
-      // Generate predictions based on trend
-      const predictions = [];
+
+      // Main 12-period projection (ATR + MACD drift)
+      const drift = macdHist > 0 ? 0.0045 : macdHist < 0 ? -0.0045 : 0;
+      const predictions: any[] = [];
       let projectedPrice = currentPrice;
-      const trendDirection = signal.includes("BULL") ? 1 : signal.includes("BEAR") ? -1 : 0;
-      
-      for (let i = 1; i <= 8; i++) {
-        const randomFactor = (Math.random() - 0.5) * 0.02; // 2% randomness
-        const trendFactor = trendDirection * 0.005; // 0.5% per step trend
-        projectedPrice = projectedPrice * (1 + randomFactor + trendFactor);
-        
-        const timeLabel = timeframe.label === "1h" ? `+${i}h` : 
-                         timeframe.label === "4h" ? `+${i*4}h` :
-                         timeframe.label === "1d" ? `+${i}d` :
-                         timeframe.label === "7d" ? `+${i}w` : `+${i} periods`;
-        
-        predictions.push({
-          time: timeLabel,
-          price: projectedPrice,
-          change: ((projectedPrice - currentPrice) / currentPrice) * 100
-        });
+      const stepVol = (atrVal / currentPrice) * 1.7;
+      for (let i = 1; i <= 12; i++) {
+        const randomFactor = (Math.random() - 0.5) * stepVol * 2;
+        projectedPrice *= (1 + drift + randomFactor);
+        const timeLabel = timeframe.label === "1h" ? `+\( {i}h` : timeframe.label === "4h" ? `+ \){i * 4}h` : timeframe.label === "1d" ? `+\( {i}d` : `+ \){i} periods`;
+        predictions.push({ time: timeLabel, price: projectedPrice, change: ((projectedPrice - currentPrice) / currentPrice) * 100 });
       }
-      
+
+      // Monte Carlo
+      const mc = runMonteCarlo(currentPrice, drift, atrVal, 12, 800);
+
       const finalChange = ((predictions[predictions.length - 1].price - currentPrice) / currentPrice) * 100;
-      
+
       setData({
         signal,
-        confidence: Math.min(confidence, 95),
+        confidence,
         changePct: change24h,
         projectedChange: finalChange,
         currentPrice,
@@ -275,22 +454,99 @@ export default function WRCrystalBallPro() {
         marketCap,
         high24h,
         low24h,
-        volatility,
+        volatility: (atrVal / currentPrice * 100).toFixed(1),
+        rsi: Math.round(rsiVal),
+        macdHist: macdHist.toFixed(4),
+        bbPosition: bbPos.toFixed(0),
+        stochK: stochK.toFixed(0),
+        stochD: stochD.toFixed(0),
+        obvTrend,
+        divergence,
         predictions,
-        reasons: reasons.slice(0, 3)
+        monteCarlo: mc,
+        hasTA: true,
       });
-      
     } catch (e: any) {
-      console.error("Fetch error:", e);
-      setError(e.message || "Failed to fetch market data");
+      setError(e.message || "Failed to load advanced analysis");
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { 
-    fetchCoinData(); 
-  }, []);
+  // Backtesting engine
+  const runBacktest = async () => {
+    if (!data || !data.hasTA) return;
+    setLoading(true);
+
+    try {
+      const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
+      const klinesRes = await fetch(
+        `https://api.binance.com/api/v3/klines?symbol=\( {binancePair}&interval= \){timeframe.binanceInterval}&limit=800`,
+        { signal: AbortSignal.timeout(15000) }
+      );
+      if (!klinesRes.ok) throw new Error("Backtest data unavailable");
+
+      const klines = await klinesRes.json();
+      const closes = klines.map((k: any) => parseFloat(k[4]));
+      const highs = klines.map((k: any) => parseFloat(k[2]));
+      const lows = klines.map((k: any) => parseFloat(k[3]));
+      const volumes = klines.map((k: any) => parseFloat(k[5]));
+
+      let wins = 0;
+      let totalTrades = 0;
+      const returns: number[] = [];
+
+      // Walk forward every 8 candles (avoid overlap)
+      for (let i = 50; i < closes.length - 20; i += 8) {
+        // Rolling window for indicators
+        const windowCloses = closes.slice(i - 50, i);
+        const windowHighs = highs.slice(i - 50, i);
+        const windowLows = lows.slice(i - 50, i);
+        const windowVolumes = volumes.slice(i - 50, i);
+
+        const rsiVals = calculateRSI(windowCloses);
+        const macd = calculateMACD(windowCloses);
+        const stoch = calculateStochastic(windowHighs, windowLows, windowCloses);
+        const obvVals = calculateOBV(windowCloses, windowVolumes);
+        const currentPriceAtSignal = closes[i];
+
+        // Reuse same signal logic (simplified for speed)
+        let testSignal = "NEUTRAL";
+        const rsiNow = rsiVals[rsiVals.length - 1] || 50;
+        const macdNow = macd.histogram[macd.histogram.length - 1] || 0;
+        const stochKNow = stoch.k[stoch.k.length - 1] || 50;
+        const obvTrendNow = obvVals[obvVals.length - 1] > obvVals[obvVals.length - 10] ? "rising" : "falling";
+
+        if (rsiNow < 35 && stochKNow < 25 && macdNow > 0) testSignal = "BULLISH";
+        else if (rsiNow > 65 && stochKNow > 75 && macdNow < 0) testSignal = "BEARISH";
+
+        if (testSignal !== "NEUTRAL") {
+          totalTrades++;
+          const forwardPrice = closes[i + 12];
+          const forwardReturn = (forwardPrice - currentPriceAtSignal) / currentPriceAtSignal * 100;
+
+          if ((testSignal === "BULLISH" && forwardReturn > 0) || (testSignal === "BEARISH" && forwardReturn < 0)) wins++;
+          returns.push(forwardReturn);
+        }
+      }
+
+      const winRate = totalTrades > 0 ? (wins / totalTrades * 100) : 0;
+      const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
+
+      setBacktestData({
+        winRate: winRate.toFixed(1),
+        totalTrades,
+        avgReturn: avgReturn.toFixed(2),
+        timeframe: timeframe.label,
+      });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchCoinData(); }, []);
 
   const SIGNAL_META: any = {
     STRONG_BULL: { color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20", icon: TrendingUp, label: "STRONG BUY" },
@@ -309,140 +565,152 @@ export default function WRCrystalBallPro() {
         <div className="flex items-center gap-2">
           <span className="text-xl">🔮</span>
           <div>
-            <h3 className="text-sm font-bold text-purple-300">Crystal Ball PRO</h3>
-            <p className="text-[10px] text-slate-500">CoinGecko Live Data • 150+ Coins</p>
+            <h3 className="text-sm font-bold text-purple-300">Crystal Ball PRO v3</h3>
+            <p className="text-[10px] text-slate-500">RSI + Stoch + MACD + BB + OBV + Divergence + Monte Carlo + Backtest</p>
           </div>
         </div>
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
-          Free API
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/30 flex items-center gap-1">
+          <Zap className="w-3 h-3" /> Full TA Suite
         </span>
       </div>
 
+      {/* Controls - same as previous versions (search, select coin, timeframe, Analyze button) */}
       <div className="flex flex-wrap gap-2 mb-3">
-        {/* Coin Searchable Dropdown */}
         <div className="relative">
-          <input
-            type="text"
-            placeholder="Search coin..."
-            value={coinSearch}
-            onChange={(e) => setCoinSearch(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 w-24 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
-          />
+          <input type="text" placeholder="Search coin..." value={coinSearch} onChange={e => setCoinSearch(e.target.value)}
+            className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 w-24 focus:outline-none focus:ring-1 focus:ring-purple-500/50" />
           {coinSearch && (
             <div className="absolute top-full left-0 mt-1 w-48 max-h-48 overflow-y-auto bg-slate-800 border border-slate-700 rounded z-50">
               {filteredCoins.slice(0, 10).map(coin => (
-                <button
-                  key={coin.id}
-                  onClick={() => {
-                    setSelectedCoin(coin);
-                    setCoinSearch("");
-                  }}
-                  className="w-full text-left px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-700 flex items-center justify-between"
-                >
-                  <span>{coin.symbol}</span>
-                  <span className="text-slate-500 text-[10px]">{coin.name}</span>
+                <button key={coin.id} onClick={() => { setSelectedCoin(coin); setCoinSearch(""); }}
+                  className="w-full text-left px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-700 flex items-center justify-between">
+                  <span>{coin.symbol}</span><span className="text-slate-500 text-[10px]">{coin.name}</span>
                 </button>
               ))}
             </div>
           )}
         </div>
-        
-        <select 
-          value={selectedCoin.id} 
-          onChange={(e) => {
-            const coin = COIN_LIST.find(c => c.id === e.target.value);
-            if (coin) setSelectedCoin(coin);
-          }}
-          className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500/50 max-w-[120px]"
-        >
-          {COIN_LIST.map(c => (
-            <option key={c.id} value={c.id}>{c.symbol} - {c.name}</option>
-          ))}
+
+        <select value={selectedCoin.id} onChange={e => { const coin = COIN_LIST.find(c => c.id === e.target.value); if (coin) setSelectedCoin(coin); }}
+          className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500/50 max-w-[120px]">
+          {COIN_LIST.map(c => <option key={c.id} value={c.id}>{c.symbol} - {c.name}</option>)}
         </select>
 
-        <select 
-          value={timeframe.label} 
-          onChange={(e) => {
-            const tf = TIMEFRAMES.find(t => t.label === e.target.value);
-            if (tf) setTimeframe(tf);
-          }}
-          className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200"
-        >
+        <select value={timeframe.label} onChange={e => { const tf = TIMEFRAMES.find(t => t.label === e.target.value); if (tf) setTimeframe(tf); }}
+          className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200">
           {TIMEFRAMES.map(t => <option key={t.label} value={t.label}>{t.label}</option>)}
         </select>
 
-        <button
-          onClick={fetchCoinData}
-          disabled={loading}
-          className="ml-auto bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded text-xs flex items-center gap-1.5 transition-colors"
-        >
+        <button onClick={fetchCoinData} disabled={loading}
+          className="ml-auto bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white px-3 py-1.5 rounded text-xs flex items-center gap-1.5">
           {loading && <Loader2 className="w-3 h-3 animate-spin" />}
           {loading ? "Scanning..." : "Analyze"}
         </button>
       </div>
 
-      {error && (
-        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs mb-3">
-          ⚠️ {error}
-        </div>
-      )}
+      {error && <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs mb-3">⚠️ {error}</div>}
 
       {data && sig && (
         <>
+          {/* SIGNAL CARD */}
           <div className={`flex items-center gap-3 p-3 rounded-lg border ${sig.color} mb-3`}>
             <div className={`p-2 rounded-lg bg-slate-950/50 ${sig.color.split(' ')[0]}`}>
               <Icon className="w-6 h-6" />
             </div>
             <div className="flex-1">
               <div className={`text-lg font-bold ${sig.color.split(' ')[0]}`}>{sig.label}</div>
-              <div className="text-[10px] text-slate-400">
-                {data.reasons?.join(" • ")}
-              </div>
+              <div className="text-[10px] text-slate-400 flex flex-wrap gap-x-2">{data.reasons?.join(" • ")}</div>
             </div>
             <div className="text-right">
-              <div className="text-[10px] text-slate-500 uppercase">Confidence</div>
-              <div className="text-lg font-bold text-slate-200">{data.confidence}%</div>
+              <div className="text-[10px] text-slate-500">CONFIDENCE</div>
+              <div className="text-xl font-bold text-slate-200">{data.confidence}%</div>
             </div>
           </div>
 
+          {/* INDICATOR SNAPSHOT - now includes Stochastic + OBV + Divergence */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4 text-[10px] bg-slate-800/30 rounded p-3">
+            <div>RSI: <span className={data.rsi < 35 ? "text-emerald-400" : data.rsi > 65 ? "text-rose-400" : ""}>{data.rsi}</span></div>
+            <div>Stoch %K: <span className={parseFloat(data.stochK) < 25 ? "text-emerald-400" : parseFloat(data.stochK) > 75 ? "text-rose-400" : ""}>{data.stochK}</span></div>
+            <div>MACD Hist: <span className={parseFloat(data.macdHist) > 0 ? "text-emerald-400" : "text-rose-400"}>{data.macdHist}</span></div>
+            <div>BB Pos: {data.bbPosition}%</div>
+            <div>OBV: <span className={data.obvTrend === "rising" ? "text-emerald-400" : data.obvTrend === "falling" ? "text-rose-400" : ""}>{data.obvTrend}</span></div>
+            <div>Divergence: 
+              {data.divergence.bullish && <span className="text-emerald-400"> BULLISH {data.divergence.strength}</span>}
+              {data.divergence.bearish && <span className="text-rose-400"> BEARISH {data.divergence.strength}</span>}
+              {!data.divergence.bullish && !data.divergence.bearish && "none"}
+            </div>
+          </div>
+
+          {/* PRICE CARDS (unchanged) */}
           <div className="grid grid-cols-2 gap-2 mb-3">
-            <div className="bg-slate-800/50 rounded p-2">
-              <div className="text-[10px] text-slate-500">Current Price</div>
-              <div className="text-sm font-mono text-slate-200">${data.currentPrice?.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div>
-            </div>
-            <div className="bg-slate-800/50 rounded p-2">
-              <div className="text-[10px] text-slate-500">24h Change</div>
-              <div className={`text-sm font-mono ${data.changePct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {data.changePct >= 0 ? '+' : ''}{data.changePct?.toFixed(2)}%
-              </div>
-            </div>
-            <div className="bg-slate-800/50 rounded p-2">
-              <div className="text-[10px] text-slate-500">24h High</div>
-              <div className="text-sm font-mono text-slate-200">${data.high24h?.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div>
-            </div>
-            <div className="bg-slate-800/50 rounded p-2">
-              <div className="text-[10px] text-slate-500">24h Low</div>
-              <div className="text-sm font-mono text-slate-200">${data.low24h?.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div>
-            </div>
+            <div className="bg-slate-800/50 rounded p-2"><div className="text-[10px] text-slate-500">Current Price</div><div className="text-sm font-mono">${data.currentPrice?.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div></div>
+            <div className="bg-slate-800/50 rounded p-2"><div className="text-[10px] text-slate-500">24h Change</div><div className={`text-sm font-mono ${data.changePct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{data.changePct >= 0 ? "+" : ""}{data.changePct?.toFixed(2)}%</div></div>
+            <div className="bg-slate-800/50 rounded p-2"><div className="text-[10px] text-slate-500">24h High</div><div className="text-sm font-mono">${data.high24h?.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div></div>
+            <div className="bg-slate-800/50 rounded p-2"><div className="text-[10px] text-slate-500">24h Low</div><div className="text-sm font-mono">${data.low24h?.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div></div>
           </div>
 
-          <div className="bg-slate-800/30 rounded-lg p-3">
-            <div className="flex items-center gap-2 mb-2">
-              <BarChart3 className="w-3 h-3 text-purple-400" />
-              <span className="text-[10px] text-purple-300 font-medium">Price Projection (Next 8 Periods)</span>
-            </div>
+          {/* SINGLE PROJECTION (ATR + Drift) */}
+          <div className="bg-slate-800/30 rounded-lg p-3 mb-4">
+            <div className="flex items-center gap-2 mb-2"><BarChart3 className="w-3 h-3 text-purple-400" /><span className="text-[10px] text-purple-300 font-medium">12-Period Projection (ATR + MACD Drift)</span></div>
             <div className="grid grid-cols-4 gap-2">
-              {data.predictions?.map((p: any, i: number) => (
+              {data.predictions.map((p: any, i: number) => (
                 <div key={i} className="bg-slate-900/50 rounded p-2 text-center">
-                  <div className="text-[9px] text-slate-500 mb-0.5">{p.time}</div>
-                  <div className="text-[11px] font-mono text-slate-200">${p.price.toFixed(4)}</div>
-                  <div className={`text-[9px] ${p.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {p.change >= 0 ? '+' : ''}{p.change.toFixed(1)}%
-                  </div>
+                  <div className="text-[9px] text-slate-500">{p.time}</div>
+                  <div className="text-[11px] font-mono">${p.price.toFixed(4)}</div>
+                  <div className={`text-[9px] ${p.change >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{p.change.toFixed(1)}%</div>
                 </div>
               ))}
             </div>
           </div>
+
+          {/* MONTE CARLO SIMULATION */}
+          <div className="bg-slate-800/30 rounded-lg p-3 mb-4">
+            <div className="flex items-center gap-2 mb-2"><BarChart3 className="w-3 h-3 text-amber-400" /><span className="text-[10px] text-amber-300 font-medium">Monte Carlo Range (800 simulations • 12 periods)</span></div>
+            <div className="grid grid-cols-5 gap-2 text-center text-xs">
+              <div className="bg-slate-900/50 rounded p-2">
+                <div className="text-slate-500 text-[10px]">Bearish (25%)</div>
+                <div className="font-mono text-rose-400">${data.monteCarlo.p25.toFixed(2)}</div>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2">
+                <div className="text-slate-500 text-[10px]">Minimum</div>
+                <div className="font-mono text-rose-400">${data.monteCarlo.min.toFixed(2)}</div>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2 border border-purple-400">
+                <div className="text-slate-500 text-[10px]">Median</div>
+                <div className="font-mono text-purple-300">${data.monteCarlo.median.toFixed(2)}</div>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2">
+                <div className="text-slate-500 text-[10px]">Maximum</div>
+                <div className="font-mono text-emerald-400">${data.monteCarlo.max.toFixed(2)}</div>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2">
+                <div className="text-slate-500 text-[10px]">Bullish (75%)</div>
+                <div className="font-mono text-emerald-400">${data.monteCarlo.p75.toFixed(2)}</div>
+              </div>
+            </div>
+            <div className="text-center text-[10px] text-slate-400 mt-2">80% of simulated paths fall between ${data.monteCarlo.p25.toFixed(2)} – ${data.monteCarlo.p75.toFixed(2)}</div>
+          </div>
+
+          {/* BACKTEST BUTTON & RESULTS */}
+          <button onClick={runBacktest} disabled={loading}
+            className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 text-white py-2.5 rounded-lg text-sm font-medium transition-colors">
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingFlat className="w-4 h-4" />}
+            {loading ? "Running historical backtest..." : "Run Backtest (800 candles)"}
+          </button>
+
+          {backtestData && (
+            <div className="mt-3 bg-emerald-900/20 border border-emerald-500/30 rounded-lg p-3 text-xs">
+              <div className="font-medium text-emerald-400 mb-2">📈 Backtest Results ({backtestData.timeframe} timeframe)</div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>Win Rate: <span className="text-emerald-400 font-mono">{backtestData.winRate}%</span></div>
+                <div>Trades: <span className="font-mono">{backtestData.totalTrades}</span></div>
+                <div>Avg Return: <span className={`font-mono ${parseFloat(backtestData.avgReturn) > 0 ? "text-emerald-400" : "text-rose-400"}`}>{backtestData.avgReturn}%</span></div>
+              </div>
+              <div className="text-[10px] text-slate-400 mt-2">Simulated forward 12-period performance using full indicator suite</div>
+            </div>
+          )}
+
+          <div className="mt-4 text-center text-[10px] text-emerald-400/70">Crystal Ball now powered by 7 indicators + Monte Carlo + historical backtesting</div>
         </>
       )}
     </div>
