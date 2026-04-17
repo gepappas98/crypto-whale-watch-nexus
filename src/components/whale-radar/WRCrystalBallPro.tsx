@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
-import { TrendingUp, TrendingDown, Minus, Loader2, Activity, BarChart3, TrendingFlat, Zap } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { TrendingUp, TrendingDown, Minus, Loader2, Activity, BarChart3, Zap } from "lucide-react";
+// FIX 1: Removed non-existent "TrendingFlat" from lucide-react import.
+//         Added "useCallback" to React imports for FIX 2.
 
 // Comprehensive coin list - CoinGecko IDs (150+ coins)
 const COIN_LIST = [
@@ -169,13 +171,16 @@ const calculateRSI = (prices: number[], period: number = 14): number[] => {
   const losses = changes.map(c => Math.max(-c, 0));
 
   let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) || 0.0001;
+  // FIX 3: Use Math.max to guarantee avgLoss is never 0 (avoids division-by-zero
+  //         and the previous "|| 0.0001" which had wrong operator precedence).
+  let avgLoss = Math.max(losses.slice(0, period).reduce((a, b) => a + b, 0) / period, 0.0001);
 
   const rsi: number[] = [100 - 100 / (1 + avgGain / avgLoss)];
 
   for (let i = period; i < gains.length; i++) {
     avgGain = (avgGain * (period - 1) + gains[i]) / period;
-    avgLoss = (avgLoss * (period - 1) + losses[i]) / period || 0.0001;
+    // FIX 3 (continued): Same fix applied to the rolling avgLoss update.
+    avgLoss = Math.max((avgLoss * (period - 1) + losses[i]) / period, 0.0001);
     rsi.push(100 - 100 / (1 + avgGain / avgLoss));
   }
   return rsi;
@@ -309,7 +314,9 @@ export default function WRCrystalBallPro() {
     c.name.toLowerCase().includes(coinSearch.toLowerCase())
   );
 
-  const fetchCoinData = async () => {
+  // FIX 2: Wrapped fetchCoinData in useCallback so the useEffect dependency array
+  //         can safely include it, preventing stale closure bugs.
+  const fetchCoinData = useCallback(async () => {
     setLoading(true);
     setError(null);
     setData(null);
@@ -467,9 +474,10 @@ export default function WRCrystalBallPro() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedCoin, timeframe]); // FIX 2: correct deps for useCallback
 
-  const runBacktest = async () => {
+  // FIX 2: fetchCoinData is now stable via useCallback and safe to include here.
+  const runBacktest = useCallback(async () => {
     if (!data || !data.hasTA) return;
     setLoading(true);
 
@@ -542,11 +550,12 @@ export default function WRCrystalBallPro() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedCoin, timeframe, data]);
 
+  // FIX 2: fetchCoinData is now correctly listed as a dependency.
   useEffect(() => { 
     fetchCoinData(); 
-  }, [selectedCoin.id, timeframe.label]);
+  }, [fetchCoinData]);
 
   const SIGNAL_META: any = {
     STRONG_BULL: { color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20", icon: TrendingUp, label: "STRONG BUY" },
@@ -736,7 +745,8 @@ export default function WRCrystalBallPro() {
             disabled={loading}
             className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
           >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingFlat className="w-4 h-4" />}
+            {/* FIX 1: Replaced non-existent TrendingFlat with Minus (already imported) */}
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Minus className="w-4 h-4" />}
             {loading ? "Running historical backtest..." : "Run Backtest (800 candles)"}
           </button>
 
