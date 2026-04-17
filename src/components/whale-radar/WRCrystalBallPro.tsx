@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { TrendingUp, TrendingDown, Minus, Loader2, Activity, BarChart3, Zap, AlertTriangle, Brain, Target } from "lucide-react";
-
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { TrendingUp, TrendingDown, Minus, Loader2, Activity, BarChart3, Zap } from "lucide-react";
 // ==================== ΕΝΗΜΕΡΩΜΕΝΗ COIN LIST (220+ coins) ====================
 const COIN_LIST = [
   { symbol: "BTC", id: "bitcoin", name: "Bitcoin" },
@@ -195,12 +194,13 @@ const COIN_LIST = [
   { symbol: "GRASS", id: "grass", name: "Grass" },
 ];
 
+
 const TIMEFRAMES = [
-  { label: "1h", binanceInterval: "1h" },
-  { label: "4h", binanceInterval: "4h" },
-  { label: "1d", binanceInterval: "1d" },
-  { label: "7d", binanceInterval: "1d" },
-  { label: "30d", binanceInterval: "1d" },
+  { label: "1h", binanceInterval: "1h", aggregate: 1, useHourly: true },
+  { label: "4h", binanceInterval: "4h", aggregate: 4, useHourly: true },
+  { label: "1d", binanceInterval: "1d", aggregate: 1, useHourly: false },
+  { label: "7d", binanceInterval: "1d", aggregate: 1, useHourly: false },
+  { label: "30d", binanceInterval: "1d", aggregate: 1, useHourly: false },
 ];
 
 const SIGNAL_META: Record<string, { color: string; icon: typeof TrendingUp; label: string }> = {
@@ -213,7 +213,7 @@ const SIGNAL_META: Record<string, { color: string; icon: typeof TrendingUp; labe
 
 // ==================== TA HELPERS ====================
 const calculateEMA = (prices: number[], period: number): number[] => {
-  if (prices.length < period) return prices.map(() => prices[prices.length - 1] ?? 0);
+  if (prices.length < period || period <= 0) return [prices[prices.length - 1] ?? 0];
   const k = 2 / (period + 1);
   let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
   const result = prices.slice(0, period - 1).map(() => ema);
@@ -282,13 +282,10 @@ const calculateStochastic = (highs: number[], lows: number[], closes: number[], 
   if (highs.length < period) return { k: [], d: [] };
   const kRaw: number[] = [];
   for (let i = period - 1; i < highs.length; i++) {
-    const sliceHigh = highs.slice(i - period + 1, i + 1);
-    const sliceLow = lows.slice(i - period + 1, i + 1);
-    const highestHigh = Math.max(...sliceHigh);
-    const lowestLow = Math.min(...sliceLow);
-    const close = closes[i];
+    const highestHigh = Math.max(...highs.slice(i - period + 1, i + 1));
+    const lowestLow = Math.min(...lows.slice(i - period + 1, i + 1));
     const range = highestHigh - lowestLow;
-    kRaw.push(range > 0 ? ((close - lowestLow) / range) * 100 : 50);
+    kRaw.push(range > 0 ? ((closes[i] - lowestLow) / range) * 100 : 50);
   }
   const k = calculateEMA(kRaw, smoothK);
   const d = calculateEMA(k, smoothD);
@@ -319,75 +316,9 @@ const detectRSIDivergence = (prices: number[], rsiValues: number[], lookback = 1
   return { bullish, bearish, strength };
 };
 
-const calculateADX = (highs: number[], lows: number[], closes: number[], period = 14) => {
-  if (highs.length < period + 1) return { adx: 25, diPositive: 25, diNegative: 25 };
-  const tr: number[] = [];
-  const plusDM: number[] = [];
-  const minusDM: number[] = [];
-  for (let i = 1; i < highs.length; i++) {
-    const trueRange = Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]));
-    tr.push(trueRange);
-    const upMove = highs[i] - highs[i - 1];
-    const downMove = lows[i - 1] - lows[i];
-    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
-    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
-  }
-  let smoothTR = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  let smoothPlus = plusDM.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  let smoothMinus = minusDM.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  const adxValues: number[] = [];
-  for (let i = period; i < tr.length; i++) {
-    smoothTR = (smoothTR * (period - 1) + tr[i]) / period;
-    smoothPlus = (smoothPlus * (period - 1) + plusDM[i]) / period;
-    smoothMinus = (smoothMinus * (period - 1) + minusDM[i]) / period;
-    const diPlus = smoothTR > 0 ? (smoothPlus / smoothTR) * 100 : 0;
-    const diMinus = smoothTR > 0 ? (smoothMinus / smoothTR) * 100 : 0;
-    const dx = (diPlus + diMinus) > 0 ? Math.abs(diPlus - diMinus) / (diPlus + diMinus) * 100 : 0;
-    adxValues.push(dx);
-  }
-  const adx = adxValues[adxValues.length - 1] || 25;
-  return { adx: Math.round(adx), diPositive: Math.round(smoothPlus / smoothTR * 100), diNegative: Math.round(smoothMinus / smoothTR * 100) };
-};
-
-const calculateCCI = (highs: number[], lows: number[], closes: number[], period = 20) => {
-  if (highs.length < period) return 0;
-  let cci = 0;
-  for (let i = period - 1; i < closes.length; i++) {
-    const sliceHigh = highs.slice(i - period + 1, i + 1);
-    const sliceLow = lows.slice(i - period + 1, i + 1);
-    const sliceClose = closes.slice(i - period + 1, i + 1);
-    const typicalPrice = (sliceHigh[sliceHigh.length - 1] + sliceLow[sliceLow.length - 1] + sliceClose[sliceClose.length - 1]) / 3;
-    const sma = sliceClose.reduce((a, b) => a + b, 0) / period;
-    const meanDev = sliceClose.reduce((sum, p) => sum + Math.abs(p - sma), 0) / period;
-    cci = meanDev > 0 ? (typicalPrice - sma) / (0.015 * meanDev) : 0;
-  }
-  return Math.round(cci);
-};
-
-const calculateSuperTrend = (highs: number[], lows: number[], closes: number[], period = 10, multiplier = 3) => {
-  if (highs.length < period) return { trend: "neutral", value: closes[closes.length - 1] || 0 };
-  const atr = calculateATR(highs, lows, closes, period);
-  let upperBand = highs[period - 1] - multiplier * (atr[0] || 0);
-  let lowerBand = lows[period - 1] + multiplier * (atr[0] || 0);
-  let finalUpper = upperBand;
-  let finalLower = lowerBand;
-  let trend = closes[period - 1] > finalUpper ? "bull" : "bear";
-
-  for (let i = period; i < closes.length; i++) {
-    const atrVal = atr[i - period + 1] || atr[atr.length - 1] || 0;
-    upperBand = highs[i] - multiplier * atrVal;
-    lowerBand = lows[i] + multiplier * atrVal;
-    finalUpper = trend === "bull" ? Math.max(upperBand, finalUpper) : upperBand;
-    finalLower = trend === "bear" ? Math.min(lowerBand, finalLower) : lowerBand;
-    if (closes[i] > finalUpper) trend = "bull";
-    else if (closes[i] < finalLower) trend = "bear";
-  }
-  return { trend, value: trend === "bull" ? finalLower : finalUpper };
-};
-
-const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods = 12, simulations = 1500) => {
+const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods = 12, simulations = 800) => {
   const finalPrices: number[] = [];
-  const stepVol = (atr / currentPrice) * 1.9;
+  const stepVol = (atr / currentPrice) * 1.8;
   for (let sim = 0; sim < simulations; sim++) {
     let price = currentPrice;
     for (let i = 0; i < periods; i++) {
@@ -409,62 +340,37 @@ const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods
 
 // ==================== PRICE FORMATTING ====================
 const formatPrice = (price: number | null | undefined): string => {
-  if (price === null || price === undefined || isNaN(price) || price <= 0) return "—";
-  if (price < 0.000001) return `\[ {price.toExponential(6)}`;
-  if (price < 0.00001) return ` \]{price.toFixed(8)}`;
-  if (price < 0.001) return `\[ {price.toFixed(7).replace(/\.?0+$/, "")}`;
-  if (price < 0.01) return ` \]{price.toFixed(6).replace(/\.?0+$/, "")}`;
-  if (price < 1) return `\[ {price.toFixed(5).replace(/\.?0+$/, "")}`;
-  if (price < 100) return ` \]{price.toFixed(4).replace(/\.?0+$/, "")}`;
-  if (price < 10000) return `\[ {price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  return ` \]{price.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  if (price === null || price === undefined || isNaN(price)) return "—";
+  if (price === 0) return "$0.00";
+  if (price < 0.00001) return `$${price.toExponential(4)}`;
+  if (price < 0.01) return `$${price.toFixed(8).replace(/\.?0+$/, "")}`;
+  if (price < 1) return `$${price.toFixed(6).replace(/\.?0+$/, "")}`;
+  if (price < 100) return `$${price.toFixed(4).replace(/\.?0+$/, "")}`;
+  if (price < 10000) return `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `$${price.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 };
 
-const formatLargeNumber = (num: number | null | undefined): string => {
-  if (!num || isNaN(num) || num <= 0) return "—";
-  if (num >= 1e12) return `\[ {(num / 1e12).toFixed(2)}T`;
-  if (num >= 1e9) return ` \]{(num / 1e9).toFixed(2)}B`;
-  if (num >= 1e6) return `\[ {(num / 1e6).toFixed(2)}M`;
-  return ` \]{num.toLocaleString()}`;
+// ==================== DATA FETCHING ====================
+const fetchWithAbort = (url: string, timeoutMs = 15000, externalSignal?: AbortSignal) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  const signal = externalSignal 
+    ? (() => {
+        externalSignal.addEventListener('abort', () => controller.abort());
+        return controller.signal;
+      })()
+    : controller.signal;
+
+  return fetch(url, { signal }).finally(() => clearTimeout(timeoutId));
 };
 
-const createProxyUrl = (url: string): string => `https://corsproxy.io/?${encodeURIComponent(url)}`;
-
-// ==================== AI FORECAST ENGINE (ΕΠΙΘΕΤΙΚΟ) ====================
-const generateAIForecast = (data: any, coinName: string, currentPrice: number): string => {
-  const isBullish = data.signal.includes("BULL");
-  const isBearish = data.signal.includes("BEAR");
-  const strength = data.confidence > 78 ? "πολύ ισχυρή" : data.confidence > 65 ? "ισχυρή" : "μέτρια";
-
-  let forecast = `🔮 Crystal Ball AI βλέπει ${strength} ${isBullish ? "ανοδική" : isBearish ? "καθοδική" : "πλευρική"} κίνηση για ${coinName}.\n\n`;
-
-  if (isBullish) {
-    const target1 = (currentPrice * 1.08).toFixed(0);
-    const target2 = (currentPrice * 1.16).toFixed(0);
-    forecast += `Πιθανό target: \[ {target1} – \]{target2} (+8% έως +16%). `;
-  } else if (isBearish) {
-    const target1 = (currentPrice * 0.92).toFixed(0);
-    const target2 = (currentPrice * 0.85).toFixed(0);
-    forecast += `Πιθανό target: \[ {target1} – \]{target2} (-8% έως -15%). `;
-  }
-
-  if (data.superTrend === "bull" && data.adx > 25) forecast += `SuperTrend + ADX δείχνουν ισχυρή ανοδική τάση. `;
-  if (data.superTrend === "bear" && data.adx > 25) forecast += `SuperTrend + ADX δείχνουν καθοδική πίεση. `;
-  if (data.divergence.bullish) forecast += `Bullish divergence ενισχύει την άνοδο. `;
-  if (data.divergence.bearish) forecast += `Bearish divergence ενισχύει την πτώση. `;
-
-  forecast += `\n\nMonte Carlo (1500 προσομοιώσεις): ${formatPrice(data.monteCarlo.p25)} – ${formatPrice(data.monteCarlo.p75)} (68% πιθανότητα).`;
-  forecast += `\n\nΣυμβουλή: ${isBullish ? "Μπορείς να ψάξεις long θέσεις." : isBearish ? "Προσοχή σε short ή take profit." : "Καλύτερα να περιμένεις clearer σήμα."}`;
-
-  return forecast;
-};
-
-// ==================== MAIN COMPONENT ====================
-export default function CrystalBallAI() {
+export default function WRCrystalBallPro() {
   const [selectedCoin, setSelectedCoin] = useState(COIN_LIST[0]);
   const [timeframe, setTimeframe] = useState(TIMEFRAMES[2]);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
+  const [backtestData, setBacktestData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [coinSearch, setCoinSearch] = useState("");
   const abortRef = useRef<AbortController | null>(null);
@@ -479,25 +385,14 @@ export default function CrystalBallAI() {
   );
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setCoinSearch("");
-    };
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setCoinSearch("");
+      }
+    }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  const fetchWithTimeout = async (url: string, timeoutMs: number, signal: AbortSignal) => {
-    const timeoutController = new AbortController();
-    const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
-    try {
-      const res = await fetch(url, { signal: AbortSignal.any ? AbortSignal.any([signal, timeoutController.signal]) : signal });
-      clearTimeout(timeoutId);
-      return res;
-    } catch (err) {
-      clearTimeout(timeoutId);
-      throw err;
-    }
-  };
 
   const fetchCoinData = useCallback(async () => {
     if (abortRef.current) abortRef.current.abort();
@@ -507,20 +402,25 @@ export default function CrystalBallAI() {
     setLoading(true);
     setError(null);
     setData(null);
+    setBacktestData(null);
 
     try {
-      const coinGeckoUrl = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${selectedCoin.id}&price_change_percentage=24h,7d`;
-      const proxyCoinGecko = createProxyUrl(coinGeckoUrl);
+      // 1. CoinGecko for current market data (CORS-friendly)
+      const cgRes = await fetchWithAbort(
+        `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${selectedCoin.id}&price_change_percentage=24h,7d`,
+        15000,
+        signal
+      );
 
-      const coinGeckoRes = await fetchWithTimeout(proxyCoinGecko, 15000, signal);
-      if (!coinGeckoRes.ok) throw new Error(coinGeckoRes.status === 429 ? "Rate limit exceeded. Wait 30s." : `CoinGecko error: ${coinGeckoRes.status}`);
+      if (cgRes.status === 429) throw new Error("CoinGecko rate limit exceeded. Please wait 30 seconds.");
+      if (!cgRes.ok) throw new Error(`CoinGecko error: ${cgRes.status}`);
 
-      const json = await coinGeckoRes.json();
-      if (!Array.isArray(json) || json.length === 0) throw new Error("No data from CoinGecko");
+      const cgJson = await cgRes.json();
+      if (!Array.isArray(cgJson) || cgJson.length === 0) throw new Error("No data from CoinGecko");
 
-      const coin = json[0];
+      const coin = cgJson[0];
       const currentPrice = Number(coin.current_price) || 0;
-      if (currentPrice <= 0) throw new Error("Invalid price data");
+      if (currentPrice <= 0) throw new Error("Invalid price data from CoinGecko");
 
       const change24h = coin.price_change_percentage_24h || 0;
       const change7d = coin.price_change_percentage_7d_in_currency || 0;
@@ -529,72 +429,98 @@ export default function CrystalBallAI() {
       const high24h = Number(coin.high_24h) || currentPrice;
       const low24h = Number(coin.low_24h) || currentPrice;
 
-      const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
-      const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=\( {binancePair}&interval= \){timeframe.binanceInterval}&limit=500`;
-      const proxyBinance = createProxyUrl(binanceUrl);
+      // 2. CryptoCompare for OHLCV history (CORS-friendly, NO proxy needed)
+      const symbol = selectedCoin.symbol.toUpperCase();
+      const limit = 200;
+      const ccUrl = timeframe.useHourly
+        ? `https://min-api.cryptocompare.com/data/v2/histohour?fsym=${symbol}&tsym=USD&limit=${limit}&aggregate=${timeframe.aggregate}`
+        : `https://min-api.cryptocompare.com/data/v2/histoday?fsym=${symbol}&tsym=USD&limit=${limit}&aggregate=${timeframe.aggregate}`;
 
-      const klinesRes = await fetchWithTimeout(proxyBinance, 12000, signal);
+      const ccRes = await fetchWithAbort(ccUrl, 15000, signal);
+      if (!ccRes.ok) throw new Error("Failed to fetch historical data from CryptoCompare");
 
-      let signalValue = "NEUTRAL";
-      let confidence = 45;
-      let reasons: string[] = [];
-      let rsiVal = 50, macdHist = 0, bbPos = 50, atrVal = currentPrice * 0.02;
-      let stochK = 50, stochD = 50, obvTrend = "flat";
-      let divergence = { bullish: false, bearish: false, strength: "" };
-      let adxData = { adx: 25, diPositive: 25, diNegative: 25 };
-      let cciVal = 0;
-      let superTrendData = { trend: "neutral", value: currentPrice };
+      const ccJson = await ccRes.json();
+      const ohlcv = ccJson?.Data?.Data;
 
-      if (klinesRes.ok) {
-        const klines = await klinesRes.json();
-        if (Array.isArray(klines) && klines.length > 30) {
-          const closes = klines.map((k: any) => parseFloat(k[4]));
-          const highs = klines.map((k: any) => parseFloat(k[2]));
-          const lows = klines.map((k: any) => parseFloat(k[3]));
-          const volumes = klines.map((k: any) => parseFloat(k[5]));
-
-          const rsiValues = calculateRSI(closes);
-          rsiVal = rsiValues[rsiValues.length - 1] || 50;
-
-          const macd = calculateMACD(closes);
-          macdHist = macd.histogram[macd.histogram.length - 1] || 0;
-
-          const bb = calculateBollingerBands(closes);
-          const latestBB = bb[bb.length - 1];
-          bbPos = latestBB ? ((currentPrice - latestBB.lower) / (latestBB.upper - latestBB.lower)) * 100 : 50;
-          bbPos = Math.max(0, Math.min(100, bbPos));
-
-          const atrValues = calculateATR(highs, lows, closes);
-          atrVal = atrValues[atrValues.length - 1] || (currentPrice * 0.02);
-
-          const stoch = calculateStochastic(highs, lows, closes);
-          stochK = stoch.k[stoch.k.length - 1] || 50;
-          stochD = stoch.d[stoch.d.length - 1] || 50;
-
-          const obv = calculateOBV(closes, volumes);
-          const obvRecent = obv.slice(-10);
-          obvTrend = obvRecent[obvRecent.length - 1] > obvRecent[0] ? "rising" : obvRecent[obvRecent.length - 1] < obvRecent[0] ? "falling" : "flat";
-
-          divergence = detectRSIDivergence(closes, rsiValues);
-          adxData = calculateADX(highs, lows, closes);
-          cciVal = calculateCCI(highs, lows, closes);
-          superTrendData = calculateSuperTrend(highs, lows, closes);
-
-          if (change24h > 8 && change7d > 15) { signalValue = "STRONG_BULL"; confidence = 72; reasons.push("Strong momentum"); }
-          else if (change24h < -8 && change7d < -15) { signalValue = "STRONG_BEAR"; confidence = 72; reasons.push("Strong downtrend"); }
-
-          if (rsiVal < 32 && stochK < 25 && superTrendData.trend === "bull") { confidence += 25; reasons.push("Oversold + Bullish SuperTrend"); if (signalValue === "NEUTRAL") signalValue = "BULLISH"; }
-          else if (rsiVal > 68 && stochK > 75 && superTrendData.trend === "bear") { confidence += 25; reasons.push("Overbought + Bearish SuperTrend"); if (signalValue === "NEUTRAL") signalValue = "BEARISH"; }
-
-          if (macdHist > 0 && obvTrend === "rising" && superTrendData.trend === "bull") {
-            confidence += 18; reasons.push("MACD + OBV + SuperTrend bullish");
-            if (signalValue === "NEUTRAL" || signalValue === "BULLISH") signalValue = "STRONG_BULL";
-          }
-
-          confidence = Math.min(97, Math.max(38, Math.round(confidence)));
-        }
+      if (!Array.isArray(ohlcv) || ohlcv.length < 30) {
+        throw new Error("Insufficient chart data from CryptoCompare");
       }
 
+      // Map to indicator format
+      const closes = ohlcv.map((d: any) => d.close);
+      const highs = ohlcv.map((d: any) => d.high);
+      const lows = ohlcv.map((d: any) => d.low);
+      const volumes = ohlcv.map((d: any) => d.volumefrom);
+
+      // Calculate indicators (plain functions, NOT hooks)
+      const rsiValues = calculateRSI(closes);
+      const rsiVal = rsiValues[rsiValues.length - 1] || 50;
+
+      const macd = calculateMACD(closes);
+      const macdHist = macd.histogram[macd.histogram.length - 1] || 0;
+
+      const bb = calculateBollingerBands(closes);
+      const latestBB = bb[bb.length - 1];
+      const bbRange = latestBB ? latestBB.upper - latestBB.lower : 0;
+      let bbPos = bbRange > 0 ? ((currentPrice - latestBB.lower) / bbRange) * 100 : 50;
+      bbPos = Math.max(0, Math.min(100, bbPos));
+
+      const atrValues = calculateATR(highs, lows, closes);
+      const atrVal = atrValues[atrValues.length - 1] || (currentPrice * 0.02);
+
+      const stoch = calculateStochastic(highs, lows, closes);
+      const stochK = stoch.k[stoch.k.length - 1] || 50;
+      const stochD = stoch.d[stoch.d.length - 1] || 50;
+
+      const obv = calculateOBV(closes, volumes);
+      const obvRecent = obv.slice(-10);
+      const obvTrend = obvRecent[obvRecent.length - 1] > obvRecent[0] ? "rising" : obvRecent[obvRecent.length - 1] < obvRecent[0] ? "falling" : "flat";
+
+      const divergence = detectRSIDivergence(closes, rsiValues);
+
+      const ema12 = calculateEMA(closes, 12);
+      const emaBullish = currentPrice > (ema12[ema12.length - 1] || 0);
+
+      // Signal logic
+      let signalValue = "NEUTRAL";
+      let confidence = 45;
+      const reasons: string[] = [];
+
+      if (change24h > 8 && change7d > 15) { signalValue = "STRONG_BULL"; confidence = 72; reasons.push("Strong price action"); }
+      else if (change24h < -8 && change7d < -15) { signalValue = "STRONG_BEAR"; confidence = 72; reasons.push("Strong price action"); }
+
+      if (rsiVal < 32 && stochK < 25 && emaBullish) {
+        confidence += 22; reasons.push(`RSI/Stoch oversold (${Math.round(rsiVal)}/${Math.round(stochK)})`);
+        if (signalValue === "NEUTRAL") signalValue = "BULLISH";
+      } else if (rsiVal > 68 && stochK > 75 && !emaBullish) {
+        confidence += 22; reasons.push(`RSI/Stoch overbought (${Math.round(rsiVal)}/${Math.round(stochK)})`);
+        if (signalValue === "NEUTRAL") signalValue = "BEARISH";
+      }
+
+      if (macdHist > 0 && obvTrend === "rising") {
+        confidence += 16; reasons.push("MACD + OBV bullish");
+        if (signalValue.includes("BULL") || signalValue === "NEUTRAL") signalValue = "STRONG_BULL";
+      } else if (macdHist < 0 && obvTrend === "falling") {
+        confidence += 16; reasons.push("MACD + OBV bearish");
+        if (signalValue.includes("BEAR") || signalValue === "NEUTRAL") signalValue = "STRONG_BEAR";
+      }
+
+      if (bbPos < 20 && divergence.bullish) {
+        confidence += 14; reasons.push("Bullish RSI divergence @ lower BB");
+      } else if (bbPos > 80 && divergence.bearish) {
+        confidence += 14; reasons.push("Bearish RSI divergence @ upper BB");
+      }
+
+      const volRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
+      if (volRatio > 9) confidence = Math.min(97, confidence + 9);
+      const volatilityPct = (atrVal / currentPrice) * 100;
+      if (volatilityPct > 22) confidence = Math.max(38, confidence - 14);
+
+      if (confidence > 84 && signalValue === "BULLISH") signalValue = "STRONG_BULL";
+      if (confidence > 84 && signalValue === "BEARISH") signalValue = "STRONG_BEAR";
+      confidence = Math.min(97, Math.max(38, Math.round(confidence)));
+
+      // Predictions
       const drift = macdHist > 0 ? 0.0045 : macdHist < 0 ? -0.0045 : 0;
       const predictions: any[] = [];
       let projectedPrice = currentPrice;
@@ -603,21 +529,11 @@ export default function CrystalBallAI() {
       for (let i = 1; i <= 12; i++) {
         const randomFactor = (Math.random() - 0.5) * stepVol * 2;
         projectedPrice *= (1 + drift + randomFactor);
-        const timeLabel = timeframe.label.includes("h") ? `+\( {i * (timeframe.label === "1h" ? 1 : 4)}h` : `+ \){i}d`;
+        const timeLabel = timeframe.label === "1h" ? `+${i}h` : timeframe.label === "4h" ? `+${i * 4}h` : `+${i}d`;
         predictions.push({ time: timeLabel, price: projectedPrice, change: ((projectedPrice - currentPrice) / currentPrice) * 100 });
       }
 
-      const mc = runMonteCarlo(currentPrice, drift, atrVal);
-
-      const aiForecast = generateAIForecast({
-        signal: signalValue,
-        confidence,
-        adx: adxData.adx,
-        cci: cciVal,
-        superTrend: superTrendData.trend,
-        divergence,
-        monteCarlo: mc
-      }, selectedCoin.name, currentPrice);
+      const mc = runMonteCarlo(currentPrice, drift, atrVal, 12, 800);
 
       setData({
         signal: signalValue,
@@ -625,10 +541,10 @@ export default function CrystalBallAI() {
         reasons,
         changePct: change24h,
         currentPrice,
-        high24h,
-        low24h,
         volume,
         marketCap,
+        high24h,
+        low24h,
         volatility: (atrVal / currentPrice * 100).toFixed(1),
         rsi: Math.round(rsiVal),
         macdHist: macdHist.toFixed(4),
@@ -639,27 +555,103 @@ export default function CrystalBallAI() {
         divergence,
         predictions,
         monteCarlo: mc,
-        adx: adxData.adx,
-        cci: cciVal,
-        superTrend: superTrendData.trend,
-        aiForecast,
         hasTA: true,
       });
     } catch (e: any) {
       if (e.name !== "AbortError") {
-        let msg = e.message || "Failed to load analysis";
-        if (msg.includes("fetch")) msg = "Network error — please try again.";
-        setError(msg);
+        setError(e.message || "Failed to load analysis");
       }
     } finally {
       setLoading(false);
     }
   }, [selectedCoin, timeframe]);
 
+  const runBacktest = useCallback(async () => {
+    if (!data || !data.hasTA) return;
+    setLoading(true);
+
+    try {
+      const symbol = selectedCoin.symbol.toUpperCase();
+      const limit = 800;
+      const ccUrl = timeframe.useHourly
+        ? `https://min-api.cryptocompare.com/data/v2/histohour?fsym=${symbol}&tsym=USD&limit=${limit}&aggregate=${timeframe.aggregate}`
+        : `https://min-api.cryptocompare.com/data/v2/histoday?fsym=${symbol}&tsym=USD&limit=${limit}&aggregate=${timeframe.aggregate}`;
+
+      const ccRes = await fetchWithAbort(ccUrl, 20000);
+      if (!ccRes.ok) throw new Error("Backtest data unavailable");
+
+      const ccJson = await ccRes.json();
+      const ohlcv = ccJson?.Data?.Data;
+      if (!Array.isArray(ohlcv)) throw new Error("Invalid backtest data");
+
+      const closes = ohlcv.map((d: any) => d.close);
+      const highs = ohlcv.map((d: any) => d.high);
+      const lows = ohlcv.map((d: any) => d.low);
+      const volumes = ohlcv.map((d: any) => d.volumefrom);
+
+      let wins = 0;
+      let totalTrades = 0;
+      const returns: number[] = [];
+
+      for (let i = 50; i < closes.length - 20; i += 8) {
+        const windowCloses = closes.slice(i - 50, i);
+        const windowHighs = highs.slice(i - 50, i);
+        const windowLows = lows.slice(i - 50, i);
+        const windowVolumes = volumes.slice(i - 50, i);
+
+        const rsiVals = calculateRSI(windowCloses);
+        const macd = calculateMACD(windowCloses);
+        const stoch = calculateStochastic(windowHighs, windowLows, windowCloses);
+        const obvVals = calculateOBV(windowCloses, windowVolumes);
+        const currentPriceAtSignal = closes[i];
+
+        let testSignal = "NEUTRAL";
+        const rsiNow = rsiVals[rsiVals.length - 1] || 50;
+        const macdNow = macd.histogram[macd.histogram.length - 1] || 0;
+        const stochKNow = stoch.k[stoch.k.length - 1] || 50;
+        const obvTrendNow = obvVals.length > 10 && obvVals[obvVals.length - 1] > obvVals[obvVals.length - 10] ? "rising" : "falling";
+
+        if (rsiNow < 35 && stochKNow < 25 && macdNow > 0 && obvTrendNow === "rising") testSignal = "BULLISH";
+        else if (rsiNow > 65 && stochKNow > 75 && macdNow < 0 && obvTrendNow === "falling") testSignal = "BEARISH";
+
+        if (testSignal !== "NEUTRAL") {
+          totalTrades++;
+          const forwardIdx = i + 12;
+          if (forwardIdx >= closes.length) continue;
+          const forwardPrice = closes[forwardIdx];
+          if (forwardPrice === undefined) continue;
+
+          const forwardReturn = (forwardPrice - currentPriceAtSignal) / currentPriceAtSignal * 100;
+          if ((testSignal === "BULLISH" && forwardReturn > 0) || (testSignal === "BEARISH" && forwardReturn < 0)) wins++;
+          returns.push(forwardReturn);
+        }
+      }
+
+      const winRate = totalTrades > 0 ? (wins / totalTrades * 100) : 0;
+      const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
+
+      setBacktestData({
+        winRate: winRate.toFixed(1),
+        totalTrades,
+        avgReturn: avgReturn.toFixed(2),
+        timeframe: timeframe.label,
+      });
+    } catch (e: any) {
+      setError(e.message || "Backtest failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedCoin, timeframe, data]);
+
   useEffect(() => {
     fetchCoinData();
-    return () => { if (abortRef.current) abortRef.current.abort(); };
   }, [fetchCoinData]);
+
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   const sig = data ? SIGNAL_META[data.signal] : null;
   const Icon = sig?.icon || Activity;
@@ -668,137 +660,202 @@ export default function CrystalBallAI() {
     <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 mb-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className="text-2xl">🔮</span>
+          <span className="text-xl">🔮</span>
           <div>
-            <h3 className="text-lg font-bold text-purple-300 flex items-center gap-2">
-              <Brain className="w-5 h-5" /> Crystal Ball AI
-            </h3>
-            <p className="text-xs text-slate-400">12+ TradingView Indicators • Predictive AI Engine</p>
+            <h3 className="text-sm font-bold text-purple-300">Crystal Ball PRO v3</h3>
+            <p className="text-[10px] text-slate-500">RSI + Stoch + MACD + BB + OBV + Divergence + Monte Carlo + Backtest</p>
           </div>
         </div>
-        <span className="text-xs px-3 py-1 rounded-full bg-gradient-to-r from-purple-500 to-violet-500 text-white font-medium">AI FORECAST</span>
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/30 flex items-center gap-1">
+          <Zap className="w-3 h-3" /> Full TA Suite
+        </span>
       </div>
 
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div className="flex flex-wrap gap-2 mb-3">
         <div className="relative" ref={dropdownRef}>
           <input
             type="text"
             placeholder="Search coin..."
             value={coinSearch}
             onChange={e => setCoinSearch(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm w-32 focus:outline-none focus:ring-1 focus:ring-purple-500"
+            className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 w-24 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
           />
           {coinSearch && (
-            <div className="absolute top-full left-0 mt-1 w-64 max-h-60 overflow-y-auto bg-slate-800 border border-slate-700 rounded z-50">
-              {filteredCoins.slice(0, 12).map(coin => (
+            <div className="absolute top-full left-0 mt-1 w-48 max-h-48 overflow-y-auto bg-slate-800 border border-slate-700 rounded z-50">
+              {filteredCoins.slice(0, 10).map(coin => (
                 <button
                   key={coin.id}
                   onClick={() => { setSelectedCoin(coin); setCoinSearch(""); }}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700 flex justify-between"
+                  className="w-full text-left px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-700 flex items-center justify-between"
                 >
                   <span>{coin.symbol}</span>
-                  <span className="text-slate-500 text-xs">{coin.name}</span>
+                  <span className="text-slate-500 text-[10px]">{coin.name}</span>
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        <select value={selectedCoin.id} onChange={e => {
-          const coin = COIN_LIST.find(c => c.id === e.target.value);
-          if (coin) setSelectedCoin(coin);
-        }} className="bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+        <select
+          value={selectedCoin.id}
+          onChange={e => { const coin = COIN_LIST.find(c => c.id === e.target.value); if (coin) setSelectedCoin(coin); }}
+          className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500/50 max-w-[120px]"
+        >
           {COIN_LIST.map(c => <option key={c.id} value={c.id}>{c.symbol} - {c.name}</option>)}
         </select>
 
-        <select value={timeframe.label} onChange={e => {
-          const tf = TIMEFRAMES.find(t => t.label === e.target.value);
-          if (tf) setTimeframe(tf);
-        }} className="bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+        <select
+          value={timeframe.label}
+          onChange={e => { const tf = TIMEFRAMES.find(t => t.label === e.target.value); if (tf) setTimeframe(tf); }}
+          className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200"
+        >
           {TIMEFRAMES.map(t => <option key={t.label} value={t.label}>{t.label}</option>)}
         </select>
 
-        <button onClick={fetchCoinData} disabled={loading}
-          className="ml-auto bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white px-6 py-2 rounded text-sm font-medium flex items-center gap-2">
-          {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-          {loading ? "Analyzing..." : "Analyze Market"}
+        <button
+          onClick={fetchCoinData}
+          disabled={loading}
+          className="ml-auto bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white px-3 py-1.5 rounded text-xs flex items-center gap-1.5"
+        >
+          {loading && <Loader2 className="w-3 h-3 animate-spin" />}
+          {loading ? "Scanning..." : "Analyze"}
         </button>
       </div>
 
       {error && (
-        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm mb-4 flex items-start gap-2">
-          <AlertTriangle className="w-5 h-5 mt-0.5" /> {error}
+        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-xs mb-3">
+          ⚠️ {error}
         </div>
       )}
 
       {data && sig && (
         <>
-          <div className={`flex items-center gap-4 p-4 rounded-2xl border ${sig.color} mb-4`}>
-            <div className={`p-3 rounded-xl bg-slate-950/70 ${sig.color.split(' ')[0]}`}>
-              <Icon className="w-8 h-8" />
+          <div className={`flex items-center gap-3 p-3 rounded-lg border ${sig.color} mb-3`}>
+            <div className={`p-2 rounded-lg bg-slate-950/50 ${sig.color.split(' ')[0]}`}>
+              <Icon className="w-6 h-6" />
             </div>
             <div className="flex-1">
-              <div className={`text-2xl font-bold ${sig.color.split(' ')[0]}`}>{sig.label}</div>
-              <div className="text-sm text-slate-400">{data.reasons?.join(" • ") || "Balanced market"}</div>
+              <div className={`text-lg font-bold ${sig.color.split(' ')[0]}`}>{sig.label}</div>
+              <div className="text-[10px] text-slate-400 flex flex-wrap gap-x-2">
+                {data.reasons?.join(" • ") || "No specific signals detected"}
+              </div>
             </div>
             <div className="text-right">
-              <div className="text-xs text-slate-500">CONFIDENCE</div>
-              <div className="text-3xl font-bold text-slate-100">{data.confidence}%</div>
+              <div className="text-[10px] text-slate-500">CONFIDENCE</div>
+              <div className="text-xl font-bold text-slate-200">{data.confidence}%</div>
             </div>
           </div>
 
-          <div className="p-5 bg-gradient-to-br from-violet-950/60 to-slate-900 border border-violet-500/30 rounded-3xl mb-6 whitespace-pre-line">
-            <div className="flex items-center gap-3 mb-4">
-              <Target className="w-6 h-6 text-violet-400" />
-              <span className="font-semibold text-lg text-violet-300">CRYSTAL BALL AI FORECAST</span>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4 text-[10px] bg-slate-800/30 rounded p-3">
+            <div>RSI: <span className={data.rsi < 35 ? "text-emerald-400" : data.rsi > 65 ? "text-rose-400" : ""}>{data.rsi}</span></div>
+            <div>Stoch %K: <span className={parseFloat(data.stochK) < 25 ? "text-emerald-400" : parseFloat(data.stochK) > 75 ? "text-rose-400" : ""}>{data.stochK}</span></div>
+            <div>MACD Hist: <span className={parseFloat(data.macdHist) > 0 ? "text-emerald-400" : "text-rose-400"}>{data.macdHist}</span></div>
+            <div>BB Pos: {data.bbPosition}%</div>
+            <div>OBV: <span className={data.obvTrend === "rising" ? "text-emerald-400" : data.obvTrend === "falling" ? "text-rose-400" : ""}>{data.obvTrend}</span></div>
+            <div>Divergence:
+              {data.divergence.bullish && <span className="text-emerald-400"> BULLISH {data.divergence.strength}</span>}
+              {data.divergence.bearish && <span className="text-rose-400"> BEARISH {data.divergence.strength}</span>}
+              {!data.divergence.bullish && !data.divergence.bearish && " none"}
             </div>
-            <p className="text-slate-200 leading-relaxed text-[15px]">{data.aiForecast}</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mb-6 text-sm">
-            <div className="bg-slate-800/60 rounded-2xl p-4">
-              <div className="text-xs text-slate-400">Current Price</div>
-              <div className="font-mono text-xl font-medium mt-1">{formatPrice(data.currentPrice)}</div>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="bg-slate-800/50 rounded p-2">
+              <div className="text-[10px] text-slate-500">Current Price</div>
+              <div className="text-sm font-mono">{formatPrice(data.currentPrice)}</div>
             </div>
-            <div className="bg-slate-800/60 rounded-2xl p-4">
-              <div className="text-xs text-slate-400">24h Change</div>
-              <div className={`font-mono text-xl mt-1 ${data.changePct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+            <div className="bg-slate-800/50 rounded p-2">
+              <div className="text-[10px] text-slate-500">24h Change</div>
+              <div className={`text-sm font-mono ${data.changePct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                 {data.changePct >= 0 ? "+" : ""}{data.changePct?.toFixed(2)}%
               </div>
             </div>
-            <div className="bg-slate-800/60 rounded-2xl p-4 col-span-2">
-              <div className="text-xs text-slate-400">Market Cap</div>
-              <div className="font-mono text-lg">{formatLargeNumber(data.marketCap)}</div>
+            <div className="bg-slate-800/50 rounded p-2">
+              <div className="text-[10px] text-slate-500">24h High</div>
+              <div className="text-sm font-mono">{formatPrice(data.high24h)}</div>
             </div>
-            <div className="bg-slate-800/60 rounded-2xl p-4 col-span-2">
-              <div className="text-xs text-slate-400">24h Volume</div>
-              <div className="font-mono text-lg">{formatLargeNumber(data.volume)}</div>
+            <div className="bg-slate-800/50 rounded p-2">
+              <div className="text-[10px] text-slate-500">24h Low</div>
+              <div className="text-sm font-mono">{formatPrice(data.low24h)}</div>
             </div>
           </div>
 
-          <div className="bg-slate-800/30 rounded-3xl p-5 mb-6">
-            <div className="flex items-center gap-2 mb-4">
-              <BarChart3 className="w-4 h-4 text-purple-400" />
-              <span className="text-purple-300 text-sm font-medium">12-Period Price Projection</span>
+          <div className="bg-slate-800/30 rounded-lg p-3 mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <BarChart3 className="w-3 h-3 text-purple-400" />
+              <span className="text-[10px] text-purple-300 font-medium">12-Period Projection (ATR + MACD Drift)</span>
             </div>
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-4 gap-2">
               {data.predictions.map((p: any, i: number) => (
-                <div key={i} className="bg-slate-900/70 rounded-2xl p-3 text-center">
-                  <div className="text-xs text-slate-500">{p.time}</div>
-                  <div className="font-mono text-base mt-1">{formatPrice(p.price)}</div>
-                  <div className={`text-xs mt-1 ${p.change >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{p.change.toFixed(1)}%</div>
+                <div key={i} className="bg-slate-900/50 rounded p-2 text-center">
+                  <div className="text-[9px] text-slate-500">{p.time}</div>
+                  <div className="text-[11px] font-mono">{formatPrice(p.price)}</div>
+                  <div className={`text-[9px] ${p.change >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{p.change.toFixed(1)}%</div>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="text-center text-xs text-emerald-400/60 mt-6">
-            Crystal Ball AI • 12 TradingView algorithms • Real-time prediction engine
+          <div className="bg-slate-800/30 rounded-lg p-3 mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <BarChart3 className="w-3 h-3 text-amber-400" />
+              <span className="text-[10px] text-amber-300 font-medium">Monte Carlo Range (800 simulations • 12 periods)</span>
+            </div>
+            <div className="grid grid-cols-5 gap-2 text-center text-xs">
+              <div className="bg-slate-900/50 rounded p-2">
+                <div className="text-slate-500 text-[10px]">Bearish (25%)</div>
+                <div className="font-mono text-rose-400">{formatPrice(data.monteCarlo.p25)}</div>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2">
+                <div className="text-slate-500 text-[10px]">Minimum</div>
+                <div className="font-mono text-rose-400">{formatPrice(data.monteCarlo.min)}</div>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2 border border-purple-400">
+                <div className="text-slate-500 text-[10px]">Median</div>
+                <div className="font-mono text-purple-300">{formatPrice(data.monteCarlo.median)}</div>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2">
+                <div className="text-slate-500 text-[10px]">Maximum</div>
+                <div className="font-mono text-emerald-400">{formatPrice(data.monteCarlo.max)}</div>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2">
+                <div className="text-slate-500 text-[10px]">Bullish (75%)</div>
+                <div className="font-mono text-emerald-400">{formatPrice(data.monteCarlo.p75)}</div>
+              </div>
+            </div>
+            <div className="text-center text-[10px] text-slate-400 mt-2">
+              50% of simulated paths fall between {formatPrice(data.monteCarlo.p25)} – {formatPrice(data.monteCarlo.p75)}
+            </div>
+          </div>
+
+          <button
+            onClick={runBacktest}
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Minus className="w-4 h-4" />}
+            {loading ? "Running historical backtest..." : "Run Backtest (800 candles)"}
+          </button>
+
+          {backtestData && (
+            <div className="mt-3 bg-emerald-900/20 border border-emerald-500/30 rounded-lg p-3 text-xs">
+              <div className="font-medium text-emerald-400 mb-2">📈 Backtest Results ({backtestData.timeframe} timeframe)</div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>Win Rate: <span className="text-emerald-400 font-mono">{backtestData.winRate}%</span></div>
+                <div>Trades: <span className="font-mono">{backtestData.totalTrades}</span></div>
+                <div>Avg Return: <span className={`font-mono ${parseFloat(backtestData.avgReturn) > 0 ? "text-emerald-400" : "text-rose-400"}`}>{backtestData.avgReturn}%</span></div>
+              </div>
+              <div className="text-[10px] text-slate-400 mt-2">Simulated forward 12-period performance using full indicator suite</div>
+            </div>
+          )}
+
+          <div className="mt-4 text-center text-[10px] text-emerald-400/70">
+            Crystal Ball now powered by 7 indicators + Monte Carlo + historical backtesting
           </div>
         </>
       )}
 
-      {loading && (
+      {loading && !data && (
         <div className="text-center py-16">
           <Loader2 className="w-10 h-10 animate-spin mx-auto text-purple-400" />
           <p className="mt-4 text-slate-400">Running multi-factor AI analysis...</p>
