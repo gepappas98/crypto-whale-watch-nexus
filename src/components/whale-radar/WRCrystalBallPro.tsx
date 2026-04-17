@@ -148,7 +148,7 @@ const TIMEFRAMES = [
   { label: "30d", binanceInterval: "1d", days: 30, interval: "daily" },
 ];
 
-const SIGNAL_META: Record<string, { color: string; icon: typeof TrendingUp; label: string }> = {
+const SIGNAL_META = {
   STRONG_BULL: { color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20", icon: TrendingUp, label: "STRONG BUY" },
   BULLISH: { color: "text-green-400 bg-green-500/10 border-green-500/20", icon: TrendingUp, label: "BUY" },
   NEUTRAL: { color: "text-slate-400 bg-slate-500/10 border-slate-500/20", icon: Minus, label: "HOLD" },
@@ -156,8 +156,41 @@ const SIGNAL_META: Record<string, { color: string; icon: typeof TrendingUp; labe
   STRONG_BEAR: { color: "text-red-500 bg-red-500/10 border-red-500/20", icon: TrendingDown, label: "STRONG SELL" },
 };
 
+// ==================== CORS PROXY HELPER ====================
+const proxify = (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`;
+
+// ==================== TIMEOUT-AWARE FETCH ====================
+// Compatible with all browsers — no AbortSignal.any / AbortSignal.timeout
+function fetchWithTimeout(url, timeoutMs, parentSignal) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  // Forward parent cancellation into the local controller
+  const forwardAbort = () => controller.abort();
+  if (parentSignal) {
+    parentSignal.addEventListener("abort", forwardAbort);
+  }
+
+  return fetch(url, { signal: controller.signal }).finally(() => {
+    clearTimeout(timeoutId);
+    if (parentSignal) {
+      parentSignal.removeEventListener("abort", forwardAbort);
+    }
+  });
+}
+
+// ==================== SAFE JSON PARSE ====================
+async function safeJson(res) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("Proxy returned an unexpected response – try again in a moment");
+  }
+}
+
 // ==================== ADVANCED TA HELPERS ====================
-const calculateEMA = (prices: number[], period: number): number[] => {
+const calculateEMA = (prices, period) => {
   if (prices.length < period) {
     return prices.map(() => prices[prices.length - 1] ?? 0);
   }
@@ -173,7 +206,7 @@ const calculateEMA = (prices: number[], period: number): number[] => {
   return result;
 };
 
-const calculateRSI = (prices: number[], period: number = 14): number[] => {
+const calculateRSI = (prices, period = 14) => {
   if (prices.length < period + 1) return [];
   const changes = prices.slice(1).map((p, i) => p - prices[i]);
   const gains = changes.map(c => Math.max(c, 0));
@@ -182,7 +215,7 @@ const calculateRSI = (prices: number[], period: number = 14): number[] => {
   let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
   let avgLoss = Math.max(losses.slice(0, period).reduce((a, b) => a + b, 0) / period, 0.0001);
 
-  const rsi: number[] = [100 - 100 / (1 + avgGain / avgLoss)];
+  const rsi = [100 - 100 / (1 + avgGain / avgLoss)];
 
   for (let i = period; i < gains.length; i++) {
     avgGain = (avgGain * (period - 1) + gains[i]) / period;
@@ -192,7 +225,7 @@ const calculateRSI = (prices: number[], period: number = 14): number[] => {
   return rsi;
 };
 
-const calculateMACD = (prices: number[], fast = 12, slow = 26, signalPeriod = 9) => {
+const calculateMACD = (prices, fast = 12, slow = 26, signalPeriod = 9) => {
   const emaFast = calculateEMA(prices, fast);
   const emaSlow = calculateEMA(prices, slow);
   const macdLine = emaFast.slice(emaFast.length - emaSlow.length).map((f, i) => f - emaSlow[i]);
@@ -201,8 +234,8 @@ const calculateMACD = (prices: number[], fast = 12, slow = 26, signalPeriod = 9)
   return { macdLine, signalLine, histogram };
 };
 
-const calculateBollingerBands = (prices: number[], period = 20, stdDev = 2) => {
-  const bands: { upper: number; middle: number; lower: number }[] = [];
+const calculateBollingerBands = (prices, period = 20, stdDev = 2) => {
+  const bands = [];
   for (let i = period - 1; i < prices.length; i++) {
     const slice = prices.slice(i - period + 1, i + 1);
     const mean = slice.reduce((a, b) => a + b, 0) / period;
@@ -213,9 +246,9 @@ const calculateBollingerBands = (prices: number[], period = 20, stdDev = 2) => {
   return bands;
 };
 
-const calculateATR = (highs: number[], lows: number[], closes: number[], period = 14) => {
+const calculateATR = (highs, lows, closes, period = 14) => {
   if (highs.length < period + 1) return [];
-  const tr: number[] = [];
+  const tr = [];
   for (let i = 1; i < highs.length; i++) {
     const trueRange = Math.max(
       highs[i] - lows[i],
@@ -233,9 +266,9 @@ const calculateATR = (highs: number[], lows: number[], closes: number[], period 
   return result;
 };
 
-const calculateStochastic = (highs: number[], lows: number[], closes: number[], period = 14, smoothK = 3, smoothD = 3) => {
+const calculateStochastic = (highs, lows, closes, period = 14, smoothK = 3, smoothD = 3) => {
   if (highs.length < period) return { k: [], d: [] };
-  const kRaw: number[] = [];
+  const kRaw = [];
   for (let i = period - 1; i < highs.length; i++) {
     const sliceHigh = highs.slice(i - period + 1, i + 1);
     const sliceLow = lows.slice(i - period + 1, i + 1);
@@ -250,8 +283,8 @@ const calculateStochastic = (highs: number[], lows: number[], closes: number[], 
   return { k, d };
 };
 
-const calculateOBV = (closes: number[], volumes: number[]) => {
-  const obv: number[] = [volumes[0] || 0];
+const calculateOBV = (closes, volumes) => {
+  const obv = [volumes[0] || 0];
   for (let i = 1; i < closes.length; i++) {
     if (closes[i] > closes[i - 1]) obv.push(obv[i - 1] + volumes[i]);
     else if (closes[i] < closes[i - 1]) obv.push(obv[i - 1] - volumes[i]);
@@ -260,7 +293,7 @@ const calculateOBV = (closes: number[], volumes: number[]) => {
   return obv;
 };
 
-const detectRSIDivergence = (prices: number[], rsiValues: number[], lookback = 15): { bullish: boolean; bearish: boolean; strength: string } => {
+const detectRSIDivergence = (prices, rsiValues, lookback = 15) => {
   if (prices.length < lookback || rsiValues.length < lookback) return { bullish: false, bearish: false, strength: "" };
   const recentPrices = prices.slice(-lookback);
   const recentRSI = rsiValues.slice(-lookback);
@@ -278,8 +311,8 @@ const detectRSIDivergence = (prices: number[], rsiValues: number[], lookback = 1
   return { bullish, bearish, strength };
 };
 
-const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods = 12, simulations = 800) => {
-  const finalPrices: number[] = [];
+const runMonteCarlo = (currentPrice, drift, atr, periods = 12, simulations = 800) => {
+  const finalPrices = [];
   const stepVol = (atr / currentPrice) * 1.8;
 
   for (let sim = 0; sim < simulations; sim++) {
@@ -301,7 +334,7 @@ const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods
 };
 
 // ==================== PRICE FORMATTING ====================
-const formatPrice = (price: number | null | undefined): string => {
+const formatPrice = (price) => {
   if (price === null || price === undefined || isNaN(price)) return "—";
   if (price === 0) return "$0.00";
 
@@ -327,12 +360,12 @@ export default function WRCrystalBallPro() {
   const [selectedCoin, setSelectedCoin] = useState(COIN_LIST[0]);
   const [timeframe, setTimeframe] = useState(TIMEFRAMES[2]);
   const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<any>(null);
-  const [backtestData, setBacktestData] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState(null);
+  const [backtestData, setBacktestData] = useState(null);
+  const [error, setError] = useState(null);
   const [coinSearch, setCoinSearch] = useState("");
-  const abortRef = useRef<AbortController | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef(null);
+  const dropdownRef = useRef(null);
 
   const filteredCoins = useMemo(() =>
     COIN_LIST.filter(c =>
@@ -344,8 +377,8 @@ export default function WRCrystalBallPro() {
 
   // Click outside to close search dropdown
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setCoinSearch("");
       }
     }
@@ -354,10 +387,10 @@ export default function WRCrystalBallPro() {
   }, []);
 
   const fetchCoinData = useCallback(async () => {
-    // Cancel previous request
+    // Cancel any in-flight request
     if (abortRef.current) abortRef.current.abort();
     abortRef.current = new AbortController();
-    const signal = abortRef.current.signal;
+    const abortSignal = abortRef.current.signal;
 
     setLoading(true);
     setError(null);
@@ -365,21 +398,30 @@ export default function WRCrystalBallPro() {
     setBacktestData(null);
 
     try {
-      const coinGeckoRes = await fetch(
-        `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${selectedCoin.id}&price_change_percentage=24h,7d&include_24hr_high=true&include_24hr_low=true`,
-        { signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : signal }
-      );
+      // ── CoinGecko ─────────────────────────────────────────────────────────
+      // high_24h / low_24h are always returned by /coins/markets — no extra params needed
+      const cgRawUrl = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${selectedCoin.id}&price_change_percentage=24h,7d`;
+      const cgProxyUrl = proxify(cgRawUrl);
+
+      let coinGeckoRes;
+      try {
+        coinGeckoRes = await fetchWithTimeout(cgProxyUrl, 15000, abortSignal);
+      } catch (fetchErr) {
+        if (abortSignal.aborted) return;
+        throw new Error("CORS proxy temporarily unavailable – try again in a few seconds");
+      }
 
       if (coinGeckoRes.status === 429) {
         throw new Error("CoinGecko rate limit exceeded. Please wait 30 seconds.");
       }
-      if (!coinGeckoRes.ok) throw new Error(`CoinGecko error: ${coinGeckoRes.status}`);
+      if (!coinGeckoRes.ok) {
+        throw new Error(`CoinGecko error: ${coinGeckoRes.status}`);
+      }
 
-      const json = await coinGeckoRes.json();
+      const json = await safeJson(coinGeckoRes);
       if (!json || json.length === 0) throw new Error("No data returned from CoinGecko");
 
       const coin = json[0];
-
       const currentPrice = coin.current_price ?? 0;
       if (currentPrice === 0) throw new Error("Invalid price data from CoinGecko");
 
@@ -390,28 +432,36 @@ export default function WRCrystalBallPro() {
       const high24h = coin.high_24h || currentPrice;
       const low24h = coin.low_24h || currentPrice;
 
+      // ── Binance klines ────────────────────────────────────────────────────
       const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
-      const klinesRes = await fetch(
-        `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${timeframe.binanceInterval}&limit=500`,
-        { signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(12000)]) : signal }
-      );
+      const binanceRawUrl = `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${timeframe.binanceInterval}&limit=500`;
+      const binanceProxyUrl = proxify(binanceRawUrl);
 
-      let signal = "NEUTRAL";
+      let klinesRes;
+      try {
+        klinesRes = await fetchWithTimeout(binanceProxyUrl, 12000, abortSignal);
+      } catch (fetchErr) {
+        if (abortSignal.aborted) return;
+        throw new Error("CORS proxy temporarily unavailable – try again in a few seconds");
+      }
+
+      // ── TA signal calculation ─────────────────────────────────────────────
+      let tradeSignal = "NEUTRAL";
       let confidence = 45;
-      let reasons: string[] = [];
+      let reasons = [];
       let rsiVal = 50, macdHist = 0, bbPos = 50, atrVal = currentPrice * 0.02, stochK = 50, stochD = 50, obvTrend = "flat";
       let divergence = { bullish: false, bearish: false, strength: "" };
 
       if (klinesRes.ok) {
-        const klines = await klinesRes.json();
+        const klines = await safeJson(klinesRes);
         if (!Array.isArray(klines) || klines.length === 0) {
           throw new Error("Invalid data from Binance");
         }
 
-        const closes = klines.map((k: any) => parseFloat(k[4]));
-        const highs = klines.map((k: any) => parseFloat(k[2]));
-        const lows = klines.map((k: any) => parseFloat(k[3]));
-        const volumes = klines.map((k: any) => parseFloat(k[5]));
+        const closes = klines.map((k) => parseFloat(k[4]));
+        const highs = klines.map((k) => parseFloat(k[2]));
+        const lows = klines.map((k) => parseFloat(k[3]));
+        const volumes = klines.map((k) => parseFloat(k[5]));
 
         const rsiValues = calculateRSI(closes);
         rsiVal = rsiValues[rsiValues.length - 1] || 50;
@@ -440,23 +490,23 @@ export default function WRCrystalBallPro() {
         const ema12 = calculateEMA(closes, 12);
         const emaBullish = currentPrice > (ema12[ema12.length - 1] || 0);
 
-        if (change24h > 8 && change7d > 15) { signal = "STRONG_BULL"; confidence = 72; reasons.push("Strong price action"); }
-        else if (change24h < -8 && change7d < -15) { signal = "STRONG_BEAR"; confidence = 72; reasons.push("Strong price action"); }
+        if (change24h > 8 && change7d > 15) { tradeSignal = "STRONG_BULL"; confidence = 72; reasons.push("Strong price action"); }
+        else if (change24h < -8 && change7d < -15) { tradeSignal = "STRONG_BEAR"; confidence = 72; reasons.push("Strong price action"); }
 
         if (rsiVal < 32 && stochK < 25 && emaBullish) {
           confidence += 22; reasons.push(`RSI/Stoch oversold (${rsiVal.toFixed(0)}/${stochK.toFixed(0)})`);
-          if (signal === "NEUTRAL") signal = "BULLISH";
+          if (tradeSignal === "NEUTRAL") tradeSignal = "BULLISH";
         } else if (rsiVal > 68 && stochK > 75 && !emaBullish) {
           confidence += 22; reasons.push(`RSI/Stoch overbought (${rsiVal.toFixed(0)}/${stochK.toFixed(0)})`);
-          if (signal === "NEUTRAL") signal = "BEARISH";
+          if (tradeSignal === "NEUTRAL") tradeSignal = "BEARISH";
         }
 
         if (macdHist > 0 && obvTrend === "rising") {
           confidence += 16; reasons.push("MACD + OBV bullish");
-          if (signal.includes("BULL") || signal === "NEUTRAL") signal = "STRONG_BULL";
+          if (tradeSignal.includes("BULL") || tradeSignal === "NEUTRAL") tradeSignal = "STRONG_BULL";
         } else if (macdHist < 0 && obvTrend === "falling") {
           confidence += 16; reasons.push("MACD + OBV bearish");
-          if (signal.includes("BEAR") || signal === "NEUTRAL") signal = "STRONG_BEAR";
+          if (tradeSignal.includes("BEAR") || tradeSignal === "NEUTRAL") tradeSignal = "STRONG_BEAR";
         }
 
         if (bbPos < 20 && divergence.bullish) {
@@ -470,14 +520,15 @@ export default function WRCrystalBallPro() {
         const volatilityPct = (atrVal / currentPrice) * 100;
         if (volatilityPct > 22) confidence = Math.max(38, confidence - 14);
 
-        if (confidence > 84 && signal === "BULLISH") signal = "STRONG_BULL";
-        if (confidence > 84 && signal === "BEARISH") signal = "STRONG_BEAR";
+        if (confidence > 84 && tradeSignal === "BULLISH") tradeSignal = "STRONG_BULL";
+        if (confidence > 84 && tradeSignal === "BEARISH") tradeSignal = "STRONG_BEAR";
 
         confidence = Math.min(97, Math.max(38, Math.round(confidence)));
       }
 
       const drift = macdHist > 0 ? 0.0045 : macdHist < 0 ? -0.0045 : 0;
-      const predictions: any[] = [];
+      const predictions = [];
+
       let projectedPrice = currentPrice;
       const stepVol = (atrVal / currentPrice) * 1.7;
 
@@ -492,7 +543,7 @@ export default function WRCrystalBallPro() {
       const finalChange = ((predictions[predictions.length - 1].price - currentPrice) / currentPrice) * 100;
 
       setData({
-        signal,
+        signal: tradeSignal,
         confidence,
         reasons,
         changePct: change24h,
@@ -514,9 +565,14 @@ export default function WRCrystalBallPro() {
         monteCarlo: mc,
         hasTA: true,
       });
-    } catch (e: any) {
-      if (e.name !== "AbortError") {
-        setError(e.message || "Failed to load advanced analysis");
+    } catch (e) {
+      if (e.name !== "AbortError" && !abortSignal.aborted) {
+        const msg = e.message || "";
+        if (msg.toLowerCase().includes("failed to fetch")) {
+          setError("CORS proxy temporarily unavailable – try again in a few seconds");
+        } else {
+          setError(msg || "Failed to load advanced analysis");
+        }
       }
     } finally {
       setLoading(false);
@@ -527,29 +583,38 @@ export default function WRCrystalBallPro() {
     if (!data || !data.hasTA) return;
     setLoading(true);
 
+    // Use a fresh controller for the backtest
+    const btController = new AbortController();
+
     try {
       const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
-      const klinesRes = await fetch(
-        `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${timeframe.binanceInterval}&limit=800`,
-        { signal: AbortSignal.timeout(15000) }
-      );
+      const btRawUrl = `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${timeframe.binanceInterval}&limit=800`;
+      const btProxyUrl = proxify(btRawUrl);
+
+      let klinesRes;
+      try {
+        klinesRes = await fetchWithTimeout(btProxyUrl, 15000, btController.signal);
+      } catch (fetchErr) {
+        if (btController.signal.aborted) return;
+        throw new Error("CORS proxy temporarily unavailable – try again in a few seconds");
+      }
 
       if (klinesRes.status === 429) {
         throw new Error("Binance rate limit hit - please wait");
       }
       if (!klinesRes.ok) throw new Error("Backtest data unavailable");
 
-      const klines = await klinesRes.json();
+      const klines = await safeJson(klinesRes);
       if (!Array.isArray(klines)) throw new Error("Invalid backtest data");
 
-      const closes = klines.map((k: any) => parseFloat(k[4]));
-      const highs = klines.map((k: any) => parseFloat(k[2]));
-      const lows = klines.map((k: any) => parseFloat(k[3]));
-      const volumes = klines.map((k: any) => parseFloat(k[5]));
+      const closes = klines.map((k) => parseFloat(k[4]));
+      const highs = klines.map((k) => parseFloat(k[2]));
+      const lows = klines.map((k) => parseFloat(k[3]));
+      const volumes = klines.map((k) => parseFloat(k[5]));
 
       let wins = 0;
       let totalTrades = 0;
-      const returns: number[] = [];
+      const returns = [];
 
       for (let i = 50; i < closes.length - 20; i += 8) {
         const windowCloses = closes.slice(i - 50, i);
@@ -593,8 +658,15 @@ export default function WRCrystalBallPro() {
         avgReturn: avgReturn.toFixed(2),
         timeframe: timeframe.label,
       });
-    } catch (e: any) {
-      setError(e.message || "Backtest failed");
+    } catch (e) {
+      if (!btController.signal.aborted) {
+        const msg = e.message || "";
+        if (msg.toLowerCase().includes("failed to fetch")) {
+          setError("CORS proxy temporarily unavailable – try again in a few seconds");
+        } else {
+          setError(msg || "Backtest failed");
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -740,7 +812,7 @@ export default function WRCrystalBallPro() {
               <span className="text-[10px] text-purple-300 font-medium">12-Period Projection (ATR + MACD Drift)</span>
             </div>
             <div className="grid grid-cols-4 gap-2">
-              {data.predictions.map((p: any, i: number) => (
+              {data.predictions.map((p, i) => (
                 <div key={i} className="bg-slate-900/50 rounded p-2 text-center">
                   <div className="text-[9px] text-slate-500">{p.time}</div>
                   <div className="text-[11px] font-mono">{formatPrice(p.price)}</div>
