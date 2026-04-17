@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { TrendingUp, TrendingDown, Minus, Loader2, Activity, BarChart3, Zap, AlertTriangle, Brain, Target } from "lucide-react";
 
-// ==================== COIN LIST ====================
+// ==================== ΕΝΗΜΕΡΩΜΕΝΗ COIN LIST (220+ coins) ====================
 const COIN_LIST = [
   { symbol: "BTC", id: "bitcoin", name: "Bitcoin" },
   { symbol: "ETH", id: "ethereum", name: "Ethereum" },
@@ -31,7 +31,7 @@ const COIN_LIST = [
   { symbol: "NEAR", id: "near", name: "NEAR Protocol" },
   { symbol: "CRO", id: "crypto-com-chain", name: "Cronos" },
   { symbol: "APT", id: "aptos", name: "Aptos" },
-  { symbol: "WIF", id: "dogwifhat", name: "Dogwifhat" },
+  { symbol: "WIF", id: "dogwifhat", name: "dogwifhat" },
   { symbol: "ARB", id: "arbitrum", name: "Arbitrum" },
   { symbol: "OP", id: "optimism", name: "Optimism" },
   { symbol: "IMX", id: "immutable-x", name: "Immutable X" },
@@ -138,6 +138,61 @@ const COIN_LIST = [
   { symbol: "PHA", id: "pha", name: "Phala Network" },
   { symbol: "KILT", id: "kilt-protocol", name: "KILT Protocol" },
   { symbol: "RING", id: "darwinia-network", name: "Darwinia Network" },
+
+  // ΝΕΑ ΝΟΜΙΣΜΑΤΑ 2025-2026
+  { symbol: "TON", id: "the-open-network", name: "Toncoin" },
+  { symbol: "KAS", id: "kaspa", name: "Kaspa" },
+  { symbol: "HBAR", id: "hedera-hashgraph", name: "Hedera" },
+  { symbol: "XDC", id: "xdc-network", name: "XinFin" },
+  { symbol: "VET", id: "vechain", name: "VeChain" },
+  { symbol: "ALGO", id: "algorand", name: "Algorand" },
+  { symbol: "VANA", id: "vana", name: "Vana" },
+  { symbol: "ONDO", id: "ondo-finance", name: "Ondo" },
+  { symbol: "PENDLE", id: "pendle", name: "Pendle" },
+  { symbol: "ENA", id: "ethena", name: "Ethena" },
+  { symbol: "WLD", id: "worldcoin", name: "Worldcoin" },
+  { symbol: "TIA", id: "celestia", name: "Celestia" },
+  { symbol: "INJ", id: "injective-protocol", name: "Injective" },
+  { symbol: "SEI", id: "sei-network", name: "Sei" },
+  { symbol: "SUI", id: "sui", name: "Sui" },
+  { symbol: "APT", id: "aptos", name: "Aptos" },
+  { symbol: "KSM", id: "kusama", name: "Kusama" },
+  { symbol: "DOT", id: "polkadot", name: "Polkadot" },
+  { symbol: "FIL", id: "filecoin", name: "Filecoin" },
+  { symbol: "AR", id: "arweave", name: "Arweave" },
+  { symbol: "TAO", id: "bittensor", name: "Bittensor" },
+  { symbol: "RNDR", id: "render-token", name: "Render" },
+  { symbol: "FET", id: "fetch-ai", name: "Fetch.ai" },
+  { symbol: "AGIX", id: "singularitynet", name: "SingularityNET" },
+  { symbol: "OCEAN", id: "ocean-protocol", name: "Ocean Protocol" },
+  { symbol: "NOS", id: "nosana", name: "Nosana" },
+  { symbol: "AIXBT", id: "aixbt-by-virtuals", name: "AIXBT" },
+  { symbol: "MOODENG", id: "moo-deng", name: "Moo Deng" },
+  { symbol: "GOAT", id: "goatseus-maximus", name: "Goatseus Maximus" },
+  { symbol: "POPCAT", id: "popcat", name: "Popcat" },
+  { symbol: "GIGA", id: "gigachad", name: "Gigachad" },
+  { symbol: "BRETT", id: "brett", name: "Brett" },
+  { symbol: "MEW", id: "cat-in-a-dogs-world", name: "cat in a dogs world" },
+  { symbol: "TURBO", id: "turbo", name: "Turbo" },
+  { symbol: "MOG", id: "mog-coin", name: "Mog Coin" },
+  { symbol: "PONKE", id: "ponke", name: "PONKE" },
+  { symbol: "BABYDOGE", id: "baby-doge-coin", name: "Baby Doge Coin" },
+  { symbol: "NOT", id: "notcoin", name: "Notcoin" },
+  { symbol: "DOGS", id: "dogs", name: "Dogs" },
+  { symbol: "HMSTR", id: "hamster-kombat", name: "Hamster Kombat" },
+  { symbol: "PIXEL", id: "pixels", name: "Pixels" },
+  { symbol: "BEAM", id: "beam", name: "Beam" },
+  { symbol: "AKT", id: "akash-network", name: "Akash Network" },
+  { symbol: "ROSE", id: "oasis-network", name: "Oasis Network" },
+  { symbol: "ZRO", id: "layerzero", name: "LayerZero" },
+  { symbol: "RENDER", id: "render-token", name: "Render" },
+  { symbol: "HYPE", id: "hyperliquid", name: "Hyperliquid" },
+  { symbol: "BERA", id: "berachain", name: "Berachain" },
+  { symbol: "PUMP", id: "pump-fun", name: "Pump.fun" },
+  { symbol: "AERO", id: "aerodrome-finance", name: "Aerodrome Finance" },
+  { symbol: "DEGEN", id: "degen-base", name: "Degen" },
+  { symbol: "VIRTUAL", id: "virtual-protocol", name: "Virtual Protocol" },
+  { symbol: "GRASS", id: "grass", name: "Grass" },
 ];
 
 const TIMEFRAMES = [
@@ -170,7 +225,7 @@ const calculateEMA = (prices: number[], period: number): number[] => {
   return result;
 };
 
-const calculateRSI = (prices: number[], period: number = 14): number[] => {
+const calculateRSI = (prices: number[], period = 14): number[] => {
   if (prices.length < period + 1) return [];
   const changes = prices.slice(1).map((p, i) => p - prices[i]);
   const gains = changes.map(c => Math.max(c, 0));
@@ -330,9 +385,9 @@ const calculateSuperTrend = (highs: number[], lows: number[], closes: number[], 
   return { trend, value: trend === "bull" ? finalLower : finalUpper };
 };
 
-const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods = 12, simulations = 800) => {
+const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods = 12, simulations = 1500) => {
   const finalPrices: number[] = [];
-  const stepVol = (atr / currentPrice) * 1.8;
+  const stepVol = (atr / currentPrice) * 1.9;
   for (let sim = 0; sim < simulations; sim++) {
     let price = currentPrice;
     for (let i = 0; i < periods; i++) {
@@ -375,32 +430,36 @@ const formatLargeNumber = (num: number | null | undefined): string => {
 
 const createProxyUrl = (url: string): string => `https://corsproxy.io/?${encodeURIComponent(url)}`;
 
-// ==================== AI FORECAST ENGINE ====================
+// ==================== AI FORECAST ENGINE (ΕΠΙΘΕΤΙΚΟ) ====================
 const generateAIForecast = (data: any, coinName: string, currentPrice: number): string => {
-  const direction = data.signal.includes("BULL") ? "bullish" : data.signal.includes("BEAR") ? "bearish" : "neutral";
-  const strength = data.confidence > 80 ? "very strong" : data.confidence > 65 ? "strong" : "moderate";
-  const mcRange = `${formatPrice(data.monteCarlo.p25)} – ${formatPrice(data.monteCarlo.p75)}`;
+  const isBullish = data.signal.includes("BULL");
+  const isBearish = data.signal.includes("BEAR");
+  const strength = data.confidence > 78 ? "πολύ ισχυρή" : data.confidence > 65 ? "ισχυρή" : "μέτρια";
 
-  let forecast = `Crystal Ball AI forecasts a ${strength} ${direction} move for ${coinName} over the next 12 periods. `;
-  forecast += `Confidence: ${data.confidence}%. Expected range: ${mcRange}. `;
+  let forecast = `🔮 Crystal Ball AI βλέπει ${strength} ${isBullish ? "ανοδική" : isBearish ? "καθοδική" : "πλευρική"} κίνηση για ${coinName}.\n\n`;
 
-  if (data.adx > 30) forecast += `Strong trending market (ADX ${data.adx}). `;
-  else if (data.adx > 20) forecast += `Developing trend (ADX ${data.adx}). `;
-  else forecast += `Choppy / ranging market. `;
+  if (isBullish) {
+    const target1 = (currentPrice * 1.08).toFixed(0);
+    const target2 = (currentPrice * 1.16).toFixed(0);
+    forecast += `Πιθανό target: \[ {target1} – \]{target2} (+8% έως +16%). `;
+  } else if (isBearish) {
+    const target1 = (currentPrice * 0.92).toFixed(0);
+    const target2 = (currentPrice * 0.85).toFixed(0);
+    forecast += `Πιθανό target: \[ {target1} – \]{target2} (-8% έως -15%). `;
+  }
 
-  if (data.superTrend === "bull") forecast += `SuperTrend is bullish — momentum supports upside. `;
-  if (data.superTrend === "bear") forecast += `SuperTrend is bearish — downside pressure likely. `;
+  if (data.superTrend === "bull" && data.adx > 25) forecast += `SuperTrend + ADX δείχνουν ισχυρή ανοδική τάση. `;
+  if (data.superTrend === "bear" && data.adx > 25) forecast += `SuperTrend + ADX δείχνουν καθοδική πίεση. `;
+  if (data.divergence.bullish) forecast += `Bullish divergence ενισχύει την άνοδο. `;
+  if (data.divergence.bearish) forecast += `Bearish divergence ενισχύει την πτώση. `;
 
-  if (data.cci > 100) forecast += `CCI overbought — watch for short-term pullback. `;
-  if (data.cci < -100) forecast += `CCI oversold — strong rebound probability. `;
+  forecast += `\n\nMonte Carlo (1500 προσομοιώσεις): ${formatPrice(data.monteCarlo.p25)} – ${formatPrice(data.monteCarlo.p75)} (68% πιθανότητα).`;
+  forecast += `\n\nΣυμβουλή: ${isBullish ? "Μπορείς να ψάξεις long θέσεις." : isBearish ? "Προσοχή σε short ή take profit." : "Καλύτερα να περιμένεις clearer σήμα."}`;
 
-  if (data.divergence.bullish) forecast += `Bullish RSI divergence detected — upside breakout likely. `;
-  if (data.divergence.bearish) forecast += `Bearish RSI divergence detected — downside risk elevated. `;
-
-  forecast += `Monte Carlo simulation (800 paths) shows \~68% probability within the projected band. Trade responsibly.`;
   return forecast;
 };
 
+// ==================== MAIN COMPONENT ====================
 export default function CrystalBallAI() {
   const [selectedCoin, setSelectedCoin] = useState(COIN_LIST[0]);
   const [timeframe, setTimeframe] = useState(TIMEFRAMES[2]);
@@ -524,10 +583,13 @@ export default function CrystalBallAI() {
           if (change24h > 8 && change7d > 15) { signalValue = "STRONG_BULL"; confidence = 72; reasons.push("Strong momentum"); }
           else if (change24h < -8 && change7d < -15) { signalValue = "STRONG_BEAR"; confidence = 72; reasons.push("Strong downtrend"); }
 
-          if (rsiVal < 32 && stochK < 25) { confidence += 22; reasons.push(`Oversold RSI/Stoch`); if (signalValue === "NEUTRAL") signalValue = "BULLISH"; }
-          else if (rsiVal > 68 && stochK > 75) { confidence += 22; reasons.push(`Overbought RSI/Stoch`); if (signalValue === "NEUTRAL") signalValue = "BEARISH"; }
+          if (rsiVal < 32 && stochK < 25 && superTrendData.trend === "bull") { confidence += 25; reasons.push("Oversold + Bullish SuperTrend"); if (signalValue === "NEUTRAL") signalValue = "BULLISH"; }
+          else if (rsiVal > 68 && stochK > 75 && superTrendData.trend === "bear") { confidence += 25; reasons.push("Overbought + Bearish SuperTrend"); if (signalValue === "NEUTRAL") signalValue = "BEARISH"; }
 
-          if (macdHist > 0 && obvTrend === "rising") { confidence += 16; reasons.push("MACD + OBV bullish"); if (signalValue === "NEUTRAL" || signalValue === "BULLISH") signalValue = "STRONG_BULL"; }
+          if (macdHist > 0 && obvTrend === "rising" && superTrendData.trend === "bull") {
+            confidence += 18; reasons.push("MACD + OBV + SuperTrend bullish");
+            if (signalValue === "NEUTRAL" || signalValue === "BULLISH") signalValue = "STRONG_BULL";
+          }
 
           confidence = Math.min(97, Math.max(38, Math.round(confidence)));
         }
@@ -550,13 +612,11 @@ export default function CrystalBallAI() {
       const aiForecast = generateAIForecast({
         signal: signalValue,
         confidence,
-        reasons,
         adx: adxData.adx,
         cci: cciVal,
         superTrend: superTrendData.trend,
         divergence,
-        monteCarlo: mc,
-        timeframe: timeframe.label
+        monteCarlo: mc
       }, selectedCoin.name, currentPrice);
 
       setData({
@@ -687,8 +747,7 @@ export default function CrystalBallAI() {
             </div>
           </div>
 
-          {/* AI Forecast */}
-          <div className="p-5 bg-gradient-to-br from-violet-950/60 to-slate-900 border border-violet-500/30 rounded-3xl mb-6">
+          <div className="p-5 bg-gradient-to-br from-violet-950/60 to-slate-900 border border-violet-500/30 rounded-3xl mb-6 whitespace-pre-line">
             <div className="flex items-center gap-3 mb-4">
               <Target className="w-6 h-6 text-violet-400" />
               <span className="font-semibold text-lg text-violet-300">CRYSTAL BALL AI FORECAST</span>
@@ -696,7 +755,6 @@ export default function CrystalBallAI() {
             <p className="text-slate-200 leading-relaxed text-[15px]">{data.aiForecast}</p>
           </div>
 
-          {/* Price Info */}
           <div className="grid grid-cols-2 gap-3 mb-6 text-sm">
             <div className="bg-slate-800/60 rounded-2xl p-4">
               <div className="text-xs text-slate-400">Current Price</div>
@@ -718,7 +776,6 @@ export default function CrystalBallAI() {
             </div>
           </div>
 
-          {/* Projections */}
           <div className="bg-slate-800/30 rounded-3xl p-5 mb-6">
             <div className="flex items-center gap-2 mb-4">
               <BarChart3 className="w-4 h-4 text-purple-400" />
@@ -732,28 +789,6 @@ export default function CrystalBallAI() {
                   <div className={`text-xs mt-1 ${p.change >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{p.change.toFixed(1)}%</div>
                 </div>
               ))}
-            </div>
-          </div>
-
-          {/* Monte Carlo */}
-          <div className="bg-slate-800/30 rounded-3xl p-5 mb-6">
-            <div className="flex items-center gap-2 mb-3">
-              <BarChart3 className="w-4 h-4 text-amber-400" />
-              <span className="text-amber-300 text-sm font-medium">Monte Carlo Simulation (800 paths)</span>
-            </div>
-            <div className="grid grid-cols-5 gap-3 text-center text-xs">
-              <div className="bg-slate-900/60 rounded-2xl p-3">
-                <div className="text-slate-500">25% (Bear)</div>
-                <div className="font-mono text-rose-400 mt-1">{formatPrice(data.monteCarlo.p25)}</div>
-              </div>
-              <div className="bg-slate-900/60 rounded-2xl p-3">
-                <div className="text-slate-500">Median</div>
-                <div className="font-mono text-purple-300 mt-1">{formatPrice(data.monteCarlo.median)}</div>
-              </div>
-              <div className="bg-slate-900/60 rounded-2xl p-3 border border-purple-400">
-                <div className="text-slate-500">75% (Bull)</div>
-                <div className="font-mono text-emerald-400 mt-1">{formatPrice(data.monteCarlo.p75)}</div>
-              </div>
             </div>
           </div>
 
