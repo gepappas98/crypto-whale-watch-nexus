@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { TrendingUp, TrendingDown, Minus, Loader2, Activity, BarChart3, Zap } from "lucide-react";
 
+// Comprehensive coin list - CoinGecko IDs (150+ coins)
 const COIN_LIST = [
   { symbol: "BTC", id: "bitcoin", name: "Bitcoin" },
   { symbol: "ETH", id: "ethereum", name: "Ethereum" },
@@ -147,62 +148,24 @@ const TIMEFRAMES = [
   { label: "30d", binanceInterval: "1d", days: 30, interval: "daily" },
 ];
 
-const SIGNAL_META = {
+const SIGNAL_META: Record<string, { color: string; icon: typeof TrendingUp; label: string }> = {
   STRONG_BULL: { color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20", icon: TrendingUp, label: "STRONG BUY" },
-  BULLISH:     { color: "text-green-400 bg-green-500/10 border-green-500/20",       icon: TrendingUp, label: "BUY" },
-  NEUTRAL:     { color: "text-slate-400 bg-slate-500/10 border-slate-500/20",       icon: Minus,      label: "HOLD" },
-  BEARISH:     { color: "text-rose-400 bg-rose-500/10 border-rose-500/20",          icon: TrendingDown, label: "SELL" },
-  STRONG_BEAR: { color: "text-red-500 bg-red-500/10 border-red-500/20",             icon: TrendingDown, label: "STRONG SELL" },
+  BULLISH: { color: "text-green-400 bg-green-500/10 border-green-500/20", icon: TrendingUp, label: "BUY" },
+  NEUTRAL: { color: "text-slate-400 bg-slate-500/10 border-slate-500/20", icon: Minus, label: "HOLD" },
+  BEARISH: { color: "text-rose-400 bg-rose-500/10 border-rose-500/20", icon: TrendingDown, label: "SELL" },
+  STRONG_BEAR: { color: "text-red-500 bg-red-500/10 border-red-500/20", icon: TrendingDown, label: "STRONG SELL" },
 };
 
-// ── Regular function declarations are hoisted → zero TDZ risk ──────────────
-
-// Wrap any URL through the public CORS proxy
-function proxify(url) {
-  return "https://corsproxy.io/?" + encodeURIComponent(url);
-}
-
-// Fetch with timeout + parent-abort forwarding.
-// Uses explicit try/catch instead of .finally() to avoid transpiler edge-cases.
-function timedFetch(url, timeoutMs, parentSignal) {
-  var ctrl = new AbortController();
-  var timer = setTimeout(function () { ctrl.abort(); }, timeoutMs);
-  if (parentSignal && !parentSignal.aborted) {
-    parentSignal.addEventListener("abort", function () {
-      clearTimeout(timer);
-      ctrl.abort();
-    }, { once: true });
-  }
-  return fetch(url, { signal: ctrl.signal }).then(
-    function (res) { clearTimeout(timer); return res; },
-    function (err) { clearTimeout(timer); throw err; }
-  );
-}
-
-// Parse JSON safely; throw a user-friendly error for non-JSON proxy responses.
-// Uses explicit catch (err) — NOT bare catch {} — to stay compatible with all
-// Babel/esbuild versions used by the artifact renderer.
-async function safeJson(response) {
-  var text = await response.text();
-  var parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch (parseErr) {
-    throw new Error("Proxy returned an unexpected response \u2013 try again in a moment");
-  }
-  return parsed;
-}
-
-// ── TA helpers ────────────────────────────────────────────────────────────
-
-const calculateEMA = (prices, period) => {
+// ==================== ADVANCED TA HELPERS ====================
+const calculateEMA = (prices: number[], period: number): number[] => {
   if (prices.length < period) {
-    return prices.map(() => prices[prices.length - 1] || 0);
+    return prices.map(() => prices[prices.length - 1] ?? 0);
   }
   const k = 2 / (period + 1);
   let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
   const result = prices.slice(0, period - 1).map(() => ema);
   result.push(ema);
+
   for (let i = period; i < prices.length; i++) {
     ema = prices[i] * k + ema * (1 - k);
     result.push(ema);
@@ -210,176 +173,184 @@ const calculateEMA = (prices, period) => {
   return result;
 };
 
-const calculateRSI = (prices, period) => {
-  var p = period === undefined ? 14 : period;
-  if (prices.length < p + 1) return [];
-  const changes = prices.slice(1).map((v, i) => v - prices[i]);
-  const gains   = changes.map(c => (c > 0 ? c : 0));
-  const losses  = changes.map(c => (c < 0 ? -c : 0));
-  let avgGain = gains.slice(0, p).reduce((a, b) => a + b, 0) / p;
-  let avgLoss = Math.max(losses.slice(0, p).reduce((a, b) => a + b, 0) / p, 0.0001);
-  const rsi = [100 - 100 / (1 + avgGain / avgLoss)];
-  for (let i = p; i < gains.length; i++) {
-    avgGain = (avgGain * (p - 1) + gains[i]) / p;
-    avgLoss = Math.max((avgLoss * (p - 1) + losses[i]) / p, 0.0001);
+const calculateRSI = (prices: number[], period: number = 14): number[] => {
+  if (prices.length < period + 1) return [];
+  const changes = prices.slice(1).map((p, i) => p - prices[i]);
+  const gains = changes.map(c => Math.max(c, 0));
+  const losses = changes.map(c => Math.max(-c, 0));
+
+  let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let avgLoss = Math.max(losses.slice(0, period).reduce((a, b) => a + b, 0) / period, 0.0001);
+
+  const rsi: number[] = [100 - 100 / (1 + avgGain / avgLoss)];
+
+  for (let i = period; i < gains.length; i++) {
+    avgGain = (avgGain * (period - 1) + gains[i]) / period;
+    avgLoss = Math.max((avgLoss * (period - 1) + losses[i]) / period, 0.0001);
     rsi.push(100 - 100 / (1 + avgGain / avgLoss));
   }
   return rsi;
 };
 
-const calculateMACD = (prices, fast, slow, signalPeriod) => {
-  var f = fast === undefined ? 12 : fast;
-  var s = slow === undefined ? 26 : slow;
-  var sp = signalPeriod === undefined ? 9 : signalPeriod;
-  const emaFast = calculateEMA(prices, f);
-  const emaSlow = calculateEMA(prices, s);
-  const macdLine = emaFast.slice(emaFast.length - emaSlow.length).map((v, i) => v - emaSlow[i]);
-  const signalLine = calculateEMA(macdLine, sp);
-  const histogram = macdLine.slice(macdLine.length - signalLine.length).map((v, i) => v - signalLine[i]);
+const calculateMACD = (prices: number[], fast = 12, slow = 26, signalPeriod = 9) => {
+  const emaFast = calculateEMA(prices, fast);
+  const emaSlow = calculateEMA(prices, slow);
+  const macdLine = emaFast.slice(emaFast.length - emaSlow.length).map((f, i) => f - emaSlow[i]);
+  const signalLine = calculateEMA(macdLine, signalPeriod);
+  const histogram = macdLine.slice(macdLine.length - signalLine.length).map((m, i) => m - signalLine[i]);
   return { macdLine, signalLine, histogram };
 };
 
-const calculateBollingerBands = (prices, period, stdDevMult) => {
-  var per = period === undefined ? 20 : period;
-  var sd  = stdDevMult === undefined ? 2 : stdDevMult;
-  const bands = [];
-  for (let i = per - 1; i < prices.length; i++) {
-    const slice = prices.slice(i - per + 1, i + 1);
-    const mean  = slice.reduce((a, b) => a + b, 0) / per;
-    const variance = slice.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / per;
+const calculateBollingerBands = (prices: number[], period = 20, stdDev = 2) => {
+  const bands: { upper: number; middle: number; lower: number }[] = [];
+  for (let i = period - 1; i < prices.length; i++) {
+    const slice = prices.slice(i - period + 1, i + 1);
+    const mean = slice.reduce((a, b) => a + b, 0) / period;
+    const variance = slice.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / period;
     const std = Math.sqrt(variance);
-    bands.push({ upper: mean + sd * std, middle: mean, lower: mean - sd * std });
+    bands.push({ upper: mean + stdDev * std, middle: mean, lower: mean - stdDev * std });
   }
   return bands;
 };
 
-const calculateATR = (highs, lows, closes, period) => {
-  var per = period === undefined ? 14 : period;
-  if (highs.length < per + 1) return [];
-  const tr = [];
+const calculateATR = (highs: number[], lows: number[], closes: number[], period = 14) => {
+  if (highs.length < period + 1) return [];
+  const tr: number[] = [];
   for (let i = 1; i < highs.length; i++) {
-    tr.push(Math.max(
+    const trueRange = Math.max(
       highs[i] - lows[i],
       Math.abs(highs[i] - closes[i - 1]),
-      Math.abs(lows[i]  - closes[i - 1])
-    ));
+      Math.abs(lows[i] - closes[i - 1])
+    );
+    tr.push(trueRange);
   }
-  let atr = tr.slice(0, per).reduce((a, b) => a + b, 0) / per;
+  let atr = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
   const result = [atr];
-  for (let i = per; i < tr.length; i++) {
-    atr = (atr * (per - 1) + tr[i]) / per;
+  for (let i = period; i < tr.length; i++) {
+    atr = (atr * (period - 1) + tr[i]) / period;
     result.push(atr);
   }
   return result;
 };
 
-const calculateStochastic = (highs, lows, closes, period, smoothK, smoothD) => {
-  var per = period === undefined ? 14 : period;
-  var sk  = smoothK === undefined ? 3 : smoothK;
-  var sd  = smoothD === undefined ? 3 : smoothD;
-  if (highs.length < per) return { k: [], d: [] };
-  const kRaw = [];
-  for (let i = per - 1; i < highs.length; i++) {
-    const sliceHigh = highs.slice(i - per + 1, i + 1);
-    const sliceLow  = lows.slice(i - per + 1, i + 1);
-    const hi = Math.max.apply(null, sliceHigh);
-    const lo = Math.min.apply(null, sliceLow);
-    const range = hi - lo;
-    kRaw.push(range > 0 ? ((closes[i] - lo) / range) * 100 : 50);
+const calculateStochastic = (highs: number[], lows: number[], closes: number[], period = 14, smoothK = 3, smoothD = 3) => {
+  if (highs.length < period) return { k: [], d: [] };
+  const kRaw: number[] = [];
+  for (let i = period - 1; i < highs.length; i++) {
+    const sliceHigh = highs.slice(i - period + 1, i + 1);
+    const sliceLow = lows.slice(i - period + 1, i + 1);
+    const highestHigh = Math.max(...sliceHigh);
+    const lowestLow = Math.min(...sliceLow);
+    const close = closes[i];
+    const range = highestHigh - lowestLow;
+    kRaw.push(range > 0 ? ((close - lowestLow) / range) * 100 : 50);
   }
-  const k = calculateEMA(kRaw, sk);
-  const d = calculateEMA(k, sd);
+  const k = calculateEMA(kRaw, smoothK);
+  const d = calculateEMA(k, smoothD);
   return { k, d };
 };
 
-const calculateOBV = (closes, volumes) => {
-  const obv = [volumes[0] || 0];
+const calculateOBV = (closes: number[], volumes: number[]) => {
+  const obv: number[] = [volumes[0] || 0];
   for (let i = 1; i < closes.length; i++) {
-    if      (closes[i] > closes[i - 1]) obv.push(obv[i - 1] + volumes[i]);
+    if (closes[i] > closes[i - 1]) obv.push(obv[i - 1] + volumes[i]);
     else if (closes[i] < closes[i - 1]) obv.push(obv[i - 1] - volumes[i]);
-    else                                obv.push(obv[i - 1]);
+    else obv.push(obv[i - 1]);
   }
   return obv;
 };
 
-const detectRSIDivergence = (prices, rsiValues, lookback) => {
-  var lb = lookback === undefined ? 15 : lookback;
-  if (prices.length < lb || rsiValues.length < lb) return { bullish: false, bearish: false, strength: "" };
-  const rP = prices.slice(-lb);
-  const rR = rsiValues.slice(-lb);
-  const last = rP.length - 1;
-  const priceLowerLow  = rP[last] < rP[last - 5];
-  const rsiHigherLow   = rR[last] > rR[last - 5];
-  const priceHigherHigh = rP[last] > rP[last - 5];
-  const rsiLowerHigh   = rR[last] < rR[last - 5];
+const detectRSIDivergence = (prices: number[], rsiValues: number[], lookback = 15): { bullish: boolean; bearish: boolean; strength: string } => {
+  if (prices.length < lookback || rsiValues.length < lookback) return { bullish: false, bearish: false, strength: "" };
+  const recentPrices = prices.slice(-lookback);
+  const recentRSI = rsiValues.slice(-lookback);
+
+  const priceLowerLow = recentPrices[recentPrices.length - 1] < recentPrices[recentPrices.length - 5];
+  const rsiHigherLow = recentRSI[recentRSI.length - 1] > recentRSI[recentRSI.length - 5];
+
+  const priceHigherHigh = recentPrices[recentPrices.length - 1] > recentPrices[recentPrices.length - 5];
+  const rsiLowerHigh = recentRSI[recentRSI.length - 1] < recentRSI[recentRSI.length - 5];
+
   const bullish = priceLowerLow && rsiHigherLow;
   const bearish = priceHigherHigh && rsiLowerHigh;
-  const strength = (bullish || bearish)
-    ? (Math.abs(rR[last] - rR[last - 5]) > 8 ? "strong" : "mild")
-    : "";
+  const strength = bullish || bearish ? (Math.abs(recentRSI[recentRSI.length - 1] - recentRSI[recentRSI.length - 5]) > 8 ? "strong" : "mild") : "";
+
   return { bullish, bearish, strength };
 };
 
-const runMonteCarlo = (currentPrice, drift, atr, periods, simulations) => {
-  var per  = periods === undefined ? 12 : periods;
-  var sims = simulations === undefined ? 800 : simulations;
-  const finalPrices = [];
+const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods = 12, simulations = 800) => {
+  const finalPrices: number[] = [];
   const stepVol = (atr / currentPrice) * 1.8;
-  for (let sim = 0; sim < sims; sim++) {
+
+  for (let sim = 0; sim < simulations; sim++) {
     let price = currentPrice;
-    for (let i = 0; i < per; i++) {
-      price *= (1 + drift + (Math.random() - 0.5) * stepVol * 2);
+    for (let i = 0; i < periods; i++) {
+      const randomShock = (Math.random() - 0.5) * stepVol * 2;
+      price *= (1 + drift + randomShock);
     }
     finalPrices.push(price);
   }
   finalPrices.sort((a, b) => a - b);
-  return {
-    min:    finalPrices[0],
-    p25:    finalPrices[Math.floor(finalPrices.length * 0.25)],
-    median: finalPrices[Math.floor(finalPrices.length / 2)],
-    p75:    finalPrices[Math.floor(finalPrices.length * 0.75)],
-    max:    finalPrices[finalPrices.length - 1],
-    simulations: sims,
-  };
+  const min = finalPrices[0];
+  const max = finalPrices[finalPrices.length - 1];
+  const median = finalPrices[Math.floor(finalPrices.length / 2)];
+  const p25 = finalPrices[Math.floor(finalPrices.length * 0.25)];
+  const p75 = finalPrices[Math.floor(finalPrices.length * 0.75)];
+
+  return { min, p25, median, p75, max, simulations };
 };
 
-// ── Price formatting ──────────────────────────────────────────────────────
-
-const formatPrice = (price) => {
-  if (price === null || price === undefined || isNaN(price)) return "\u2014";
+// ==================== PRICE FORMATTING ====================
+const formatPrice = (price: number | null | undefined): string => {
+  if (price === null || price === undefined || isNaN(price)) return "—";
   if (price === 0) return "$0.00";
-  if (price < 0.00001)  return "$" + price.toExponential(4);
-  if (price < 0.01)     return "$" + price.toFixed(8).replace(/\.?0+$/, "");
-  if (price < 1)        return "$" + price.toFixed(6).replace(/\.?0+$/, "");
-  if (price < 100)      return "$" + price.toFixed(4).replace(/\.?0+$/, "");
-  if (price < 10000)    return "$" + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return "$" + price.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+  if (price < 0.00001) {
+    return `\[ {price.toExponential(4)}`;
+  }
+  if (price < 0.01) {
+    return ` \]{price.toFixed(8).replace(/\.?0+$/, "")}`;
+  }
+  if (price < 1) {
+    return `\[ {price.toFixed(6).replace(/\.?0+$/, "")}`;
+  }
+  if (price < 100) {
+    return ` \]{price.toFixed(4).replace(/\.?0+$/, "")}`;
+  }
+  if (price < 10000) {
+    return `\[ {price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  return ` \]{price.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 };
 
-// ── Component ─────────────────────────────────────────────────────────────
+// CORS Proxy Helper (using reliable corsproxy.io)
+const createProxyUrl = (url: string): string => {
+  return `https://corsproxy.io/?${encodeURIComponent(url)}`;
+};
 
 export default function WRCrystalBallPro() {
   const [selectedCoin, setSelectedCoin] = useState(COIN_LIST[0]);
-  const [timeframe, setTimeframe]       = useState(TIMEFRAMES[2]);
-  const [loading, setLoading]           = useState(false);
-  const [data, setData]                 = useState(null);
-  const [backtestData, setBacktestData] = useState(null);
-  const [error, setError]               = useState(null);
-  const [coinSearch, setCoinSearch]     = useState("");
-  const abortRef    = useRef(null);
-  const dropdownRef = useRef(null);
+  const [timeframe, setTimeframe] = useState(TIMEFRAMES[2]);
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<any>(null);
+  const [backtestData, setBacktestData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [coinSearch, setCoinSearch] = useState("");
+  const abortRef = useRef<AbortController | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const filteredCoins = useMemo(
-    () => COIN_LIST.filter(
-      c => c.symbol.toLowerCase().includes(coinSearch.toLowerCase()) ||
-           c.name.toLowerCase().includes(coinSearch.toLowerCase())
+  const filteredCoins = useMemo(() =>
+    COIN_LIST.filter(c =>
+      c.symbol.toLowerCase().includes(coinSearch.toLowerCase()) ||
+      c.name.toLowerCase().includes(coinSearch.toLowerCase())
     ),
     [coinSearch]
   );
 
+  // Click outside to close search dropdown
   useEffect(() => {
-    function handleClickOutside(event) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setCoinSearch("");
       }
     }
@@ -387,11 +358,26 @@ export default function WRCrystalBallPro() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // ── Main fetch + TA ─────────────────────────────────────────────────────
+  const fetchWithTimeoutAndAbort = async (url: string, timeoutMs: number, signal: AbortSignal) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const combinedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+      const res = await fetch(url, { signal: combinedSignal });
+      clearTimeout(timeoutId);
+      return res;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      throw err;
+    }
+  };
+
   const fetchCoinData = useCallback(async () => {
+    // Cancel previous request
     if (abortRef.current) abortRef.current.abort();
     abortRef.current = new AbortController();
-    var abortSig = abortRef.current.signal;
+    const signal = abortRef.current.signal;
 
     setLoading(true);
     setError(null);
@@ -399,298 +385,247 @@ export default function WRCrystalBallPro() {
     setBacktestData(null);
 
     try {
-      // ── CoinGecko ──────────────────────────────────────────────────────
-      // high_24h / low_24h are always present in /coins/markets — no extra params
-      var cgUrl = proxify(
-        "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=" +
-        selectedCoin.id +
-        "&price_change_percentage=24h,7d"
-      );
+      const coinGeckoUrl = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${selectedCoin.id}&price_change_percentage=24h,7d`;
+      const proxyCoinGeckoUrl = createProxyUrl(coinGeckoUrl);
 
-      var cgRes = null;
-      try {
-        cgRes = await timedFetch(cgUrl, 15000, abortSig);
-      } catch (cgFetchErr) {
-        if (abortSig.aborted) return;
-        throw new Error("CORS proxy temporarily unavailable \u2013 try again in a few seconds");
+      const coinGeckoRes = await fetchWithTimeoutAndAbort(proxyCoinGeckoUrl, 15000, signal);
+
+      if (coinGeckoRes.status === 429) {
+        throw new Error("CoinGecko rate limit exceeded. Please wait 30 seconds.");
+      }
+      if (!coinGeckoRes.ok) {
+        throw new Error(`CoinGecko error: ${coinGeckoRes.status}`);
       }
 
-      if (cgRes.status === 429) throw new Error("CoinGecko rate limit exceeded. Please wait 30 seconds.");
-      if (!cgRes.ok) throw new Error("CoinGecko error: " + cgRes.status);
+      const json = await coinGeckoRes.json();
+      if (!json || json.length === 0) throw new Error("No data returned from CoinGecko");
 
-      var cgJson = await safeJson(cgRes);
-      if (!cgJson || cgJson.length === 0) throw new Error("No data returned from CoinGecko");
+      const coin = json[0];
 
-      var coin = cgJson[0];
-      var currentPrice = coin.current_price != null ? coin.current_price : 0;
+      const currentPrice = coin.current_price ?? 0;
       if (currentPrice === 0) throw new Error("Invalid price data from CoinGecko");
 
-      var change24h  = coin.price_change_percentage_24h || 0;
-      var change7d   = coin.price_change_percentage_7d_in_currency || 0;
-      var volume     = coin.total_volume || 0;
-      var marketCap  = coin.market_cap || 0;
-      var high24h    = coin.high_24h || currentPrice;
-      var low24h     = coin.low_24h  || currentPrice;
+      const change24h = coin.price_change_percentage_24h || 0;
+      const change7d = coin.price_change_percentage_7d_in_currency || 0;
+      const volume = coin.total_volume || 0;
+      const marketCap = coin.market_cap || 0;
+      const high24h = coin.high_24h || currentPrice;
+      const low24h = coin.low_24h || currentPrice;
 
-      // ── Binance klines ─────────────────────────────────────────────────
-      var binancePair = selectedCoin.symbol.toUpperCase() + "USDT";
-      var binUrl = proxify(
-        "https://api.binance.com/api/v3/klines?symbol=" +
-        binancePair +
-        "&interval=" + timeframe.binanceInterval +
-        "&limit=500"
-      );
+      const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
+      const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=\( {binancePair}&interval= \){timeframe.binanceInterval}&limit=500`;
+      const proxyBinanceUrl = createProxyUrl(binanceUrl);
 
-      var binRes = null;
-      try {
-        binRes = await timedFetch(binUrl, 12000, abortSig);
-      } catch (binFetchErr) {
-        if (abortSig.aborted) return;
-        throw new Error("CORS proxy temporarily unavailable \u2013 try again in a few seconds");
-      }
+      const klinesRes = await fetchWithTimeoutAndAbort(proxyBinanceUrl, 12000, signal);
 
-      // ── TA calculation ─────────────────────────────────────────────────
-      var tradeSignal = "NEUTRAL";
-      var confidence  = 45;
-      var reasons     = [];
-      var rsiVal      = 50;
-      var macdHist    = 0;
-      var bbPos       = 50;
-      var atrVal      = currentPrice * 0.02;
-      var stochK      = 50;
-      var stochD      = 50;
-      var obvTrend    = "flat";
-      var divergence  = { bullish: false, bearish: false, strength: "" };
+      let signalValue = "NEUTRAL";
+      let confidence = 45;
+      let reasons: string[] = [];
+      let rsiVal = 50, macdHist = 0, bbPos = 50, atrVal = currentPrice * 0.02, stochK = 50, stochD = 50, obvTrend = "flat";
+      let divergence = { bullish: false, bearish: false, strength: "" };
 
-      if (binRes.ok) {
-        var klines = await safeJson(binRes);
-        if (!Array.isArray(klines) || klines.length === 0) throw new Error("Invalid data from Binance");
+      if (klinesRes.ok) {
+        const klines = await klinesRes.json();
+        if (!Array.isArray(klines) || klines.length === 0) {
+          throw new Error("Invalid data from Binance");
+        }
 
-        var closes  = klines.map(function (k) { return parseFloat(k[4]); });
-        var highs   = klines.map(function (k) { return parseFloat(k[2]); });
-        var lows    = klines.map(function (k) { return parseFloat(k[3]); });
-        var volumes = klines.map(function (k) { return parseFloat(k[5]); });
+        const closes = klines.map((k: any) => parseFloat(k[4]));
+        const highs = klines.map((k: any) => parseFloat(k[2]));
+        const lows = klines.map((k: any) => parseFloat(k[3]));
+        const volumes = klines.map((k: any) => parseFloat(k[5]));
 
-        var rsiValues = calculateRSI(closes);
+        const rsiValues = calculateRSI(closes);
         rsiVal = rsiValues[rsiValues.length - 1] || 50;
 
-        var macd = calculateMACD(closes);
+        const macd = calculateMACD(closes);
         macdHist = macd.histogram[macd.histogram.length - 1] || 0;
 
-        var bb = calculateBollingerBands(closes);
-        var latestBB = bb[bb.length - 1];
-        bbPos = latestBB
-          ? ((currentPrice - latestBB.lower) / (latestBB.upper - latestBB.lower)) * 100
-          : 50;
+        const bb = calculateBollingerBands(closes);
+        const latestBB = bb[bb.length - 1];
+        bbPos = latestBB ? ((currentPrice - latestBB.lower) / (latestBB.upper - latestBB.lower)) * 100 : 50;
         bbPos = Math.max(0, Math.min(100, bbPos));
 
-        var atrValues = calculateATR(highs, lows, closes);
+        const atrValues = calculateATR(highs, lows, closes);
         atrVal = atrValues[atrValues.length - 1] || (currentPrice * 0.02);
 
-        var stoch = calculateStochastic(highs, lows, closes);
+        const stoch = calculateStochastic(highs, lows, closes);
         stochK = stoch.k[stoch.k.length - 1] || 50;
         stochD = stoch.d[stoch.d.length - 1] || 50;
 
-        var obv = calculateOBV(closes, volumes);
-        var obvRecent = obv.slice(-10);
-        if      (obvRecent[obvRecent.length - 1] > obvRecent[0]) obvTrend = "rising";
-        else if (obvRecent[obvRecent.length - 1] < obvRecent[0]) obvTrend = "falling";
-        else                                                      obvTrend = "flat";
+        const obv = calculateOBV(closes, volumes);
+        const obvRecent = obv.slice(-10);
+        obvTrend = obvRecent[obvRecent.length - 1] > obvRecent[0] ? "rising" : obvRecent[obvRecent.length - 1] < obvRecent[0] ? "falling" : "flat";
 
         divergence = detectRSIDivergence(closes, rsiValues);
 
-        var ema12      = calculateEMA(closes, 12);
-        var emaBullish = currentPrice > (ema12[ema12.length - 1] || 0);
+        const ema12 = calculateEMA(closes, 12);
+        const emaBullish = currentPrice > (ema12[ema12.length - 1] || 0);
 
-        if      (change24h > 8  && change7d > 15)  { tradeSignal = "STRONG_BULL"; confidence = 72; reasons.push("Strong price action"); }
-        else if (change24h < -8 && change7d < -15) { tradeSignal = "STRONG_BEAR"; confidence = 72; reasons.push("Strong price action"); }
+        if (change24h > 8 && change7d > 15) { signalValue = "STRONG_BULL"; confidence = 72; reasons.push("Strong price action"); }
+        else if (change24h < -8 && change7d < -15) { signalValue = "STRONG_BEAR"; confidence = 72; reasons.push("Strong price action"); }
 
         if (rsiVal < 32 && stochK < 25 && emaBullish) {
-          confidence += 22;
-          reasons.push("RSI/Stoch oversold (" + rsiVal.toFixed(0) + "/" + stochK.toFixed(0) + ")");
-          if (tradeSignal === "NEUTRAL") tradeSignal = "BULLISH";
+          confidence += 22; reasons.push(`RSI/Stoch oversold (\( {rsiVal.toFixed(0)}/ \){stochK.toFixed(0)})`);
+          if (signalValue === "NEUTRAL") signalValue = "BULLISH";
         } else if (rsiVal > 68 && stochK > 75 && !emaBullish) {
-          confidence += 22;
-          reasons.push("RSI/Stoch overbought (" + rsiVal.toFixed(0) + "/" + stochK.toFixed(0) + ")");
-          if (tradeSignal === "NEUTRAL") tradeSignal = "BEARISH";
+          confidence += 22; reasons.push(`RSI/Stoch overbought (\( {rsiVal.toFixed(0)}/ \){stochK.toFixed(0)})`);
+          if (signalValue === "NEUTRAL") signalValue = "BEARISH";
         }
 
         if (macdHist > 0 && obvTrend === "rising") {
-          confidence += 16;
-          reasons.push("MACD + OBV bullish");
-          if (tradeSignal.includes("BULL") || tradeSignal === "NEUTRAL") tradeSignal = "STRONG_BULL";
+          confidence += 16; reasons.push("MACD + OBV bullish");
+          if (signalValue.includes("BULL") || signalValue === "NEUTRAL") signalValue = "STRONG_BULL";
         } else if (macdHist < 0 && obvTrend === "falling") {
-          confidence += 16;
-          reasons.push("MACD + OBV bearish");
-          if (tradeSignal.includes("BEAR") || tradeSignal === "NEUTRAL") tradeSignal = "STRONG_BEAR";
+          confidence += 16; reasons.push("MACD + OBV bearish");
+          if (signalValue.includes("BEAR") || signalValue === "NEUTRAL") signalValue = "STRONG_BEAR";
         }
 
-        if (bbPos < 20 && divergence.bullish)      { confidence += 14; reasons.push("Bullish RSI divergence @ lower BB"); }
-        else if (bbPos > 80 && divergence.bearish) { confidence += 14; reasons.push("Bearish RSI divergence @ upper BB"); }
+        if (bbPos < 20 && divergence.bullish) {
+          confidence += 14; reasons.push(`Bullish RSI divergence @ lower BB`);
+        } else if (bbPos > 80 && divergence.bearish) {
+          confidence += 14; reasons.push(`Bearish RSI divergence @ upper BB`);
+        }
 
-        var volRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
+        const volRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
         if (volRatio > 9) confidence = Math.min(97, confidence + 9);
-        var volatilityPct = (atrVal / currentPrice) * 100;
+        const volatilityPct = (atrVal / currentPrice) * 100;
         if (volatilityPct > 22) confidence = Math.max(38, confidence - 14);
 
-        if (confidence > 84 && tradeSignal === "BULLISH") tradeSignal = "STRONG_BULL";
-        if (confidence > 84 && tradeSignal === "BEARISH") tradeSignal = "STRONG_BEAR";
+        if (confidence > 84 && signalValue === "BULLISH") signalValue = "STRONG_BULL";
+        if (confidence > 84 && signalValue === "BEARISH") signalValue = "STRONG_BEAR";
+
         confidence = Math.min(97, Math.max(38, Math.round(confidence)));
       }
 
-      var drift    = macdHist > 0 ? 0.0045 : macdHist < 0 ? -0.0045 : 0;
-      var stepVol  = (atrVal / currentPrice) * 1.7;
-      var predictions = [];
-      var projectedPrice = currentPrice;
+      const drift = macdHist > 0 ? 0.0045 : macdHist < 0 ? -0.0045 : 0;
+      const predictions: any[] = [];
+      let projectedPrice = currentPrice;
+      const stepVol = (atrVal / currentPrice) * 1.7;
 
-      for (var pi = 1; pi <= 12; pi++) {
-        projectedPrice *= (1 + drift + (Math.random() - 0.5) * stepVol * 2);
-        var timeLabel =
-          timeframe.label === "1h"  ? "+" + pi + "h" :
-          timeframe.label === "4h"  ? "+" + (pi * 4) + "h" :
-          timeframe.label === "1d"  ? "+" + pi + "d" :
-                                      "+" + pi + " periods";
-        predictions.push({
-          time:   timeLabel,
-          price:  projectedPrice,
-          change: ((projectedPrice - currentPrice) / currentPrice) * 100,
-        });
+      for (let i = 1; i <= 12; i++) {
+        const randomFactor = (Math.random() - 0.5) * stepVol * 2;
+        projectedPrice *= (1 + drift + randomFactor);
+        const timeLabel = timeframe.label === "1h" ? `+\( {i}h` : timeframe.label === "4h" ? `+ \){i * 4}h` : timeframe.label === "1d" ? `+\( {i}d` : `+ \){i} periods`;
+        predictions.push({ time: timeLabel, price: projectedPrice, change: ((projectedPrice - currentPrice) / currentPrice) * 100 });
       }
 
-      var mc          = runMonteCarlo(currentPrice, drift, atrVal, 12, 800);
-      var finalChange = ((predictions[predictions.length - 1].price - currentPrice) / currentPrice) * 100;
+      const mc = runMonteCarlo(currentPrice, drift, atrVal, 12, 800);
+      const finalChange = ((predictions[predictions.length - 1].price - currentPrice) / currentPrice) * 100;
 
       setData({
-        signal:        tradeSignal,
+        signal: signalValue,
         confidence,
         reasons,
-        changePct:     change24h,
+        changePct: change24h,
         projectedChange: finalChange,
         currentPrice,
         volume,
         marketCap,
         high24h,
         low24h,
-        volatility:    (atrVal / currentPrice * 100).toFixed(1),
-        rsi:           Math.round(rsiVal),
-        macdHist:      macdHist.toFixed(4),
-        bbPosition:    bbPos.toFixed(0),
-        stochK:        stochK.toFixed(0),
-        stochD:        stochD.toFixed(0),
+        volatility: (atrVal / currentPrice * 100).toFixed(1),
+        rsi: Math.round(rsiVal),
+        macdHist: macdHist.toFixed(4),
+        bbPosition: bbPos.toFixed(0),
+        stochK: stochK.toFixed(0),
+        stochD: stochD.toFixed(0),
         obvTrend,
         divergence,
         predictions,
-        monteCarlo:    mc,
-        hasTA:         true,
+        monteCarlo: mc,
+        hasTA: true,
       });
-
-    } catch (err) {
-      if (err.name !== "AbortError" && !abortSig.aborted) {
-        var msg = err.message || "";
-        if (msg.toLowerCase().indexOf("failed to fetch") !== -1) {
-          setError("CORS proxy temporarily unavailable \u2013 try again in a few seconds");
-        } else {
-          setError(msg || "Failed to load advanced analysis");
+    } catch (e: any) {
+      if (e.name !== "AbortError") {
+        let msg = e.message || "Failed to load advanced analysis";
+        if (msg.includes("fetch") || msg.includes("Failed to fetch")) {
+          msg = "Network error (CORS/proxy). Please try again in a few seconds.";
         }
+        setError(msg);
       }
     } finally {
       setLoading(false);
     }
   }, [selectedCoin, timeframe]);
 
-  // ── Backtest ─────────────────────────────────────────────────────────────
   const runBacktest = useCallback(async () => {
     if (!data || !data.hasTA) return;
     setLoading(true);
-
-    var btCtrl = new AbortController();
-    var btSig  = btCtrl.signal;
+    setError(null);
 
     try {
-      var binancePair = selectedCoin.symbol.toUpperCase() + "USDT";
-      var btUrl = proxify(
-        "https://api.binance.com/api/v3/klines?symbol=" +
-        binancePair +
-        "&interval=" + timeframe.binanceInterval +
-        "&limit=800"
-      );
+      const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
+      const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=\( {binancePair}&interval= \){timeframe.binanceInterval}&limit=800`;
+      const proxyUrl = createProxyUrl(binanceUrl);
 
-      var btRes = null;
-      try {
-        btRes = await timedFetch(btUrl, 15000, btSig);
-      } catch (btFetchErr) {
-        if (btSig.aborted) return;
-        throw new Error("CORS proxy temporarily unavailable \u2013 try again in a few seconds");
+      const klinesRes = await fetchWithTimeoutAndAbort(proxyUrl, 15000, new AbortController().signal); // new controller for backtest
+
+      if (klinesRes.status === 429) {
+        throw new Error("Binance rate limit hit - please wait");
       }
+      if (!klinesRes.ok) throw new Error("Backtest data unavailable");
 
-      if (btRes.status === 429) throw new Error("Binance rate limit hit - please wait");
-      if (!btRes.ok) throw new Error("Backtest data unavailable");
-
-      var klines = await safeJson(btRes);
+      const klines = await klinesRes.json();
       if (!Array.isArray(klines)) throw new Error("Invalid backtest data");
 
-      var closes  = klines.map(function (k) { return parseFloat(k[4]); });
-      var highs   = klines.map(function (k) { return parseFloat(k[2]); });
-      var lows    = klines.map(function (k) { return parseFloat(k[3]); });
-      var volumes = klines.map(function (k) { return parseFloat(k[5]); });
+      const closes = klines.map((k: any) => parseFloat(k[4]));
+      const highs = klines.map((k: any) => parseFloat(k[2]));
+      const lows = klines.map((k: any) => parseFloat(k[3]));
+      const volumes = klines.map((k: any) => parseFloat(k[5]));
 
-      var wins = 0, totalTrades = 0;
-      var returns = [];
+      let wins = 0;
+      let totalTrades = 0;
+      const returns: number[] = [];
 
-      for (var i = 50; i < closes.length - 20; i += 8) {
-        var wC = closes.slice(i - 50, i);
-        var wH = highs.slice(i - 50, i);
-        var wL = lows.slice(i - 50, i);
-        var wV = volumes.slice(i - 50, i);
+      for (let i = 50; i < closes.length - 20; i += 8) {
+        const windowCloses = closes.slice(i - 50, i);
+        const windowHighs = highs.slice(i - 50, i);
+        const windowLows = lows.slice(i - 50, i);
+        const windowVolumes = volumes.slice(i - 50, i);
 
-        var rsiVals  = calculateRSI(wC);
-        var macdW    = calculateMACD(wC);
-        var stochW   = calculateStochastic(wH, wL, wC);
-        var obvVals  = calculateOBV(wC, wV);
-        var entryPrice = closes[i];
+        const rsiVals = calculateRSI(windowCloses);
+        const macd = calculateMACD(windowCloses);
+        const stoch = calculateStochastic(windowHighs, windowLows, windowCloses);
+        const obvVals = calculateOBV(windowCloses, windowVolumes);
+        const currentPriceAtSignal = closes[i];
 
-        var testSignal  = "NEUTRAL";
-        var rsiNow      = rsiVals[rsiVals.length - 1] || 50;
-        var macdNow     = macdW.histogram[macdW.histogram.length - 1] || 0;
-        var stochKNow   = stochW.k[stochW.k.length - 1] || 50;
-        var obvTrendNow = (obvVals.length > 10 && obvVals[obvVals.length - 1] > obvVals[obvVals.length - 10])
-          ? "rising" : "falling";
+        let testSignal = "NEUTRAL";
+        const rsiNow = rsiVals[rsiVals.length - 1] || 50;
+        const macdNow = macd.histogram[macd.histogram.length - 1] || 0;
+        const stochKNow = stoch.k[stoch.k.length - 1] || 50;
+        const obvTrendNow = obvVals.length > 10 && obvVals[obvVals.length - 1] > obvVals[obvVals.length - 10] ? "rising" : "falling";
 
-        if      (rsiNow < 35 && stochKNow < 25 && macdNow > 0 && obvTrendNow === "rising")   testSignal = "BULLISH";
-        else if (rsiNow > 65 && stochKNow > 75 && macdNow < 0 && obvTrendNow === "falling")  testSignal = "BEARISH";
+        if (rsiNow < 35 && stochKNow < 25 && macdNow > 0 && obvTrendNow === "rising") testSignal = "BULLISH";
+        else if (rsiNow > 65 && stochKNow > 75 && macdNow < 0 && obvTrendNow === "falling") testSignal = "BEARISH";
 
         if (testSignal !== "NEUTRAL") {
           totalTrades++;
-          var forwardPrice = closes[i + 12];
+          const forwardPrice = closes[i + 12];
           if (forwardPrice === undefined) continue;
-          var forwardReturn = (forwardPrice - entryPrice) / entryPrice * 100;
-          if ((testSignal === "BULLISH" && forwardReturn > 0) ||
-              (testSignal === "BEARISH" && forwardReturn < 0)) wins++;
+
+          const forwardReturn = (forwardPrice - currentPriceAtSignal) / currentPriceAtSignal * 100;
+
+          if ((testSignal === "BULLISH" && forwardReturn > 0) || (testSignal === "BEARISH" && forwardReturn < 0)) wins++;
           returns.push(forwardReturn);
         }
       }
 
-      var winRate   = totalTrades > 0 ? (wins / totalTrades * 100) : 0;
-      var avgReturn = returns.length > 0
-        ? returns.reduce(function (a, b) { return a + b; }, 0) / returns.length
-        : 0;
+      const winRate = totalTrades > 0 ? (wins / totalTrades * 100) : 0;
+      const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
 
       setBacktestData({
-        winRate:     winRate.toFixed(1),
+        winRate: winRate.toFixed(1),
         totalTrades,
-        avgReturn:   avgReturn.toFixed(2),
-        timeframe:   timeframe.label,
+        avgReturn: avgReturn.toFixed(2),
+        timeframe: timeframe.label,
       });
-
-    } catch (err) {
-      if (!btSig.aborted) {
-        var msg = err.message || "";
-        if (msg.toLowerCase().indexOf("failed to fetch") !== -1) {
-          setError("CORS proxy temporarily unavailable \u2013 try again in a few seconds");
-        } else {
-          setError(msg || "Backtest failed");
-        }
+    } catch (e: any) {
+      let msg = e.message || "Backtest failed";
+      if (msg.includes("fetch") || msg.includes("Failed to fetch")) {
+        msg = "Network error during backtest. Please try again.";
       }
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -698,11 +633,13 @@ export default function WRCrystalBallPro() {
 
   useEffect(() => {
     fetchCoinData();
-    return () => { if (abortRef.current) abortRef.current.abort(); };
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
   }, [fetchCoinData]);
 
-  const sig  = data ? SIGNAL_META[data.signal] : null;
-  const Icon = sig ? sig.icon : Activity;
+  const sig = data ? SIGNAL_META[data.signal] : null;
+  const Icon = sig?.icon || Activity;
 
   return (
     <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 mb-4">
@@ -746,10 +683,7 @@ export default function WRCrystalBallPro() {
 
         <select
           value={selectedCoin.id}
-          onChange={e => {
-            const found = COIN_LIST.find(c => c.id === e.target.value);
-            if (found) setSelectedCoin(found);
-          }}
+          onChange={e => { const coin = COIN_LIST.find(c => c.id === e.target.value); if (coin) setSelectedCoin(coin); }}
           className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500/50 max-w-[120px]"
         >
           {COIN_LIST.map(c => <option key={c.id} value={c.id}>{c.symbol} - {c.name}</option>)}
@@ -757,10 +691,7 @@ export default function WRCrystalBallPro() {
 
         <select
           value={timeframe.label}
-          onChange={e => {
-            const found = TIMEFRAMES.find(t => t.label === e.target.value);
-            if (found) setTimeframe(found);
-          }}
+          onChange={e => { const tf = TIMEFRAMES.find(t => t.label === e.target.value); if (tf) setTimeframe(tf); }}
           className="bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200"
         >
           {TIMEFRAMES.map(t => <option key={t.label} value={t.label}>{t.label}</option>)}
@@ -785,13 +716,13 @@ export default function WRCrystalBallPro() {
       {data && sig && (
         <>
           <div className={`flex items-center gap-3 p-3 rounded-lg border ${sig.color} mb-3`}>
-            <div className={`p-2 rounded-lg bg-slate-950/50 ${sig.color.split(" ")[0]}`}>
+            <div className={`p-2 rounded-lg bg-slate-950/50 ${sig.color.split(' ')[0]}`}>
               <Icon className="w-6 h-6" />
             </div>
             <div className="flex-1">
-              <div className={`text-lg font-bold ${sig.color.split(" ")[0]}`}>{sig.label}</div>
+              <div className={`text-lg font-bold ${sig.color.split(' ')[0]}`}>{sig.label}</div>
               <div className="text-[10px] text-slate-400 flex flex-wrap gap-x-2">
-                {data.reasons && data.reasons.length > 0 ? data.reasons.join(" • ") : "No specific signals detected"}
+                {data.reasons?.join(" • ") || "No specific signals detected"}
               </div>
             </div>
             <div className="text-right">
@@ -809,7 +740,7 @@ export default function WRCrystalBallPro() {
             <div>Divergence:
               {data.divergence.bullish && <span className="text-emerald-400"> BULLISH {data.divergence.strength}</span>}
               {data.divergence.bearish && <span className="text-rose-400"> BEARISH {data.divergence.strength}</span>}
-              {!data.divergence.bullish && !data.divergence.bearish && " none"}
+              {!data.divergence.bullish && !data.divergence.bearish && "none"}
             </div>
           </div>
 
@@ -821,7 +752,7 @@ export default function WRCrystalBallPro() {
             <div className="bg-slate-800/50 rounded p-2">
               <div className="text-[10px] text-slate-500">24h Change</div>
               <div className={`text-sm font-mono ${data.changePct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                {data.changePct >= 0 ? "+" : ""}{data.changePct != null ? data.changePct.toFixed(2) : "0.00"}%
+                {data.changePct >= 0 ? "+" : ""}{data.changePct?.toFixed(2)}%
               </div>
             </div>
             <div className="bg-slate-800/50 rounded p-2">
@@ -840,7 +771,7 @@ export default function WRCrystalBallPro() {
               <span className="text-[10px] text-purple-300 font-medium">12-Period Projection (ATR + MACD Drift)</span>
             </div>
             <div className="grid grid-cols-4 gap-2">
-              {data.predictions.map((p, i) => (
+              {data.predictions.map((p: any, i: number) => (
                 <div key={i} className="bg-slate-900/50 rounded p-2 text-center">
                   <div className="text-[9px] text-slate-500">{p.time}</div>
                   <div className="text-[11px] font-mono">{formatPrice(p.price)}</div>
