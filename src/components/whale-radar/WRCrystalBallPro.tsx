@@ -264,29 +264,6 @@ const detectRSIDivergence = (prices: number[], rsiValues: number[], lookback = 1
   return { bullish, bearish, strength };
 };
 
-const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods = 12, simulations = 800) => {
-  const finalPrices: number[] = [];
-  const stepVol = (atr / currentPrice) * 1.8;
-  for (let sim = 0; sim < simulations; sim++) {
-    let price = currentPrice;
-    for (let i = 0; i < periods; i++) {
-      const randomShock = (Math.random() - 0.5) * stepVol * 2;
-      price *= (1 + drift + randomShock);
-    }
-    finalPrices.push(price);
-  }
-  finalPrices.sort((a, b) => a - b);
-  return {
-    min: finalPrices[0],
-    p25: finalPrices[Math.floor(finalPrices.length * 0.25)],
-    median: finalPrices[Math.floor(finalPrices.length / 2)],
-    p75: finalPrices[Math.floor(finalPrices.length * 0.75)],
-    max: finalPrices[finalPrices.length - 1],
-    simulations
-  };
-};
-
-// TradingView Advanced Indicators
 const calculateADX = (highs: number[], lows: number[], closes: number[], period = 14) => {
   if (highs.length < period + 1) return { adx: 25, diPositive: 25, diNegative: 25 };
   const tr: number[] = [];
@@ -353,7 +330,27 @@ const calculateSuperTrend = (highs: number[], lows: number[], closes: number[], 
   return { trend, value: trend === "bull" ? finalLower : finalUpper };
 };
 
-const runMonteCarlo = /* ... same as above ... */; // (already defined earlier)
+const runMonteCarlo = (currentPrice: number, drift: number, atr: number, periods = 12, simulations = 800) => {
+  const finalPrices: number[] = [];
+  const stepVol = (atr / currentPrice) * 1.8;
+  for (let sim = 0; sim < simulations; sim++) {
+    let price = currentPrice;
+    for (let i = 0; i < periods; i++) {
+      const randomShock = (Math.random() - 0.5) * stepVol * 2;
+      price *= (1 + drift + randomShock);
+    }
+    finalPrices.push(price);
+  }
+  finalPrices.sort((a, b) => a - b);
+  return {
+    min: finalPrices[0],
+    p25: finalPrices[Math.floor(finalPrices.length * 0.25)],
+    median: finalPrices[Math.floor(finalPrices.length / 2)],
+    p75: finalPrices[Math.floor(finalPrices.length * 0.75)],
+    max: finalPrices[finalPrices.length - 1],
+    simulations
+  };
+};
 
 // ==================== PRICE FORMATTING ====================
 const formatPrice = (price: number | null | undefined): string => {
@@ -400,7 +397,7 @@ const generateAIForecast = (data: any, coinName: string, currentPrice: number): 
   if (data.divergence.bullish) forecast += `Bullish RSI divergence detected — upside breakout likely. `;
   if (data.divergence.bearish) forecast += `Bearish RSI divergence detected — downside risk elevated. `;
 
-  forecast += `Monte Carlo simulation (800 paths) shows 68% probability within the projected band. Trade responsibly.`;
+  forecast += `Monte Carlo simulation (800 paths) shows \~68% probability within the projected band. Trade responsibly.`;
   return forecast;
 };
 
@@ -409,7 +406,6 @@ export default function CrystalBallAI() {
   const [timeframe, setTimeframe] = useState(TIMEFRAMES[2]);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
-  const [backtestData, setBacktestData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [coinSearch, setCoinSearch] = useState("");
   const abortRef = useRef<AbortController | null>(null);
@@ -452,7 +448,6 @@ export default function CrystalBallAI() {
     setLoading(true);
     setError(null);
     setData(null);
-    setBacktestData(null);
 
     try {
       const coinGeckoUrl = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${selectedCoin.id}&price_change_percentage=24h,7d`;
@@ -526,7 +521,6 @@ export default function CrystalBallAI() {
           cciVal = calculateCCI(highs, lows, closes);
           superTrendData = calculateSuperTrend(highs, lows, closes);
 
-          // Signal logic
           if (change24h > 8 && change7d > 15) { signalValue = "STRONG_BULL"; confidence = 72; reasons.push("Strong momentum"); }
           else if (change24h < -8 && change7d < -15) { signalValue = "STRONG_BEAR"; confidence = 72; reasons.push("Strong downtrend"); }
 
@@ -625,7 +619,6 @@ export default function CrystalBallAI() {
         <span className="text-xs px-3 py-1 rounded-full bg-gradient-to-r from-purple-500 to-violet-500 text-white font-medium">AI FORECAST</span>
       </div>
 
-      {/* Controls */}
       <div className="flex flex-wrap gap-2 mb-4">
         <div className="relative" ref={dropdownRef}>
           <input
@@ -680,7 +673,6 @@ export default function CrystalBallAI() {
 
       {data && sig && (
         <>
-          {/* Signal */}
           <div className={`flex items-center gap-4 p-4 rounded-2xl border ${sig.color} mb-4`}>
             <div className={`p-3 rounded-xl bg-slate-950/70 ${sig.color.split(' ')[0]}`}>
               <Icon className="w-8 h-8" />
@@ -704,7 +696,7 @@ export default function CrystalBallAI() {
             <p className="text-slate-200 leading-relaxed text-[15px]">{data.aiForecast}</p>
           </div>
 
-          {/* Price Info + Volume & Market Cap */}
+          {/* Price Info */}
           <div className="grid grid-cols-2 gap-3 mb-6 text-sm">
             <div className="bg-slate-800/60 rounded-2xl p-4">
               <div className="text-xs text-slate-400">Current Price</div>
