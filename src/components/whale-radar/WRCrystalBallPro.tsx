@@ -435,7 +435,50 @@ const formatLargeNumber = (num: number | null | undefined): string => {
   return `$${num.toLocaleString()}`;
 };
 
-const createProxyUrl = (url: string): string => `https://corsproxy.io/?${encodeURIComponent(url)}`;
+// Multiple CORS proxies for reliability - try in order
+const CORS_PROXIES = [
+  (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+];
+
+// Try direct first, then proxies
+const fetchWithProxyFallback = async (url: string, signal: AbortSignal, timeoutMs = 10000): Promise<Response> => {
+  // Try direct first (works for Binance, often blocked for CoinGecko)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(url, { 
+      signal: controller.signal,
+      headers: { 'Accept': 'application/json' }
+    });
+    clearTimeout(timeoutId);
+    if (res.ok) return res;
+  } catch (e) {
+    // Direct failed, try proxies
+  }
+
+  // Try each proxy in order
+  for (let i = 0; i < CORS_PROXIES.length; i++) {
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    try {
+      const proxyUrl = CORS_PROXIES[i](url);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(proxyUrl, { 
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json' }
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) return res;
+    } catch (e: any) {
+      if (e.name === 'AbortError' && signal.aborted) throw e;
+      // Continue to next proxy
+      continue;
+    }
+  }
+  throw new Error('All proxies failed');
+};
 
 // ==================== AI FORECAST WITH STOP-LOSS & PROBABILITY ====================
 const generateAIForecast = (data: {
@@ -508,19 +551,7 @@ export default function WRCrystalBallPro() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const fetchWithTimeout = async (url: string, timeoutMs: number, signal: AbortSignal) => {
-    const timeoutController = new AbortController();
-    const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
-    try {
-      const combinedSignal = signal;
-      const res = await fetch(url, { signal: combinedSignal });
-      clearTimeout(timeoutId);
-      return res;
-    } catch (err) {
-      clearTimeout(timeoutId);
-      throw err;
-    }
-  };
+
 
   const fetchCoinData = useCallback(async () => {
     if (abortRef.current) abortRef.current.abort();
@@ -533,10 +564,8 @@ export default function WRCrystalBallPro() {
 
     try {
       const coinGeckoUrl = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${selectedCoin.id}&price_change_percentage=24h,7d`;
-      const proxyCoinGecko = createProxyUrl(coinGeckoUrl);
-
-      const coinGeckoRes = await fetchWithTimeout(proxyCoinGecko, 15000, signal);
-      if (!coinGeckoRes.ok) throw new Error(coinGeckoRes.status === 429 ? "Rate limit exceeded. Wait 30s." : `CoinGecko error: ${coinGeckoRes.status}`);
+      
+      const coinGeckoRes = await fetchWithProxyFallback(coinGeckoUrl, signal, 12000);
 
       const json = await coinGeckoRes.json();
       if (!Array.isArray(json) || json.length === 0) throw new Error("No data from CoinGecko");
@@ -554,9 +583,15 @@ export default function WRCrystalBallPro() {
 
       const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
       const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${timeframe.binanceInterval}&limit=500`;
-      const proxyBinance = createProxyUrl(binanceUrl);
-
-      const klinesRes = await fetchWithTimeout(proxyBinance, 12000, signal);
+      
+      // Try Binance directly first (usually works), then with proxy fallback
+      let klinesRes: Response | null = null;
+      try {
+        klinesRes = await fetchWithProxyFallback(binanceUrl, signal, 10000);
+      } catch (e) {
+        // Binance failed - continue with CoinGecko data only
+        klinesRes = null;
+      }
 
       let signalValue = "NEUTRAL";
       let confidence = 45;
@@ -568,7 +603,7 @@ export default function WRCrystalBallPro() {
       let cciVal = 0;
       let superTrendData = { trend: "neutral", value: currentPrice };
 
-      if (klinesRes.ok) {
+      if (klinesRes && klinesRes.ok) {
         const klines = await klinesRes.json();
         if (Array.isArray(klines) && klines.length > 30) {
           const closes = klines.map((k: any) => parseFloat(k[4]));
@@ -616,7 +651,25 @@ export default function WRCrystalBallPro() {
 
           confidence = Math.min(97, Math.max(38, Math.round(confidence)));
         }
+      } else {
+        // Fallback: Use CoinGecko data only for basic signal
+        if (change24h > 5 && change7d > 10) {
+          signalValue = "BULLISH";
+          confidence = 55;
+          reasons.push("Positive momentum (24h + 7d)");
+        } else if (change24h < -5 && change7d < -10) {
+          signalValue = "BEARISH";
+          confidence = 55;
+          reasons.push("Negative momentum (24h + 7d)");
+        } else {
+          signalValue = "NEUTRAL";
+          confidence = 45;
+          reasons.push("Sideways market - limited TA data");
+        }
+        atrVal = currentPrice * 0.03; // Estimate 3% volatility
       }
+
+      const hasFullTA = klinesRes && klinesRes.ok;
 
       const drift = macdHist > 0 ? 0.0045 : macdHist < 0 ? -0.0045 : 0;
       const predictions: any[] = [];
@@ -666,12 +719,17 @@ export default function WRCrystalBallPro() {
         cci: cciVal,
         superTrend: superTrendData.trend,
         aiForecast,
-        hasTA: true,
+        hasTA: hasFullTA,
       });
     } catch (e: any) {
       if (e.name !== "AbortError") {
         let msg = e.message || "Failed to load analysis";
-        if (msg.includes("fetch")) msg = "Network error - please try again.";
+        if (msg.includes("fetch") || msg.includes("Failed") || msg.includes("proxies")) {
+          msg = "Network temporarily unavailable. Click Analyze to retry.";
+        }
+        if (msg.includes("429") || msg.includes("Rate")) {
+          msg = "API rate limited. Please wait 30 seconds and retry.";
+        }
         setError(msg);
       }
     } finally {
@@ -798,37 +856,44 @@ export default function WRCrystalBallPro() {
             </div>
           </div>
 
-          {/* Technical Indicators Grid */}
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-6">
-            <div className="bg-slate-800/40 rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-500">RSI</div>
-              <div className={`font-mono text-lg ${data.rsi < 30 ? 'text-emerald-400' : data.rsi > 70 ? 'text-rose-400' : 'text-slate-300'}`}>{data.rsi}</div>
-            </div>
-            <div className="bg-slate-800/40 rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-500">ADX</div>
-              <div className={`font-mono text-lg ${data.adx > 25 ? 'text-amber-400' : 'text-slate-300'}`}>{data.adx}</div>
-            </div>
-            <div className="bg-slate-800/40 rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-500">CCI</div>
-              <div className={`font-mono text-lg ${data.cci > 100 ? 'text-rose-400' : data.cci < -100 ? 'text-emerald-400' : 'text-slate-300'}`}>{data.cci}</div>
-            </div>
-            <div className="bg-slate-800/40 rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-500">Stoch K</div>
-              <div className={`font-mono text-lg ${Number(data.stochK) < 20 ? 'text-emerald-400' : Number(data.stochK) > 80 ? 'text-rose-400' : 'text-slate-300'}`}>{data.stochK}</div>
-            </div>
-            <div className="bg-slate-800/40 rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-500">SuperTrend</div>
-              <div className={`font-mono text-sm ${data.superTrend === 'bull' ? 'text-emerald-400' : data.superTrend === 'bear' ? 'text-rose-400' : 'text-slate-300'}`}>
-                {data.superTrend === 'bull' ? 'BULL' : data.superTrend === 'bear' ? 'BEAR' : 'NEUTRAL'}
+          {/* Technical Indicators Grid - only show with full TA data */}
+          {data.hasTA ? (
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-6">
+              <div className="bg-slate-800/40 rounded-xl p-3 text-center">
+                <div className="text-xs text-slate-500">RSI</div>
+                <div className={`font-mono text-lg ${data.rsi < 30 ? 'text-emerald-400' : data.rsi > 70 ? 'text-rose-400' : 'text-slate-300'}`}>{data.rsi}</div>
+              </div>
+              <div className="bg-slate-800/40 rounded-xl p-3 text-center">
+                <div className="text-xs text-slate-500">ADX</div>
+                <div className={`font-mono text-lg ${data.adx > 25 ? 'text-amber-400' : 'text-slate-300'}`}>{data.adx}</div>
+              </div>
+              <div className="bg-slate-800/40 rounded-xl p-3 text-center">
+                <div className="text-xs text-slate-500">CCI</div>
+                <div className={`font-mono text-lg ${data.cci > 100 ? 'text-rose-400' : data.cci < -100 ? 'text-emerald-400' : 'text-slate-300'}`}>{data.cci}</div>
+              </div>
+              <div className="bg-slate-800/40 rounded-xl p-3 text-center">
+                <div className="text-xs text-slate-500">Stoch K</div>
+                <div className={`font-mono text-lg ${Number(data.stochK) < 20 ? 'text-emerald-400' : Number(data.stochK) > 80 ? 'text-rose-400' : 'text-slate-300'}`}>{data.stochK}</div>
+              </div>
+              <div className="bg-slate-800/40 rounded-xl p-3 text-center">
+                <div className="text-xs text-slate-500">SuperTrend</div>
+                <div className={`font-mono text-sm ${data.superTrend === 'bull' ? 'text-emerald-400' : data.superTrend === 'bear' ? 'text-rose-400' : 'text-slate-300'}`}>
+                  {data.superTrend === 'bull' ? 'BULL' : data.superTrend === 'bear' ? 'BEAR' : 'NEUTRAL'}
+                </div>
+              </div>
+              <div className="bg-slate-800/40 rounded-xl p-3 text-center">
+                <div className="text-xs text-slate-500">OBV</div>
+                <div className={`font-mono text-sm ${data.obvTrend === 'rising' ? 'text-emerald-400' : data.obvTrend === 'falling' ? 'text-rose-400' : 'text-slate-300'}`}>
+                  {data.obvTrend.toUpperCase()}
+                </div>
               </div>
             </div>
-            <div className="bg-slate-800/40 rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-500">OBV</div>
-              <div className={`font-mono text-sm ${data.obvTrend === 'rising' ? 'text-emerald-400' : data.obvTrend === 'falling' ? 'text-rose-400' : 'text-slate-300'}`}>
-                {data.obvTrend.toUpperCase()}
-              </div>
+          ) : (
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 mb-6 text-center">
+              <div className="text-amber-400 text-sm">Limited data mode - using CoinGecko price data only</div>
+              <div className="text-slate-500 text-xs mt-1">Binance klines unavailable. Analysis based on 24h/7d price movements.</div>
             </div>
-          </div>
+          )}
 
           <div className="bg-slate-800/30 rounded-3xl p-5 mb-6">
             <div className="flex items-center gap-2 mb-4">
