@@ -13,10 +13,10 @@
     <meta name="color-scheme" content="dark" />
     <link rel="canonical" href="https://whaleradar.app" />
 
-    <!-- ✅ SECURITY: Enhanced CSP (strict-dynamic + upgrade-insecure-requests) -->
+    <!-- ✅ SECURITY: Fixed CSP – removed 'strict-dynamic' to allow module loading -->
     <meta http-equiv="Content-Security-Policy" content="
       default-src 'self';
-      script-src 'self' 'unsafe-inline' 'unsafe-eval' 'strict-dynamic';
+      script-src 'self' 'unsafe-inline' 'unsafe-eval';
       style-src 'self' 'unsafe-inline';
       img-src 'self' data: https: blob:;
       font-src 'self' data:;
@@ -49,10 +49,6 @@
     <link rel="dns-prefetch" href="https://public-api.birdeye.so" />
     <link rel="dns-prefetch" href="https://api.solana.fm" />
 
-    <!-- Critical preloads -->
-    <link rel="preload" href="/src/main.tsx" as="script" fetchpriority="high" />
-    <link rel="preload" href="/assets/fonts/inter.woff2" as="font" type="font/woff2" crossorigin />
-
     <!-- PWA Support -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -79,7 +75,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
-    <!-- Structured Data (JSON-LD) - Βελτίωση SEO -->
+    <!-- Structured Data (JSON-LD) - SEO Improvement -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
