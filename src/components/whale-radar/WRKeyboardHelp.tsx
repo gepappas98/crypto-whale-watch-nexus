@@ -11,8 +11,6 @@ const SHORTCUTS = [
   { key: 'H', desc: 'History' },
   { key: 'B', desc: 'Backtest' },
   { key: 'P', desc: 'Portfolio' },
-  { key: 'E', desc: 'Signal Eval' },
-  { key: 'C', desc: 'Crystal Ball PRO' },
   { key: 'Esc', desc: 'Close modal' },
   { key: '?', desc: 'Toggle this' },
 ];
