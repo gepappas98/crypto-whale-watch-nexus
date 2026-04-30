@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { toast } from "sonner";
 
 interface WhaleSignal {
@@ -10,21 +10,67 @@ interface WhaleSignal {
   usdValue: number;
 }
 
+const DEMO_SYMBOLS = ["BTC", "ETH", "SOL", "DOGE", "XRP", "ADA", "AVAX", "MATIC", "LINK", "DOT"];
+const DEMO_EXCHANGES = ["Binance", "Coinbase", "Kraken", "Bybit", "OKX"];
+
+function generateMockSignal(): WhaleSignal {
+  const symbol = DEMO_SYMBOLS[Math.floor(Math.random() * DEMO_SYMBOLS.length)];
+  const exchange = DEMO_EXCHANGES[Math.floor(Math.random() * DEMO_EXCHANGES.length)];
+  const type = Math.random() > 0.5 ? "buy" : "sell";
+  const usdValue = Math.floor(Math.random() * 2_000_000) + 100_000;
+  const priceMap: Record<string, number> = {
+    BTC: 67000, ETH: 3500, SOL: 145, DOGE: 0.12, XRP: 0.52,
+    ADA: 0.45, AVAX: 35, MATIC: 0.7, LINK: 14, DOT: 7
+  };
+  const price = priceMap[symbol] || 100;
+  const amount = usdValue / price;
+
+  return {
+    timestamp: Date.now(),
+    symbol,
+    exchange,
+    amount,
+    type,
+    usdValue,
+  };
+}
+
 export default function NexusPro() {
   const [data, setData] = useState<WhaleSignal[]>([]);
-  const [status, setStatus] = useState<"connecting" | "connected" | "error">("connecting");
+  const [status, setStatus] = useState<"connecting" | "connected" | "demo" | "error">("connecting");
   const [errorMessage, setErrorMessage] = useState("");
+  const [isDemo, setIsDemo] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const demoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startDemoMode = useCallback(() => {
+    setIsDemo(true);
+    setStatus("demo");
+    toast.info("Running in demo mode with simulated data");
+    
+    // Generate initial batch of signals
+    const initialSignals = Array.from({ length: 5 }, () => generateMockSignal());
+    setData(initialSignals);
+
+    // Add new signals periodically
+    demoIntervalRef.current = setInterval(() => {
+      const newSignal = generateMockSignal();
+      setData((prev) => [newSignal, ...prev].slice(0, 50));
+      
+      if (newSignal.usdValue > 1_000_000) {
+        toast.info(`Demo: Large ${newSignal.type}: ${newSignal.symbol} $${newSignal.usdValue.toLocaleString()}`, {
+          duration: 3000,
+        });
+      }
+    }, 3000);
+  }, []);
 
   useEffect(() => {
     const bridgeUrl = import.meta.env.VITE_BOT_BRIDGE_URL;
 
     if (!bridgeUrl) {
-      setStatus("error");
-      setErrorMessage(
-        "⚠️ Configuration missing: VITE_BOT_BRIDGE_URL is not set in environment variables."
-      );
-      toast.error("VITE_BOT_BRIDGE_URL is not set");
+      // No bridge URL - start demo mode automatically
+      startDemoMode();
       return;
     }
 
@@ -39,7 +85,7 @@ export default function NexusPro() {
         ws.onopen = () => {
           setStatus("connected");
           toast.success("Connected to whale bridge");
-          console.log("✅ NexusPro WebSocket connected");
+          console.log("NexusPro WebSocket connected");
         };
 
         ws.onmessage = (event) => {
@@ -47,7 +93,7 @@ export default function NexusPro() {
             const signal: WhaleSignal = JSON.parse(event.data);
             setData((prev) => [signal, ...prev].slice(0, 50));
             if (signal.usdValue > 500_000) {
-              toast.info(`🐋 Large ${signal.type}: ${signal.symbol} $${signal.usdValue.toLocaleString()}`, {
+              toast.info(`Large ${signal.type}: ${signal.symbol} $${signal.usdValue.toLocaleString()}`, {
                 duration: 5000,
               });
             }
@@ -58,21 +104,21 @@ export default function NexusPro() {
 
         ws.onerror = () => {
           setStatus("error");
-          setErrorMessage("❌ WebSocket connection failed.");
+          setErrorMessage("WebSocket connection failed.");
           toast.error("WebSocket connection failed");
         };
 
         ws.onclose = (event) => {
           if (!event.wasClean) {
             setStatus("error");
-            setErrorMessage("🔌 Connection closed. Reconnecting...");
+            setErrorMessage("Connection closed. Reconnecting...");
             toast.warning("Connection lost, reconnecting in 5s...");
             reconnectTimeout = setTimeout(connect, 5000);
           }
         };
       } catch (err) {
         setStatus("error");
-        setErrorMessage(`❌ Initialization error: ${(err as Error).message}`);
+        setErrorMessage(`Initialization error: ${(err as Error).message}`);
         toast.error(`Failed to init: ${(err as Error).message}`);
       }
     }
@@ -82,8 +128,11 @@ export default function NexusPro() {
     return () => {
       clearTimeout(reconnectTimeout);
       wsRef.current?.close();
+      if (demoIntervalRef.current) {
+        clearInterval(demoIntervalRef.current);
+      }
     };
-  }, []);
+  }, [startDemoMode]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-4 md:p-8">
@@ -91,6 +140,13 @@ export default function NexusPro() {
         <h1 className="text-3xl md:text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500 mb-8">
           🐋 Nexus Pro · Real‑time Whale Feed
         </h1>
+
+        {status === "demo" && (
+          <div className="flex items-center gap-3 bg-amber-900/30 p-4 rounded-lg border border-amber-500/50 mb-6">
+            <span className="text-amber-300 font-medium">Demo Mode</span>
+            <span className="text-slate-400 text-sm">Showing simulated whale signals. Connect VITE_BOT_BRIDGE_URL for live data.</span>
+          </div>
+        )}
 
         {status === "connecting" && (
           <div className="flex items-center gap-3 bg-slate-800/50 p-4 rounded-lg border border-slate-700 mb-6">
