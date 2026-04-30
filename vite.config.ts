@@ -9,15 +9,9 @@ export default defineConfig(({ mode }) => {
   return {
     server: {
       host: "::",
-      port: 8080,
+      port: 3000,
       hmr: { overlay: false },
-      proxy: {
-        "/api": {
-          target: "http://localhost:3001",
-          changeOrigin: true,
-          secure: false,
-        },
-      },
+      allowedHosts: ["all"],
     },
     plugins: [
       react(),
