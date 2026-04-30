@@ -1,5 +1,24 @@
 import { useEffect, useState, useRef } from "react";
 import { toast } from "sonner";
+// In NexusPro.tsx
+import { useBotWebSocket } from '@/hooks/useBotWebSocket'
+import { ArbitrageCommandCenter } from './Arbitrage'
+import { GridStudio } from './Grid'
+
+export default function NexusPro() {
+  useBotWebSocket() // connects to bridge.py ws
+  
+  return (
+    <Tabs defaultValue="arbitrage">
+      <TabsList>
+        <TabsTrigger value="arbitrage">Arbitrage</TabsTrigger>
+        <TabsTrigger value="grid">Grid</TabsTrigger>
+        <TabsTrigger value="volume">Volume</TabsTrigger>
+        <TabsTrigger value="portfolio">Portfolio</TabsTrigger>
+      </TabsList>
+    </Tabs>
+  )
+}
 
 interface WhaleSignal {
   timestamp: number;
