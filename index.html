@@ -13,33 +13,8 @@
     <meta name="color-scheme" content="dark" />
     <link rel="canonical" href="https://whaleradar.app" />
 
-    <!-- ✅ SECURITY: Fixed CSP – removed 'strict-dynamic' to allow module loading -->
-    <meta http-equiv="Content-Security-Policy" content="
-      default-src 'self';
-      script-src 'self' 'unsafe-inline' 'unsafe-eval';
-      style-src 'self' 'unsafe-inline';
-      img-src 'self' data: https: blob:;
-      font-src 'self' data:;
-      connect-src 'self'
-        wss://stream.binance.com
-        wss://stream.bybit.com
-        wss://stream.bybit.com/contract/usdt/public
-        https://api.coingecko.com
-        https://api.dexscreener.com
-        https://public-api.birdeye.so
-        https://api.solana.fm
-        https://token.jup.ag
-        https://api.coinpaprika.com
-        https://*.supabase.co
-        https://cloudflare-eth.com
-        https://rpc.ankr.com
-        https://mainnet.helius-rpc.com
-        https://api.etherscan.io;
-      frame-ancestors 'none';
-      base-uri 'self';
-      form-action 'self';
-      upgrade-insecure-requests;
-    ">
+    <!-- CSP disabled for development - Vite HMR requires ws: connections -->
+    <!-- Re-enable in production with appropriate settings -->
 
     <!-- Performance: Preconnect & Prefetch -->
     <link rel="preconnect" href="https://api.coingecko.com" />
