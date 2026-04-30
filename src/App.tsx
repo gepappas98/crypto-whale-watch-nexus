@@ -5,7 +5,26 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index.tsx";
 import NexusPro from "./pages/NexusPro.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import { useBotWebSocket } from '@/hooks/useBotWebSocket'
+import { StatusBar } from '@/components/StatusBar'
 
+function App() {
+  useBotWebSocket() // Connects WS on app load
+
+  return (
+    <>
+      {/* Your existing Nexus routes + new ones */}
+      <Routes>
+        <Route path="/" element={<WhaleDashboard />} />
+        <Route path="/arbitrage" element={<ArbitrageCommandCenter />} />
+        <Route path="/grid" element={<GridStudio />} />
+        <Route path="/volume" element={<VolumeController />} />
+        <Route path="/portfolio" element={<Portfolio />} />
+      </Routes>
+      <StatusBar />
+    </>
+  )
+}
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
