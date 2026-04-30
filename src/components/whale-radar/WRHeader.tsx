@@ -76,6 +76,22 @@ export function WRHeader({
         >
           ⚙
         </button>
+        <a
+          href="/pro"
+          className="flex items-center gap-1.5 px-3 py-1 rounded text-[9px] font-black tracking-[2px] transition-all"
+          style={{
+            background: 'linear-gradient(135deg, #00d4ff18, #00ff8818)',
+            border: '1px solid #00d4ff50',
+            color: '#00d4ff',
+            textDecoration: 'none',
+            fontFamily: 'monospace',
+            letterSpacing: '0.15em',
+            boxShadow: '0 0 10px #00d4ff20',
+          }}
+          title="Open Nexus Pro — Arbitrage, Grid & Volume trading terminal"
+        >
+          ⚡ NEXUS PRO
+        </a>
         <div className="w-2 h-2 rounded-full bg-wr-green animate-blink" style={{ boxShadow: '0 0 8px hsl(var(--wr-green))' }} />
       </div>
     </header>
