@@ -1,4 +1,5 @@
 /* ══ WHALE RADAR v9 — HEADER ═════════════════════════════════════════════════ */
+import { Link } from 'react-router-dom';
 
 interface WRHeaderProps {
   scanCount: number;
