@@ -54,7 +54,14 @@ export function WRHeader({
         <HeaderStat label="SCANNING" value={scanCount > 0 ? `${scanCount} TOKENS` : '—'} live={scanCount > 0} />
         <HeaderStat label="ALERTS" value={String(alertCount)} />
         <HeaderStat label="NEXT SCAN" value={nextScan} />
-        <HeaderStat label="AI CALLS" value={String(aiCallCount)} color="purple" />
+        <Link
+          to="/nexus"
+          className="text-[10px] tracking-[2px] px-2 py-1 rounded border border-wr-green/40 text-wr-green hover:bg-wr-green/10 transition-colors"
+          title="Open Nexus Trading Terminal"
+        >
+          NEXUS →
+        </Link>
+
 
         <button
           className="text-sm opacity-60 hover:opacity-100 transition-opacity p-1 bg-transparent border-none cursor-pointer"
