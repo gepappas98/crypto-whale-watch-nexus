@@ -1,7 +1,9 @@
-/* HYPERLIQUID API CLIENT - FIXED
+/* HYPERLIQUID API CLIENT - FIXED v2
  * Now supports BOTH block explorer (hypurrscan) AND trading API (hyperliquid.xyz)
  * Trading API calls go DIRECTLY to api.hyperliquid.xyz/info (POST, no auth)
  * Block explorer calls still go through Supabase Edge Function cache.
+ * 
+ * FIX v2: Added CORS proxy fallback and better error logging
  */
 
 export interface HLCachedResponse<T = any> {
@@ -59,6 +61,10 @@ function isTradingType(type: HLFetchType): type is HLTradingType {
   return ['metaAndAssetCtxs', 'allMids', 'fundingHistory', 'l2Book', 'clearinghouse'].includes(type);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// TRADING API — DIRECT CALLS with CORS fallback
+// ═══════════════════════════════════════════════════════════════════════════
+
 async function fetchTradingAPI<T>(type: HLTradingType, address?: string, signal?: AbortSignal, startTime?: number): Promise<HLCachedResponse<T>> {
   const start = performance.now();
   let body: any;
@@ -69,23 +75,76 @@ async function fetchTradingAPI<T>(type: HLTradingType, address?: string, signal?
     case 'l2Book': body = { type: 'l2Book', coin: address?.toUpperCase() ?? '' }; break;
     case 'clearinghouse': body = { type: 'clearinghouseState', user: address ?? '' }; break;
   }
-  const res = await fetch('https://api.hyperliquid.xyz/info', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
-  });
-  if (!res.ok) throw new HLApiError(`Hyperliquid Trading API error: HTTP ${res.status}`, res.status);
+
+  // Try direct fetch first
+  let res: Response;
+  let usedProxy = false;
+
+  try {
+    res = await fetch('https://api.hyperliquid.xyz/info', {
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify(body), 
+      signal,
+    });
+  } catch (directErr) {
+    // If direct fails (CORS), try with corsproxy.io
+    console.warn('[HL] Direct fetch failed, trying CORS proxy:', directErr);
+    try {
+      res = await fetch('https://corsproxy.io/?https://api.hyperliquid.xyz/info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify(body),
+        signal,
+      });
+      usedProxy = true;
+    } catch (proxyErr) {
+      throw new HLApiError(`Failed to fetch Hyperliquid API: ${directErr}. Proxy also failed: ${proxyErr}`);
+    }
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new HLApiError(`Hyperliquid Trading API error: HTTP ${res.status} ${usedProxy ? '(via proxy)' : ''} ${text}`, res.status);
+  }
+
   const raw = await res.json();
   const fetchMs = Math.round(performance.now() - start);
+
+  // Transform raw response into our standard shape
   let data: T;
   if (type === 'metaAndAssetCtxs') {
+    // Response is [meta, assetCtxs[]]
+    if (!Array.isArray(raw) || raw.length !== 2) {
+      throw new HLApiError(`Unexpected response format: expected [meta, ctxs], got ${typeof raw}`);
+    }
     const [meta, assetCtxs] = raw as [HLMeta, HLAssetCtx[]];
     data = transformMetaAndAssetCtxs(meta, assetCtxs) as T;
-  } else { data = raw; }
-  return { data, cached: false, stale: false, age_ms: 0, fetch_ms: fetchMs, ts: Date.now() };
+  } else {
+    data = raw;
+  }
+
+  return {
+    data,
+    cached: false,
+    stale: false,
+    age_ms: 0,
+    fetch_ms: fetchMs,
+    ts: Date.now(),
+  };
 }
 
 function transformMetaAndAssetCtxs(meta: HLMeta, ctxs: HLAssetCtx[]): HLMarketsResponse {
   const markets: HLMarket[] = meta.universe.map((asset, i) => {
     const ctx = ctxs[i];
+    if (!ctx) {
+      console.warn(`[HL] No context for asset ${asset.name} at index ${i}`);
+      return {
+        symbol: asset.name, markPrice: 0, midPrice: 0, oraclePrice: 0,
+        fundingRate: 0, openInterest: 0, dayVolume: 0, premium: 0,
+        prevDayPrice: 0, impactBid: 0, impactAsk: 0, maxLeverage: asset.maxLeverage,
+      };
+    }
     return {
       symbol: asset.name, markPrice: parseFloat(ctx.markPx), midPrice: parseFloat(ctx.midPx),
       oraclePrice: parseFloat(ctx.oraclePx), fundingRate: parseFloat(ctx.funding),
@@ -95,12 +154,14 @@ function transformMetaAndAssetCtxs(meta: HLMeta, ctxs: HLAssetCtx[]): HLMarketsR
       maxLeverage: asset.maxLeverage,
     };
   });
+
   const summary: HLSummary = {
     totalOI: markets.reduce((s, m) => s + m.openInterest, 0),
     totalVolume24h: markets.reduce((s, m) => s + m.dayVolume, 0),
-    avgFundingRate: markets.reduce((s, m) => s + m.fundingRate, 0) / markets.length,
+    avgFundingRate: markets.length > 0 ? markets.reduce((s, m) => s + m.fundingRate, 0) / markets.length : 0,
     marketCount: markets.length,
   };
+
   return { markets, summary };
 }
 
