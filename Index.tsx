@@ -388,15 +388,58 @@ async function fetchHoldersViaRPC(tokenAddress: string): Promise<any[]> {
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function getCeoSignalLabel(score: number, threat: string, category: string, vmcap: number): string {
+function getCeoSignalLabel(
+  score: number,
+  threat: string,
+  category: string,
+  vmcap: number,
+  change24h: number = 0,
+  volume: number = 0,
+  mcap: number = 1
+): string {
   const t = threat.toUpperCase();
   const cat = (category || '').toUpperCase();
-  if (score >= 88 || vmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) return 'AVOID / SHORT';
-  if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE')))         return 'AGGRESSIVE LONG';
-  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) return 'LONG (tight stop)';
-  if (score >= 45) return 'LONG';
-  if (score >= 35) return 'WATCH';
-  return 'HOLD';
+  const volRatio = vmcap;
+  const isStrongBull = change24h > 12;
+  const isBearish = change24h < -10;
+
+  // EXTREME DANGER
+  if (score >= 88 || t === 'CRITICAL' || cat.includes('WASH') || cat.includes('RUG') || cat.includes('DUMP')) {
+    return '🚨 AVOID / STRONG SHORT';
+  }
+
+  if (t === 'HIGH' && (cat.includes('DISTRIBUTION') || volRatio > 700)) {
+    return '⚠️ HIGH RISK - POTENTIAL DUMP';
+  }
+
+  // STRONG BULLISH
+  if (score >= 80 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || cat.includes('ACCUMULATION'))) {
+    return isStrongBull || volRatio > 350 ? '🔥 ULTRA AGGRESSIVE LONG' : '🚀 AGGRESSIVE LONG';
+  }
+
+  if (score >= 72 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
+    return '🚀 AGGRESSIVE LONG';
+  }
+
+  // MODERATE LONG SIGNALS
+  if (score >= 58) {
+    if (volRatio > 400 || isStrongBull) return '🟢 LONG (tight stop)';
+    return '🟢 LONG';
+  }
+
+  if (score >= 48) {
+    return volRatio > 280 ? 'LONG (monitor closely)' : 'LONG / SWING';
+  }
+
+  if (score >= 35) {
+    return isBearish && volRatio > 180 ? 'WATCH - BEARISH PRESSURE' : 'WATCH';
+  }
+
+  if (t === 'MEDIUM' || volRatio > 550) {
+    return 'HOLD / CAUTION';
+  }
+
+  return 'NEUTRAL - HOLD';
 }
 
 export default function WhaleRadarApp() {
