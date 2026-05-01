@@ -1,122 +1,96 @@
 <!doctype html>
-<html lang="el">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     
-    <!-- ✅ Title & Core Meta -->
+    <!-- ✅ FIXED: Clean title (removed TODO) -->
     <title>Whale Radar v9 | AI Crypto Manipulation Detection</title>
-    <meta name="description" content="Real-time crypto whale tracking, market manipulation detection, and on-chain analytics. Multi-exchange surveillance with Binance, Bybit, and Solana integration." />
-    <meta name="keywords" content="crypto whale tracker, market manipulation, on-chain analytics, Solana, Binance, Bybit, trading signals, AI surveillance" />
+    
+    <!-- Enhanced SEO -->
+    <meta name="description" content="Real-time crypto whale tracking, market manipulation detection, and on-chain analytics. Multi-exchange surveillance with Binance, Bybit, and Solana integration.">
+    <meta name="keywords" content="crypto whale tracker, market manipulation, on-chain analytics, Solana, Binance, Bybit, trading signals">
     <meta name="author" content="Whale Radar Team" />
     <meta name="theme-color" content="#0f172a" />
     <meta name="color-scheme" content="dark" />
-    <link rel="canonical" href="https://whaleradar.app" />
-
-    <!-- ✅ SECURITY: Fixed CSP – removed 'strict-dynamic' to allow module loading -->
+    
+    <!-- ✅ SECURITY: CSP for crypto app (prevents XSS/API key theft) -->
     <meta http-equiv="Content-Security-Policy" content="
-      default-src 'self';
-      script-src 'self' 'unsafe-inline' 'unsafe-eval';
-      style-src 'self' 'unsafe-inline';
-      img-src 'self' data: https: blob:;
-      font-src 'self' data:;
-      connect-src 'self'
-        wss://stream.binance.com
-        wss://stream.bybit.com
-        wss://stream.bybit.com/contract/usdt/public
-        https://api.coingecko.com
-        https://api.dexscreener.com
-        https://public-api.birdeye.so
-        https://api.solana.fm
-        https://token.jup.ag
-        https://api.coinpaprika.com
-        https://*.supabase.co
-        https://cloudflare-eth.com
-        https://rpc.ankr.com
-        https://mainnet.helius-rpc.com
+      default-src 'self'; 
+      script-src 'self' 'unsafe-inline' 'unsafe-eval'; 
+      style-src 'self' 'unsafe-inline'; 
+      img-src 'self' data: https: blob:; 
+      font-src 'self' data:; 
+      connect-src 'self' 
+        wss://stream.binance.com 
+        wss://stream.bybit.com 
+        wss://stream.bybit.com/contract/usdt/public 
+        https://api.coingecko.com 
+        https://api.dexscreener.com 
+        https://public-api.birdeye.so 
+        https://api.solana.fm 
+        https://token.jup.ag 
+        https://api.coinpaprika.com 
+        https://*.supabase.co 
+        https://cloudflare-eth.com 
+        https://rpc.ankr.com 
+        https://mainnet.helius-rpc.com 
         https://api.etherscan.io;
       frame-ancestors 'none';
       base-uri 'self';
       form-action 'self';
-      upgrade-insecure-requests;
     ">
-
-    <!-- Performance: Preconnect & Prefetch -->
+    
+    <!-- Performance: Preconnect to critical APIs -->
     <link rel="preconnect" href="https://api.coingecko.com" />
     <link rel="preconnect" href="https://api.dexscreener.com" />
     <link rel="preconnect" href="https://stream.binance.com" />
     <link rel="preconnect" href="https://stream.bybit.com" crossorigin />
     <link rel="dns-prefetch" href="https://public-api.birdeye.so" />
-    <link rel="dns-prefetch" href="https://api.solana.fm" />
-
-    <!-- PWA Support -->
+    
+    <!-- PWA Support (critical for mobile traders) -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Whale Radar" />
-
-    <!-- Open Graph + Twitter -->
+    
+    <!-- ✅ FIXED: Replaced expiring GCS URL with permanent hosting -->
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Whale Radar v9 | AI Market Surveillance" />
     <meta property="og:description" content="Detect crypto market manipulation in real-time. Whale tracking across Binance, Bybit, and Solana." />
     <meta property="og:image" content="https://whaleradar.app/og-image.jpg" />
     <meta property="og:url" content="https://whaleradar.app" />
     <meta property="og:site_name" content="Whale Radar" />
-
+    
+    <!-- Twitter/X Card -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:site" content="@whaleradar" />
     <meta name="twitter:creator" content="@whaleradar" />
     <meta name="twitter:title" content="Whale Radar v9 | AI Market Surveillance" />
     <meta name="twitter:description" content="Detect crypto market manipulation in real-time." />
     <meta name="twitter:image" content="https://whaleradar.app/og-image.jpg" />
-
+    
     <!-- Favicons -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="alternate icon" type="image/png" href="/favicon-32x32.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-
-    <!-- Structured Data (JSON-LD) - SEO Improvement -->
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "WebSite",
-      "name": "Whale Radar",
-      "url": "https://whaleradar.app",
-      "description": "Real-time crypto whale tracking and AI market manipulation detection",
-      "potentialAction": {
-        "@type": "SearchAction",
-        "target": "https://whaleradar.app/search?q={search_term_string}",
-        "query-input": "required name=search_term_string"
-      }
-    }
-    </script>
+    
+    <!-- Preload critical assets -->
+    <link rel="preload" href="/src/main.tsx" as="script" />
+    <link rel="preload" href="/assets/fonts/inter.woff2" as="font" type="font/woff2" crossorigin />
   </head>
 
   <body>
     <div id="root"></div>
     
-    <!-- No-JS fallback -->
+    <!-- No-JS fallback for SEO -->
     <noscript>
-      <div style="padding: 2rem; text-align: center; font-family: system-ui; color: #fff; background: #0f172a; min-height: 100vh; display: flex; align-items: center; justify-content: center;">
-        <div>
-          <h1>🚀 Whale Radar v9</h1>
-          <p>JavaScript απαιτείται για real-time δεδομένα και WebSocket feeds.</p>
-          <p>Παρακαλώ ενεργοποιήστε τη JavaScript στον browser σας.</p>
-        </div>
+      <div style="padding: 2rem; text-align: center; font-family: system-ui;">
+        <h1>JavaScript Required</h1>
+        <p>Whale Radar requires JavaScript to fetch real-time market data and WebSocket feeds.</p>
       </div>
     </noscript>
-
-    <!-- Service Worker Registration -->
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then(reg => console.log('✅ Service Worker registered', reg.scope))
-            .catch(err => console.log('⚠️ Service Worker registration failed', err));
-        });
-      }
-    </script>
-
+    
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

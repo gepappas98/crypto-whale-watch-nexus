@@ -12,7 +12,6 @@ import { trackedRouter }        from './routes/tracked';
 import { alertsRouter }         from './routes/alerts';
 import { whaleEventsRouter }    from './routes/whaleEvents';
 import { signalOutcomesRouter, fillOutcomePrices } from './routes/signalOutcomes';
-import botRouter from './routes/bot';
 
 const app = express();
 const PORT = Number(process.env.API_PORT) || 3001;
@@ -45,7 +44,6 @@ app.use('/api/tracked',          trackedRouter);
 app.use('/api/alerts',           alertsRouter);
 app.use('/api/whale-events',     whaleEventsRouter);
 app.use('/api/signal-outcomes',  signalOutcomesRouter);
-app.use('/api/bot',              botRouter);
 
 // ── 404 ────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

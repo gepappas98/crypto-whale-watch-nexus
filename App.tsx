@@ -5,20 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
-// Existing: Whale Watch tab
-// NEW: Add these routes
-import { ArbitrageCommandCenter } from '@/pages/Arbitrage'
-import { GridStudio } from '@/pages/Grid' 
-import { VolumeController } from '@/pages/Volume'
-import { Portfolio } from '@/pages/Portfolio'
 
-const routes = [
-  { path: '/', label: 'Whale Watch', component: WhaleDashboard }, // existing
-  { path: '/arbitrage', label: 'Arbitrage', component: ArbitrageCommandCenter },
-  { path: '/grid', label: 'Grid', component: GridStudio },
-  { path: '/volume', label: 'Volume', component: VolumeController },
-  { path: '/portfolio', label: 'Portfolio', component: Portfolio },
-]
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
