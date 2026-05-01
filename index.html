@@ -4,106 +4,90 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     
-    <!-- ✅ Primary SEO -->
-    <title>Whale Radar v9 — Real-Time Crypto Whale Tracker &amp; Manipulation Detector</title>
-    <meta name="description" content="Real-time crypto whale tracking across Binance, Bybit &amp; Solana. AI-powered market manipulation detection, live alerts, Hyperliquid explorer, and trading signals.">
-    <meta name="keywords" content="crypto whale tracker, whale alerts, market manipulation detector, solana whale tracking, binance whales, bybit whale trades, hyperliquid explorer, defi radar, crypto gem hunter, trading signals, on-chain analytics">
-    <meta name="author" content="Whale Radar" />
-    <meta name="robots" content="index, follow" />
+    <!-- ✅ FIXED: Clean title (removed TODO) -->
+    <title>Whale Radar v9 | AI Crypto Manipulation Detection</title>
+    
+    <!-- Enhanced SEO -->
+    <meta name="description" content="Real-time crypto whale tracking, market manipulation detection, and on-chain analytics. Multi-exchange surveillance with Binance, Bybit, and Solana integration.">
+    <meta name="keywords" content="crypto whale tracker, market manipulation, on-chain analytics, Solana, Binance, Bybit, trading signals">
+    <meta name="author" content="Whale Radar Team" />
     <meta name="theme-color" content="#0f172a" />
     <meta name="color-scheme" content="dark" />
-
-    <!-- ✅ Open Graph / Social -->
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Whale Radar v9 — Real-Time Crypto Whale Tracker &amp; Manipulation Detector" />
-    <meta property="og:description" content="Detect whale movements and market manipulation in real-time. Binance, Bybit, Solana &amp; Hyperliquid integration." />
-    <meta property="og:image" content="https://whaleradar.app/og-image.jpg" />
-    <meta property="og:url" content="https://whaleradar.app" />
-    <meta property="og:site_name" content="Whale Radar" />
-    <meta property="og:locale" content="en_US" />
-
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Whale Radar v9 — Crypto Whale Tracker &amp; Manipulation Radar" />
-    <meta name="twitter:description" content="Real-time whale alerts and AI manipulation detection for serious traders." />
-    <meta name="twitter:image" content="https://whaleradar.app/og-image.jpg" />
-    <meta name="twitter:site" content="@whaleradar" />
-
-    <!-- Canonical -->
-    <link rel="canonical" href="https://whaleradar.app" />
-
-    <!-- Security Headers -->
+    
+    <!-- ✅ SECURITY: CSP for crypto app (prevents XSS/API key theft) -->
     <meta http-equiv="Content-Security-Policy" content="
-      default-src 'self';
-      script-src 'self' 'unsafe-inline' 'unsafe-eval';
-      style-src 'self' 'unsafe-inline';
-      img-src 'self' data: https: blob:;
-      font-src 'self' data:;
-      connect-src 'self'
-        wss://stream.binance.com
-        wss://stream.bybit.com
-        wss://stream.bybit.com/contract/usdt/public
-        https://api.coingecko.com
-        https://api.dexscreener.com
-        https://public-api.birdeye.so
-        https://*.supabase.co
-        https://api.etherscan.io
-        https://mainnet.helius-rpc.com;
+      default-src 'self'; 
+      script-src 'self' 'unsafe-inline' 'unsafe-eval'; 
+      style-src 'self' 'unsafe-inline'; 
+      img-src 'self' data: https: blob:; 
+      font-src 'self' data:; 
+      connect-src 'self' 
+        wss://stream.binance.com 
+        wss://stream.bybit.com 
+        wss://stream.bybit.com/contract/usdt/public 
+        https://api.coingecko.com 
+        https://api.dexscreener.com 
+        https://public-api.birdeye.so 
+        https://api.solana.fm 
+        https://token.jup.ag 
+        https://api.coinpaprika.com 
+        https://*.supabase.co 
+        https://cloudflare-eth.com 
+        https://rpc.ankr.com 
+        https://mainnet.helius-rpc.com 
+        https://api.etherscan.io;
       frame-ancestors 'none';
       base-uri 'self';
       form-action 'self';
     ">
-
-    <!-- Performance Optimizations -->
+    
+    <!-- Performance: Preconnect to critical APIs -->
     <link rel="preconnect" href="https://api.coingecko.com" />
     <link rel="preconnect" href="https://api.dexscreener.com" />
-    <link rel="preconnect" href="https://public-api.birdeye.so" />
-    <link rel="preconnect" href="https://stream.binance.com" crossorigin />
+    <link rel="preconnect" href="https://stream.binance.com" />
     <link rel="preconnect" href="https://stream.bybit.com" crossorigin />
-    <link rel="dns-prefetch" href="https://*.supabase.co" />
-
-    <!-- PWA -->
+    <link rel="dns-prefetch" href="https://public-api.birdeye.so" />
+    
+    <!-- PWA Support (critical for mobile traders) -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Whale Radar" />
-
+    
+    <!-- ✅ FIXED: Replaced expiring GCS URL with permanent hosting -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Whale Radar v9 | AI Market Surveillance" />
+    <meta property="og:description" content="Detect crypto market manipulation in real-time. Whale tracking across Binance, Bybit, and Solana." />
+    <meta property="og:image" content="https://whaleradar.app/og-image.jpg" />
+    <meta property="og:url" content="https://whaleradar.app" />
+    <meta property="og:site_name" content="Whale Radar" />
+    
+    <!-- Twitter/X Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@whaleradar" />
+    <meta name="twitter:creator" content="@whaleradar" />
+    <meta name="twitter:title" content="Whale Radar v9 | AI Market Surveillance" />
+    <meta name="twitter:description" content="Detect crypto market manipulation in real-time." />
+    <meta name="twitter:image" content="https://whaleradar.app/og-image.jpg" />
+    
     <!-- Favicons -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-
-    <!-- Preload Critical Resources -->
-    <link rel="preload" href="/src/main.tsx" as="script" type="module" />
-    <link rel="preload" as="style" href="/src/index.css" />
-
-    <!-- Structured Data (JSON-LD) for SEO -->
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "WebApplication",
-      "name": "Whale Radar v9",
-      "description": "Real-time crypto whale tracker and market manipulation detection tool",
-      "url": "https://whaleradar.app",
-      "applicationCategory": "FinanceApplication",
-      "operatingSystem": "Web Browser",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
-      }
-    }
-    </script>
+    <link rel="alternate icon" type="image/png" href="/favicon-32x32.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    
+    <!-- Preload critical assets -->
+    <link rel="preload" href="/src/main.tsx" as="script" />
+    <link rel="preload" href="/assets/fonts/inter.woff2" as="font" type="font/woff2" crossorigin />
   </head>
 
   <body>
     <div id="root"></div>
     
-    <!-- No-JS Fallback -->
+    <!-- No-JS fallback for SEO -->
     <noscript>
-      <div style="padding: 3rem 1rem; text-align: center; font-family: system-ui; max-width: 600px; margin: 0 auto;">
-        <h1>🚨 JavaScript Required</h1>
-        <p>Whale Radar needs JavaScript enabled to deliver live market data, WebSocket feeds, and real-time alerts.</p>
+      <div style="padding: 2rem; text-align: center; font-family: system-ui;">
+        <h1>JavaScript Required</h1>
+        <p>Whale Radar requires JavaScript to fetch real-time market data and WebSocket feeds.</p>
       </div>
     </noscript>
     

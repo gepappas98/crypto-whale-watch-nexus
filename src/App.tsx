@@ -5,13 +5,6 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
-import NexusLayout from "./components/nexus/NexusLayout";
-import NexusWhaleWatch from "./pages/nexus/NexusWhaleWatch";
-import NexusArbitrage from "./pages/nexus/NexusArbitrage";
-import NexusGridStudio from "./pages/nexus/NexusGridStudio";
-import NexusVolumeMaker from "./pages/nexus/NexusVolumeMaker";
-import NexusPortfolio from "./pages/nexus/NexusPortfolio";
-import { Navigate } from "react-router-dom";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,14 +26,6 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
-          <Route path="/nexus" element={<NexusLayout />}>
-            <Route index element={<Navigate to="/nexus/whale" replace />} />
-            <Route path="whale" element={<NexusWhaleWatch />} />
-            <Route path="arbitrage" element={<NexusArbitrage />} />
-            <Route path="grid" element={<NexusGridStudio />} />
-            <Route path="volume" element={<NexusVolumeMaker />} />
-            <Route path="portfolio" element={<NexusPortfolio />} />
-          </Route>
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

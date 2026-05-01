@@ -1,18 +1,15 @@
 // ══ HYPERLIQUID CACHE — Supabase Edge Function ════════════════════════════════
-//
-// Proxies and caches Hyperliquid TRADING API calls server-side.
-// FIX: Was calling api.hypurrscan.io (block explorer — no perp data).
-//      Now calls api.hyperliquid.xyz/info (trading API — real perp data).
+// Proxies and caches Hypurrscan API calls server-side.
 //
 // Endpoints served (via ?type=):
-//   metaAndAssetCtxs → POST /info  (3 000ms TTL) ← main dashboard data
-//   allMids          → POST /info  (1 000ms TTL)
-//   meta             → POST /info  (30 000ms TTL) — rarely changes
-//   fundingHistory   → POST /info  (5 000ms TTL)  — requires ?coin=BTC
-//   l2Book           → POST /info  (1 000ms TTL)  — requires ?coin=BTC
-//   clearinghouse    → POST /info  (3 000ms TTL)  — requires ?address=0x…
+//   blocks          → GET /api/recentBlocks       (500ms TTL)
+//   txs             → GET /api/recentTxs          (500ms TTL)
+//   address         → GET /api/address/:addr       (2000ms TTL)
+//   balance         → RPC rpc.hypurrscan.io        (2000ms TTL)
+//   leaderboard     → GET /api/leaderboard         (5000ms TTL)
 //
-// Rate limiting: same Postgres counter as before (200 req/min hard cap).
+// Rate limiting: tracks outgoing Hypurrscan calls in a Postgres counter table.
+// Hard cap: 200 requests/minute (≈ 3.3/sec).
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
@@ -26,25 +23,19 @@ import {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const HL_API = 'https://api.hyperliquid.xyz/info';   // ← THE FIX
+const HYPURRSCAN_API = 'https://api.hypurrscan.io';
+const HYPURRSCAN_RPC = 'https://rpc.hypurrscan.io';
 const MAX_REQUESTS_PER_MIN = 200;
-const STALE_PURGE_MS = 10_000;
+const STALE_PURGE_MS = 10_000; // purge cache rows older than 10s
 
-type CacheType =
-  | 'metaAndAssetCtxs'
-  | 'allMids'
-  | 'meta'
-  | 'fundingHistory'
-  | 'l2Book'
-  | 'clearinghouse';
+type CacheType = 'blocks' | 'txs' | 'address' | 'balance' | 'leaderboard';
 
 const TTL_MAP: Record<CacheType, number> = {
-  metaAndAssetCtxs: 3_000,
-  allMids:          1_000,
-  meta:            30_000,
-  fundingHistory:   5_000,
-  l2Book:           1_000,
-  clearinghouse:    3_000,
+  blocks:      500,
+  txs:         500,
+  address:     2_000,
+  balance:     2_000,
+  leaderboard: 5_000,
 };
 
 // ── Supabase client (service role — bypasses RLS) ─────────────────────────────
@@ -54,18 +45,25 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 );
 
-// ── Rate limit check (unchanged from original) ────────────────────────────────
+// ── Rate limit check ──────────────────────────────────────────────────────────
 
 async function checkRateLimit(): Promise<{ allowed: boolean; remaining: number }> {
+  // Minute-bucket key e.g. "2024-01-15T14:32"
   const windowKey = new Date().toISOString().slice(0, 16);
+
+  // Upsert atomically via Postgres function pattern
   const { data, error } = await supabase.rpc('increment_hl_counter', {
     p_window: windowKey,
     p_max: MAX_REQUESTS_PER_MIN,
   });
+
+  // If the RPC doesn't exist yet (first deploy), fall back gracefully
   if (error) {
+    // Soft-allow if we can't check — log and continue
     console.warn('[HLCache] rate-limit RPC error, soft-allowing:', error.message);
     return { allowed: true, remaining: MAX_REQUESTS_PER_MIN };
   }
+
   const count: number = data ?? 0;
   return {
     allowed: count <= MAX_REQUESTS_PER_MIN,
@@ -73,15 +71,20 @@ async function checkRateLimit(): Promise<{ allowed: boolean; remaining: number }
   };
 }
 
-// ── Cache helpers (unchanged from original) ───────────────────────────────────
+// ── Cache helpers ─────────────────────────────────────────────────────────────
 
-async function readCache(key: string): Promise<{ payload: unknown; age_ms: number } | null> {
+async function readCache(key: string): Promise<{
+  payload: unknown;
+  age_ms: number;
+} | null> {
   const { data, error } = await supabase
     .from('hyperliquid_cache')
     .select('payload, fetched_at')
     .eq('cache_key', key)
     .single();
+
   if (error || !data) return null;
+
   const age_ms = Date.now() - new Date(data.fetched_at).getTime();
   return { payload: data.payload, age_ms };
 }
@@ -92,6 +95,7 @@ async function writeCache(key: string, payload: unknown, ttl_ms: number): Promis
     .upsert({ cache_key: key, payload, fetched_at: new Date().toISOString(), ttl_ms });
 }
 
+// Fire-and-forget stale row purge (non-blocking)
 function purgeStaleRows(): void {
   const cutoff = new Date(Date.now() - STALE_PURGE_MS).toISOString();
   supabase
@@ -101,178 +105,119 @@ function purgeStaleRows(): void {
     .then(() => {}, () => {});
 }
 
-// ── Hyperliquid Trading API fetchers ──────────────────────────────────────────
+// ── Hypurrscan fetchers ───────────────────────────────────────────────────────
 
-async function hlPost(body: Record<string, unknown>): Promise<unknown> {
-  const res = await fetch(HL_API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(8_000),
+async function fetchBlocks(): Promise<unknown> {
+  const res = await fetch(`${HYPURRSCAN_API}/api/recentBlocks`, {
+    headers: { 'Accept': 'application/json', 'User-Agent': 'WhaleRadar/9.0' },
+    signal: AbortSignal.timeout(5_000),
   });
-  if (!res.ok) throw new Error(`Hyperliquid API ${res.status}: ${await res.text()}`);
+  if (!res.ok) throw new Error(`Hypurrscan blocks ${res.status}`);
   return res.json();
 }
 
-// Returns merged array of markets + summary totals (powers the Whale Watch cards)
-async function fetchMetaAndAssetCtxs(): Promise<unknown> {
-  const data = await hlPost({ type: 'metaAndAssetCtxs' }) as [
-    { universe: Array<{ name: string; szDecimals: number; maxLeverage: number }> },
-    Array<{
-      funding: string;
-      openInterest: string;
-      prevDayPx: string;
-      dayNtlVlm: string;
-      premium: string | null;
-      oraclePx: string;
-      markPx: string;
-      midPx: string | null;
-    }>
-  ];
-
-  const universe = data[0].universe;
-  const ctxs     = data[1];
-
-  const markets = universe.map((asset, i) => {
-    const ctx        = ctxs[i] ?? {};
-    const markPx     = parseFloat(ctx.markPx     ?? '0');
-    const oraclePx   = parseFloat(ctx.oraclePx   ?? '0');
-    const oi         = parseFloat(ctx.openInterest ?? '0');
-    const funding    = parseFloat(ctx.funding     ?? '0');
-    const dayVolUsd  = parseFloat(ctx.dayNtlVlm   ?? '0');
-    const premium    = ctx.premium != null
-      ? parseFloat(ctx.premium)
-      : oraclePx > 0 ? (markPx - oraclePx) / oraclePx : 0;
-
-    return {
-      asset:           asset.name,
-      markPx,
-      oraclePx,
-      premium,           // fraction e.g. 0.0002 = 0.02 %
-      funding,           // 8-h rate as fraction
-      openInterest:    oi,
-      openInterestUsd: oi * markPx,
-      dayVolumeUsd:    dayVolUsd,
-      maxLeverage:     asset.maxLeverage,
-      szDecimals:      asset.szDecimals,
-    };
+async function fetchRecentTxs(): Promise<unknown> {
+  const res = await fetch(`${HYPURRSCAN_API}/api/recentTxs`, {
+    headers: { 'Accept': 'application/json', 'User-Agent': 'WhaleRadar/9.0' },
+    signal: AbortSignal.timeout(5_000),
   });
+  if (!res.ok) throw new Error(`Hypurrscan txs ${res.status}`);
+  return res.json();
+}
 
-  const totalOiUsd  = markets.reduce((s, m) => s + m.openInterestUsd, 0);
-  const totalVolUsd = markets.reduce((s, m) => s + m.dayVolumeUsd, 0);
-  const avgFunding  = markets.length > 0
-    ? markets.reduce((s, m) => s + m.funding, 0) / markets.length
-    : 0;
+async function fetchAddress(addr: string): Promise<unknown> {
+  const res = await fetch(`${HYPURRSCAN_API}/api/address/${encodeURIComponent(addr)}`, {
+    headers: { 'Accept': 'application/json', 'User-Agent': 'WhaleRadar/9.0' },
+    signal: AbortSignal.timeout(6_000),
+  });
+  if (!res.ok) throw new Error(`Hypurrscan address ${res.status}`);
+  return res.json();
+}
 
-  return {
-    markets,
-    summary: {
-      totalOiUsd,
-      totalVolUsd,
-      avgFunding8h: avgFunding,
-      marketCount:  markets.length,
-    },
-    fetchedAt: new Date().toISOString(),
+async function fetchBalance(addr: string): Promise<unknown> {
+  // Use the RPC endpoint for direct balance queries
+  const body = {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'eth_getBalance',
+    params: [addr, 'latest'],
   };
+  const res = await fetch(HYPURRSCAN_RPC, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'WhaleRadar/9.0' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!res.ok) throw new Error(`Hypurrscan RPC ${res.status}`);
+  return res.json();
 }
 
-// All mid prices { BTC: "104200.5", ETH: "2510.0", ... }
-async function fetchAllMids(): Promise<unknown> {
-  return hlPost({ type: 'allMids' });
+async function fetchLeaderboard(): Promise<unknown> {
+  const res = await fetch(`${HYPURRSCAN_API}/api/leaderboard`, {
+    headers: { 'Accept': 'application/json', 'User-Agent': 'WhaleRadar/9.0' },
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!res.ok) throw new Error(`Hypurrscan leaderboard ${res.status}`);
+  return res.json();
 }
 
-// Universe metadata only (asset names, limits, etc.)
-async function fetchMeta(): Promise<unknown> {
-  return hlPost({ type: 'meta' });
-}
+// ── Dispatch by type ──────────────────────────────────────────────────────────
 
-// Hourly funding history for one coin — startTime in ms (defaults to 24h ago)
-async function fetchFundingHistory(coin: string, startTime: number): Promise<unknown> {
-  return hlPost({ type: 'fundingHistory', coin, startTime });
-}
-
-// L2 order book snapshot for one coin
-async function fetchL2Book(coin: string): Promise<unknown> {
-  return hlPost({ type: 'l2Book', coin });
-}
-
-// Perpetual account state for one address
-async function fetchClearinghouse(address: string): Promise<unknown> {
-  return hlPost({ type: 'clearinghouseState', user: address });
-}
-
-// ── Dispatch ──────────────────────────────────────────────────────────────────
-
-async function fetchFresh(
-  type: CacheType,
-  coin?: string,
-  address?: string,
-  startTime?: number,
-): Promise<unknown> {
+async function fetchFresh(type: CacheType, addr?: string): Promise<unknown> {
   switch (type) {
-    case 'metaAndAssetCtxs': return fetchMetaAndAssetCtxs();
-    case 'allMids':          return fetchAllMids();
-    case 'meta':             return fetchMeta();
-    case 'fundingHistory':   return fetchFundingHistory(coin!, startTime ?? Date.now() - 86_400_000);
-    case 'l2Book':           return fetchL2Book(coin!);
-    case 'clearinghouse':    return fetchClearinghouse(address!);
-    default: throw new Error(`Unknown cache type: ${type}`);
+    case 'blocks':      return fetchBlocks();
+    case 'txs':         return fetchRecentTxs();
+    case 'address':     return fetchAddress(addr!);
+    case 'balance':     return fetchBalance(addr!);
+    case 'leaderboard': return fetchLeaderboard();
+    default:            throw new Error(`Unknown cache type: ${type}`);
   }
 }
 
-function cacheKey(type: CacheType, coin?: string, address?: string): string {
-  if (coin)    return `${type}:${coin.toUpperCase()}`;
-  if (address) return `${type}:${address.toLowerCase()}`;
-  return type;
+function cacheKey(type: CacheType, addr?: string): string {
+  return addr ? `${type}:${addr.toLowerCase()}` : type;
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 serve(async (req: Request) => {
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') return optionsResponse();
-  if (req.method !== 'GET')    return errorResponse('Method not allowed', 405);
+  if (req.method !== 'GET') return errorResponse('Method not allowed', 405);
 
-  const url       = new URL(req.url);
-  const type      = url.searchParams.get('type') as CacheType | null;
-  const coin      = url.searchParams.get('coin')      ?? undefined;
-  const address   = url.searchParams.get('address')   ?? undefined;
-  const startTime = url.searchParams.get('startTime') ? parseInt(url.searchParams.get('startTime')!, 10) : undefined;
-  const debug     = url.searchParams.get('debug') === '1';
+  const url = new URL(req.url);
+  const type = url.searchParams.get('type') as CacheType | null;
+  const addr = url.searchParams.get('address') ?? undefined;
+  const debug = url.searchParams.get('debug') === '1';
 
-  // Default to the main dashboard endpoint if no type supplied
-  const resolvedType: CacheType = (type && TTL_MAP[type]) ? type : 'metaAndAssetCtxs';
-
-  if (type && !TTL_MAP[type]) {
+  if (!type || !TTL_MAP[type]) {
     return errorResponse(
-      `Invalid ?type=. Valid: ${Object.keys(TTL_MAP).join(', ')}`,
+      `Missing or invalid ?type=. Valid: ${Object.keys(TTL_MAP).join(', ')}`,
       400,
     );
   }
-
-  if ((resolvedType === 'fundingHistory' || resolvedType === 'l2Book') && !coin) {
-    return errorResponse('?coin= required for this type (e.g. ?coin=BTC)', 400);
+  if ((type === 'address' || type === 'balance') && !addr) {
+    return errorResponse('?address= required for this type', 400);
   }
 
-  if (resolvedType === 'clearinghouse' && !address) {
-    return errorResponse('?address= required for clearinghouse type', 400);
-  }
-
-  const key = cacheKey(resolvedType, coin, address);
-  const ttl = TTL_MAP[resolvedType];
+  const key = cacheKey(type, addr);
+  const ttl = TTL_MAP[type];
   const now = Date.now();
 
   // ── 1. Try cache ────────────────────────────────────────────────────────────
-
   const cached = await readCache(key);
-
   if (cached && cached.age_ms < ttl) {
+    // Fresh cache hit — return immediately
     const extraHeaders: Record<string, string> = {
-      'X-Cache':     'HIT',
+      'X-Cache': 'HIT',
       'X-Cache-Age': String(cached.age_ms),
       'X-Cache-TTL': String(ttl),
     };
     if (debug) extraHeaders['X-Cache-Key'] = key;
+
+    // Kick off stale purge in background
     purgeStaleRows();
+
     return jsonResponse(
       { data: cached.payload, cached: true, age_ms: cached.age_ms, ts: now },
       200,
@@ -280,20 +225,21 @@ serve(async (req: Request) => {
     );
   }
 
-  // ── Stale-while-revalidate (within 3× TTL) ──────────────────────────────────
-
+  // Stale-while-revalidate: if within 3× TTL, return stale + revalidate async
   const staleWindow = ttl * 3;
   if (cached && cached.age_ms < staleWindow) {
+    // Return stale immediately, revalidate in the background
     (async () => {
       try {
         const rl = await checkRateLimit();
         if (!rl.allowed) return;
-        const fresh = await fetchFresh(resolvedType, coin, address, startTime);
+        const fresh = await fetchFresh(type, addr);
         await writeCache(key, fresh, ttl);
       } catch (e) {
         console.error('[HLCache] Background revalidation failed:', e);
       }
     })();
+
     return jsonResponse(
       { data: cached.payload, cached: true, stale: true, age_ms: cached.age_ms, ts: now },
       200,
@@ -301,10 +247,10 @@ serve(async (req: Request) => {
     );
   }
 
-  // ── 2. Rate limit check ─────────────────────────────────────────────────────
-
+  // ── 2. Check rate limit before making fresh request ─────────────────────────
   const rl = await checkRateLimit();
   if (!rl.allowed) {
+    // Rate limited — return stale if we have anything at all
     if (cached) {
       return jsonResponse(
         { data: cached.payload, cached: true, rateLimited: true, age_ms: cached.age_ms, ts: now },
@@ -315,29 +261,29 @@ serve(async (req: Request) => {
     return errorResponse('Rate limited (200/min) and no cached data', 429);
   }
 
-  // ── 3. Fresh fetch from Hyperliquid trading API ─────────────────────────────
-
+  // ── 3. Fresh fetch from Hypurrscan ──────────────────────────────────────────
   try {
     const fetchStart = Date.now();
-    const freshData  = await fetchFresh(resolvedType, coin, address, startTime);
-    const fetchMs    = Date.now() - fetchStart;
+    const freshData = await fetchFresh(type, addr);
+    const fetchMs = Date.now() - fetchStart;
 
-    writeCache(key, freshData, ttl).catch((e) =>
-      console.error('[HLCache] writeCache failed:', e),
-    );
+    // Write to cache (non-blocking path: fire and continue)
+    writeCache(key, freshData, ttl).catch((e) => console.error('[HLCache] writeCache failed:', e));
     purgeStaleRows();
 
     return jsonResponse(
       { data: freshData, cached: false, fetch_ms: fetchMs, ts: now },
       200,
       {
-        'X-Cache':               'MISS',
-        'X-Fetch-Ms':            String(fetchMs),
+        'X-Cache': 'MISS',
+        'X-Fetch-Ms': String(fetchMs),
         'X-RateLimit-Remaining': String(rl.remaining),
       },
     );
   } catch (err) {
     console.error('[HLCache] Fetch failed:', err);
+
+    // Any stale fallback is better than nothing
     if (cached) {
       return jsonResponse(
         { data: cached.payload, cached: true, stale: true, error: (err as Error).message, age_ms: cached.age_ms, ts: now },
@@ -345,6 +291,7 @@ serve(async (req: Request) => {
         { 'X-Cache': 'ERROR-FALLBACK' },
       );
     }
+
     return errorResponse(`Upstream fetch failed: ${(err as Error).message}`, 502);
   }
 });

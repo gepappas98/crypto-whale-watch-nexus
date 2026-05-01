@@ -82,9 +82,7 @@ const RiskBadge: React.FC<{ level: string; score: number }> = ({ level, score })
 };
 
 // Flag Badge Component
-type FlagKey = keyof InsiderRiskData['flags'];
-
-const FlagBadge: React.FC<{ type: FlagKey | string; active: boolean; details?: string }> = ({ 
+const FlagBadge: React.FC<{ type: string; active: boolean; details?: string }> = ({ 
   type, active, details 
 }) => {
   if (!active) return null;

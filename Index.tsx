@@ -27,6 +27,7 @@ import { fillSignalPrices } from '@/lib/signalStore';
 import { fetchBirdeyeToken } from '@/lib/birdeye';
 import { fetchDexData } from '@/lib/dexscreener';
 import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
+import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
 import { startPerfMonitoring } from '@/lib/perfBudget';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
@@ -242,7 +243,6 @@ async function fetchHeliusFallback(address: string, symbol: string, heliusKey: s
 // Fallback 3: CoinMarketCap (free basic data)
 async function fetchCMCFallback(symbol: string): Promise<any> {
   try {
-    const {
     const res = await fetch(
       `https://api.coinmarketcap.com/data-api/v3/cryptocurrency/detail?slug=${symbol.toLowerCase()}`,
       { signal: AbortSignal.timeout(10000) }
@@ -388,58 +388,15 @@ async function fetchHoldersViaRPC(tokenAddress: string): Promise<any[]> {
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function getCeoSignalLabel(
-  score: number,
-  threat: string,
-  category: string,
-  vmcap: number,
-  change24h: number = 0,
-  volume: number = 0,
-  mcap: number = 1
-): string {
+function getCeoSignalLabel(score: number, threat: string, category: string, vmcap: number): string {
   const t = threat.toUpperCase();
   const cat = (category || '').toUpperCase();
-  const volRatio = vmcap;
-  const isStrongBull = change24h > 12;
-  const isBearish = change24h < -10;
-
-  // EXTREME DANGER
-  if (score >= 88 || t === 'CRITICAL' || cat.includes('WASH') || cat.includes('RUG') || cat.includes('DUMP')) {
-    return '🚨 AVOID / STRONG SHORT';
-  }
-
-  if (t === 'HIGH' && (cat.includes('DISTRIBUTION') || volRatio > 700)) {
-    return '⚠️ HIGH RISK - POTENTIAL DUMP';
-  }
-
-  // STRONG BULLISH
-  if (score >= 80 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || cat.includes('ACCUMULATION'))) {
-    return isStrongBull || volRatio > 350 ? '🔥 ULTRA AGGRESSIVE LONG' : '🚀 AGGRESSIVE LONG';
-  }
-
-  if (score >= 72 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
-    return '🚀 AGGRESSIVE LONG';
-  }
-
-  // MODERATE LONG SIGNALS
-  if (score >= 58) {
-    if (volRatio > 400 || isStrongBull) return '🟢 LONG (tight stop)';
-    return '🟢 LONG';
-  }
-
-  if (score >= 48) {
-    return volRatio > 280 ? 'LONG (monitor closely)' : 'LONG / SWING';
-  }
-
-  if (score >= 35) {
-    return isBearish && volRatio > 180 ? 'WATCH - BEARISH PRESSURE' : 'WATCH';
-  }
-
-  if (t === 'MEDIUM' || volRatio > 550) {
-    return 'HOLD / CAUTION';
-  }
-
-  return 'NEUTRAL - HOLD';
+  if (score >= 88 || vmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) return 'AVOID / SHORT';
+  if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE')))         return 'AGGRESSIVE LONG';
+  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) return 'LONG (tight stop)';
+  if (score >= 45) return 'LONG';
+  if (score >= 35) return 'WATCH';
+  return 'HOLD';
 }
 
 export default function WhaleRadarApp() {
@@ -1138,7 +1095,11 @@ export default function WhaleRadarApp() {
       
       <div className="flex-1 min-h-0">
         {activeTab === 'scanner' ? (
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] h-full min-h-0">
+          <div className="space-y-4 p-4 overflow-y-auto">
+            {/* CRYSTAL BALL PRO - ADDED HERE */}
+            <WRCrystalBallPro />
+            
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] h-full min-h-0">
             <WRScanner
               coins={filteredCoins}
               scanBadge={scanBadge}
@@ -1183,6 +1144,7 @@ export default function WhaleRadarApp() {
               whaleFeedEx={whaleFeedEx}
               onWhaleFeedExChange={setWhaleFeedEx}
             />
+            </div>
           </div>
         ) : (
           <WRInsiderRiskScanner
