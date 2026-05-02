@@ -15,18 +15,36 @@ declare global {
   }
 }
 
-export function registerServiceWorker(): void {
+export async function registerServiceWorker(): Promise<void> {
   if (!('serviceWorker' in navigator)) return;
 
-  // In dev, actively unregister any previously installed SW + clear caches.
-  // The SW had been caching stale React chunks → "Cannot read 'useState' of null".
-  if (import.meta.env.DEV) {
-    navigator.serviceWorker.getRegistrations().then((regs) => {
-      regs.forEach((r) => r.unregister());
-    }).catch(() => {});
-    if ('caches' in window) {
-      caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
+  const isInIframe = (() => {
+    try {
+      return window.self !== window.top;
+    } catch {
+      return true;
     }
+  })();
+
+  const isLovablePreview =
+    window.location.hostname.includes('lovableproject.com') ||
+    window.location.hostname.includes('lovable.app') ||
+    window.location.hostname.includes('id-preview--');
+
+  const unregisterAndClear = async () => {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+  };
+
+  // Lovable previews run inside iframes and must never keep SW-controlled Vite chunks.
+  // Mixed cached React chunks cause invalid hook calls before the app can render.
+  if (import.meta.env.DEV || isInIframe || isLovablePreview) {
+    await unregisterAndClear().catch(() => {});
     return;
   }
 
