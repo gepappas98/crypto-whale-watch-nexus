@@ -11,6 +11,7 @@ import NexusArbitrage from "./pages/nexus/NexusArbitrage";
 import NexusGridStudio from "./pages/nexus/NexusGridStudio";
 import NexusVolumeMaker from "./pages/nexus/NexusVolumeMaker";
 import NexusPortfolio from "./pages/nexus/NexusPortfolio";
+import NexusCrystalBall from "./pages/nexus/NexusCrystalBall";
 import { Navigate } from "react-router-dom";
 
 const queryClient = new QueryClient({
@@ -40,6 +41,7 @@ const App = () => (
             <Route path="grid" element={<NexusGridStudio />} />
             <Route path="volume" element={<NexusVolumeMaker />} />
             <Route path="portfolio" element={<NexusPortfolio />} />
+            <Route path="crystal-ball" element={<NexusCrystalBall />} />
           </Route>
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
