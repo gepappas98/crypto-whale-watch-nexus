@@ -4,11 +4,14 @@ import App from './App';
 import { registerServiceWorker } from './lib/pwa';
 import './index.css';
 
-// Register PWA service worker
-registerServiceWorker();
+async function bootstrap() {
+  await registerServiceWorker();
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  );
+}
+
+void bootstrap();
