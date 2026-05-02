@@ -437,6 +437,26 @@ const formatLargeNumber = (num: number | null | undefined): string => {
 
 const createProxyUrl = (url: string): string => `https://corsproxy.io/?${encodeURIComponent(url)}`;
 
+// Try direct fetch first (CoinGecko & Binance public endpoints support CORS),
+// fall back to a CORS proxy if the direct request fails (network/CORS error).
+const fetchWithFallback = async (url: string, signal: AbortSignal, timeoutMs: number): Promise<Response> => {
+  const withTimeout = (target: string) => {
+    const ctrl = new AbortController();
+    const onAbort = () => ctrl.abort();
+    signal.addEventListener("abort", onAbort);
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    return fetch(target, { signal: ctrl.signal })
+      .finally(() => { clearTimeout(timer); signal.removeEventListener("abort", onAbort); });
+  };
+  try {
+    const direct = await withTimeout(url);
+    if (direct.ok || (direct.status >= 400 && direct.status < 500)) return direct;
+    throw new Error(`upstream ${direct.status}`);
+  } catch {
+    return withTimeout(createProxyUrl(url));
+  }
+};
+
 // ==================== AI FORECAST WITH STOP-LOSS & PROBABILITY ====================
 const generateAIForecast = (data: {
   signal: string;
