@@ -437,6 +437,26 @@ const formatLargeNumber = (num: number | null | undefined): string => {
 
 const createProxyUrl = (url: string): string => `https://corsproxy.io/?${encodeURIComponent(url)}`;
 
+// Try direct fetch first (CoinGecko & Binance public endpoints support CORS),
+// fall back to a CORS proxy if the direct request fails (network/CORS error).
+const fetchWithFallback = async (url: string, signal: AbortSignal, timeoutMs: number): Promise<Response> => {
+  const withTimeout = (target: string) => {
+    const ctrl = new AbortController();
+    const onAbort = () => ctrl.abort();
+    signal.addEventListener("abort", onAbort);
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    return fetch(target, { signal: ctrl.signal })
+      .finally(() => { clearTimeout(timer); signal.removeEventListener("abort", onAbort); });
+  };
+  try {
+    const direct = await withTimeout(url);
+    if (direct.ok || (direct.status >= 400 && direct.status < 500)) return direct;
+    throw new Error(`upstream ${direct.status}`);
+  } catch {
+    return withTimeout(createProxyUrl(url));
+  }
+};
+
 // ==================== AI FORECAST WITH STOP-LOSS & PROBABILITY ====================
 const generateAIForecast = (data: {
   signal: string;
@@ -533,9 +553,8 @@ export default function WRCrystalBallPro() {
 
     try {
       const coinGeckoUrl = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${selectedCoin.id}&price_change_percentage=24h,7d`;
-      const proxyCoinGecko = createProxyUrl(coinGeckoUrl);
 
-      const coinGeckoRes = await fetchWithTimeout(proxyCoinGecko, 15000, signal);
+      const coinGeckoRes = await fetchWithFallback(coinGeckoUrl, signal, 15000);
       if (!coinGeckoRes.ok) throw new Error(coinGeckoRes.status === 429 ? "Rate limit exceeded. Wait 30s." : `CoinGecko error: ${coinGeckoRes.status}`);
 
       const json = await coinGeckoRes.json();
@@ -554,9 +573,8 @@ export default function WRCrystalBallPro() {
 
       const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
       const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${timeframe.binanceInterval}&limit=500`;
-      const proxyBinance = createProxyUrl(binanceUrl);
 
-      const klinesRes = await fetchWithTimeout(proxyBinance, 12000, signal);
+      const klinesRes = await fetchWithFallback(binanceUrl, signal, 12000);
 
       let signalValue = "NEUTRAL";
       let confidence = 45;
