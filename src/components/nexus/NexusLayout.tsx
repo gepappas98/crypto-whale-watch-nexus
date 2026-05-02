@@ -1,5 +1,5 @@
 import { NavLink, Outlet, Link } from "react-router-dom";
-import { Activity, BarChart3, Grid3X3, Volume2, Wallet, Waves, ArrowLeft } from "lucide-react";
+import { Activity, BarChart3, Grid3X3, Volume2, Wallet, Waves, ArrowLeft, Brain } from "lucide-react";
 import { useNexusBot } from "@/hooks/useNexusBot";
 import { useNexusMarkets } from "@/hooks/useNexusMarkets";
 
@@ -9,6 +9,7 @@ const NAV = [
   { to: "/nexus/grid", icon: Grid3X3, label: "Grid Studio" },
   { to: "/nexus/volume", icon: Volume2, label: "Volume Maker" },
   { to: "/nexus/portfolio", icon: Wallet, label: "Portfolio" },
+  { to: "/nexus/crystal-ball", icon: Brain, label: "Crystal Ball" },
 ];
 
 export default function NexusLayout() {
