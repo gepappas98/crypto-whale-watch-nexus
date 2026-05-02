@@ -171,7 +171,7 @@ const COIN_LIST = [
   { symbol: "PIXEL", id: "pixels", name: "Pixels" },
   { symbol: "BEAM", id: "beam", name: "Beam" },
   { symbol: "AKT", id: "akash-network", name: "Akash Network" },
-  { symbol: "RENDER", id: "render-token", name: "Render" },
+  
   { symbol: "PUMP", id: "pump-fun", name: "Pump.fun" },
   { symbol: "VANA", id: "vana", name: "Vana" },
   { symbol: "PI", id: "pi-network", name: "Pi Network" },
