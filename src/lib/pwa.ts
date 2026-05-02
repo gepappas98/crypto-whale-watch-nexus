@@ -16,42 +16,51 @@ declare global {
 }
 
 export function registerServiceWorker(): void {
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', async () => {
-      try {
-        const registration = await navigator.serviceWorker.register('/sw.js', {
-          scope: '/',
-          updateViaCache: 'imports'
-        });
+  if (!('serviceWorker' in navigator)) return;
 
-        console.log('[PWA] SW registered:', registration.scope);
+  // In dev, actively unregister any previously installed SW + clear caches.
+  // The SW had been caching stale React chunks → "Cannot read 'useState' of null".
+  if (import.meta.env.DEV) {
+    navigator.serviceWorker.getRegistrations().then((regs) => {
+      regs.forEach((r) => r.unregister());
+    }).catch(() => {});
+    if ('caches' in window) {
+      caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
+    }
+    return;
+  }
 
-        // Handle updates
-        registration.addEventListener('updatefound', () => {
-          const newWorker = registration.installing;
-          if (!newWorker) return;
+  window.addEventListener('load', async () => {
+    try {
+      const registration = await navigator.serviceWorker.register('/sw.js', {
+        scope: '/',
+        updateViaCache: 'imports'
+      });
 
-          newWorker.addEventListener('statechange', () => {
-            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              // New version available
-              console.log('[PWA] New version available');
-              window.dispatchEvent(new CustomEvent('sw-update-available'));
-            }
-          });
-        });
+      console.log('[PWA] SW registered:', registration.scope);
 
-        // Listen for messages from SW
-        navigator.serviceWorker.addEventListener('message', (event) => {
-          if (event.data?.type === 'NOTIFICATION_CLICK') {
-            console.log('[PWA] Notification clicked:', event.data.payload);
+      registration.addEventListener('updatefound', () => {
+        const newWorker = registration.installing;
+        if (!newWorker) return;
+
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            console.log('[PWA] New version available');
+            window.dispatchEvent(new CustomEvent('sw-update-available'));
           }
         });
+      });
 
-      } catch (error) {
-        console.error('[PWA] SW registration failed:', error);
-      }
-    });
-  }
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data?.type === 'NOTIFICATION_CLICK') {
+          console.log('[PWA] Notification clicked:', event.data.payload);
+        }
+      });
+
+    } catch (error) {
+      console.error('[PWA] SW registration failed:', error);
+    }
+  });
 }
 
 // Request notification permission
