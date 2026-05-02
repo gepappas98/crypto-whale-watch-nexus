@@ -553,9 +553,8 @@ export default function WRCrystalBallPro() {
 
     try {
       const coinGeckoUrl = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${selectedCoin.id}&price_change_percentage=24h,7d`;
-      const proxyCoinGecko = createProxyUrl(coinGeckoUrl);
 
-      const coinGeckoRes = await fetchWithTimeout(proxyCoinGecko, 15000, signal);
+      const coinGeckoRes = await fetchWithFallback(coinGeckoUrl, signal, 15000);
       if (!coinGeckoRes.ok) throw new Error(coinGeckoRes.status === 429 ? "Rate limit exceeded. Wait 30s." : `CoinGecko error: ${coinGeckoRes.status}`);
 
       const json = await coinGeckoRes.json();
@@ -574,9 +573,8 @@ export default function WRCrystalBallPro() {
 
       const binancePair = `${selectedCoin.symbol.toUpperCase()}USDT`;
       const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${binancePair}&interval=${timeframe.binanceInterval}&limit=500`;
-      const proxyBinance = createProxyUrl(binanceUrl);
 
-      const klinesRes = await fetchWithTimeout(proxyBinance, 12000, signal);
+      const klinesRes = await fetchWithFallback(binanceUrl, signal, 12000);
 
       let signalValue = "NEUTRAL";
       let confidence = 45;
