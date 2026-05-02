@@ -8,10 +8,10 @@ import { InsiderRiskData, TransferEvent, TokenHolder } from '@/types/insiderRisk
 export function calculateRiskScore(data: Partial<InsiderRiskData>): {
   score: number;
   level: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-  flags: Record<string, boolean>;
+  flags: InsiderRiskData['flags'];
 } {
   let score = 0;
-  const flags: Record<string, boolean> = {
+  const flags: InsiderRiskData['flags'] = {
     lowCirculating: false,
     extremeTeamControl: false,
     highConcentration: false,

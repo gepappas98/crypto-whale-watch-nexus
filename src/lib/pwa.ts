@@ -73,9 +73,14 @@ export async function subscribeToPush(publicKey: string): Promise<PushSubscripti
 
   try {
     const registration = await navigator.serviceWorker.ready;
+    const keyBytes = urlBase64ToUint8Array(publicKey);
+    // Copy into a fresh ArrayBuffer-backed view to satisfy BufferSource typing
+    // (some lib.dom builds reject Uint8Array<ArrayBufferLike>).
+    const appServerKey = new Uint8Array(keyBytes.byteLength);
+    appServerKey.set(keyBytes);
     const subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey)
+      applicationServerKey: appServerKey.buffer,
     });
 
     return subscription;
@@ -87,13 +92,17 @@ export async function subscribeToPush(publicKey: string): Promise<PushSubscripti
 
 // Background sync for offline alerts
 export async function triggerBackgroundSync(tag: string = 'whale-sync'): Promise<void> {
-  if (!('serviceWorker' in navigator) || !('sync' in registration)) {
+  if (!('serviceWorker' in navigator)) {
     console.log('[PWA] Background sync not supported');
     return;
   }
 
   const registration = await navigator.serviceWorker.ready;
-  
+  if (!('sync' in registration)) {
+    console.log('[PWA] Background sync not supported');
+    return;
+  }
+
   try {
     await (registration as any).sync.register(tag);
     console.log('[PWA] Background sync registered:', tag);
