@@ -27,6 +27,7 @@ import { fillSignalPrices } from '@/lib/signalStore';
 import { fetchBirdeyeToken } from '@/lib/birdeye';
 import { fetchDexData } from '@/lib/dexscreener';
 import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
+import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
 import { startPerfMonitoring } from '@/lib/perfBudget';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
@@ -707,6 +708,8 @@ export default function WhaleRadarApp() {
       />
 
       <WRTracker tracked={tracked} onUntrack={untrackToken} />
+
+      <WRCrystalBallPro />
 
       {kbdOpen && <WRKeyboardHelp onClose={() => setKbdOpen(false)} />}
 
