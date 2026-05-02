@@ -44,8 +44,9 @@ export default defineConfig(({ mode }) => {
         },
 
         devOptions: {
-          // Enable in dev so you can debug the SW without a production build
-          enabled: true,
+          // Disabled in dev — the SW was caching stale React chunks and
+          // causing "Cannot read properties of null (reading 'useState')".
+          enabled: false,
           type: "module",
         },
       }),
