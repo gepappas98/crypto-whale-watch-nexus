@@ -60,7 +60,7 @@ interface PriceSnapshot {
 const symbols = ["BTC", "ETH", "SOL"];
 
 /* ═══════════════════════════════════════════════════════════════
-   FETCH FUNCTIONS
+   DIRECT BROWSER FETCH FUNCTIONS — NO PROXIES
    ═══════════════════════════════════════════════════════════════ */
 
 /**
@@ -81,15 +81,14 @@ const fetchHyperliquidMids = async (): Promise<Record<string, string>> => {
 };
 
 /**
- * Coinbase Simple Spot Price — no auth, no CORS
+ * Coinbase — DIRECT browser fetch (CORS enabled, no auth)
  * Returns: { "data": { "base": "BTC", "currency": "USD", "amount": "65234.50" } }
  */
 const fetchCoinbasePrice = async (symbol: string): Promise<number> => {
-  const res = await fetch(`/api/proxy/coinbase?symbol=${symbol}-USD`);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Coinbase proxy ${res.status}`);
-  }
+  const res = await fetch(
+    `https://api.coinbase.com/v2/prices/${symbol}-USD/spot`
+  );
+  if (!res.ok) throw new Error(`Coinbase HTTP ${res.status}`);
   const data = await res.json();
   const price = parseFloat(data.data?.amount || data.amount || "0");
   if (isNaN(price) || price <= 0) throw new Error("Coinbase invalid price");
@@ -97,15 +96,14 @@ const fetchCoinbasePrice = async (symbol: string): Promise<number> => {
 };
 
 /**
- * CryptoCompare — aggregates 200+ exchanges, free tier
+ * CryptoCompare — DIRECT browser fetch (CORS enabled, no auth)
  * Returns: { "USD": 65234.50 }
  */
 const fetchCryptoComparePrice = async (symbol: string): Promise<number> => {
-  const res = await fetch(`/api/proxy/cryptocompare?fsym=${symbol}&tsyms=USD`);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `CC proxy ${res.status}`);
-  }
+  const res = await fetch(
+    `https://min-api.cryptocompare.com/data/price?fsym=${symbol}&tsyms=USD`
+  );
+  if (!res.ok) throw new Error(`CC HTTP ${res.status}`);
   const data = await res.json();
   const price = parseFloat(data.USD || data.usd || "0");
   if (isNaN(price) || price <= 0) throw new Error("CC invalid price");
@@ -131,7 +129,7 @@ export default function NexusArbitrage() {
     refetch,
     isRefetching,
   } = useQuery({
-    queryKey: ["nexus-arbitrage-v2"],
+    queryKey: ["nexus-arbitrage-direct"],
     queryFn: async (): Promise<Opportunity[]> => {
       const results: Opportunity[] = [];
       let hlMids: Record<string, string> = {};
@@ -164,7 +162,7 @@ export default function NexusArbitrage() {
           snapshot.hl = isNaN(p) || p <= 0 ? null : p;
         }
 
-        /* ── Coinbase ── */
+        /* ── Coinbase (DIRECT) ── */
         const cbStart = performance.now();
         try {
           snapshot.cb = await fetchCoinbasePrice(sym);
@@ -186,7 +184,7 @@ export default function NexusArbitrage() {
           console.error("[Nexus] Coinbase failed:", e);
         }
 
-        /* ── CryptoCompare (aggregated) ── */
+        /* ── CryptoCompare (DIRECT) ── */
         const ccStart = performance.now();
         try {
           snapshot.cc = await fetchCryptoComparePrice(sym);
@@ -291,7 +289,7 @@ export default function NexusArbitrage() {
               ARBITRAGE COMMAND CENTER
             </h1>
             <p className="text-xs text-muted-foreground">
-              HL ↔ Coinbase ↔ CryptoCompare • Real prices • Every 5s
+              HL ↔ Coinbase ↔ CryptoCompare • Direct fetch • Every 5s
             </p>
           </div>
         </div>
@@ -526,7 +524,10 @@ export default function NexusArbitrage() {
                   }}
                   itemStyle={{ color: "#22c55e" }}
                   labelStyle={{ color: "#666" }}
-                  formatter={(value: number) => [`${value.toFixed(3)}%`, "Spread"]}
+                  formatter={(value: number) => [
+                    `${value.toFixed(3)}%`,
+                    "Spread",
+                  ]}
                 />
                 <Line
                   type="monotone"
