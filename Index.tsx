@@ -36,7 +36,8 @@ import type { InsiderRiskSettings } from '@/types/insiderRisk';
 import { DEFAULT_CEX_ADDRESSES } from '@/types/insiderRisk';
 import { calculateRiskScore, fetchEtherscanTokenHolders, fetchEtherscanTransfers } from '@/lib/insiderRiskUtils';
 import type { InsiderRiskData } from '@/types/insiderRisk';
-
+import ArbitrageCommandCenter from '@/components/ArbitrageCommandCenter';
+// Then render <ArbitrageCommandCenter />
 // ═══════════════════════════════════════════════════════════════════════════════
 // FALLBACK API CONFIGURATION - FREE TIER ENDPOINTS
 // ═══════════════════════════════════════════════════════════════════════════════
