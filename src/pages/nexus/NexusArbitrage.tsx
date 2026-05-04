@@ -7,6 +7,7 @@ import {
   Activity,
   TrendingUp,
   TrendingDown,
+  Zap,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -39,7 +40,7 @@ interface Opportunity {
   confidence: number;
   hlPrice: number | null;
   cbPrice: number | null;
-  bpPrice: number | null;
+  ccPrice: number | null;
   exchanges: string[];
 }
 
@@ -53,7 +54,7 @@ interface ExchangeHealth {
 interface PriceSnapshot {
   hl: number | null;
   cb: number | null;
-  bp: number | null;
+  cc: number | null;
 }
 
 const symbols = ["BTC", "ETH", "SOL"];
@@ -64,7 +65,6 @@ const symbols = ["BTC", "ETH", "SOL"];
 
 /**
  * Hyperliquid — direct browser fetch (CORS enabled)
- * Returns: { "BTC": "65000.5", "ETH": "3450.2", ... }
  */
 const fetchHyperliquidMids = async (): Promise<Record<string, string>> => {
   const res = await fetch("https://api.hyperliquid.xyz/info", {
@@ -81,53 +81,35 @@ const fetchHyperliquidMids = async (): Promise<Record<string, string>> => {
 };
 
 /**
- * Coinbase — proxied through Next.js API (bypasses CORS)
- * Endpoint: /api/proxy/coinbase?symbol=BTC-USD
- * Returns: { trade_id, price, size, time, bid, ask, volume }
+ * Coinbase Simple Spot Price — no auth, no CORS
+ * Returns: { "data": { "base": "BTC", "currency": "USD", "amount": "65234.50" } }
  */
 const fetchCoinbasePrice = async (symbol: string): Promise<number> => {
-  const productId = `${symbol}-USD`;
-  const res = await fetch(`/api/proxy/coinbase?symbol=${productId}`);
+  const res = await fetch(`/api/proxy/coinbase?symbol=${symbol}-USD`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Coinbase proxy ${res.status}`);
   }
   const data = await res.json();
-  const price = parseFloat(data.price);
+  const price = parseFloat(data.data?.amount || data.amount || "0");
   if (isNaN(price) || price <= 0) throw new Error("Coinbase invalid price");
   return price;
 };
 
 /**
- * Backpack — proxied through Next.js API (bypasses CORS)
- * Tries perp first, then spot fallback
+ * CryptoCompare — aggregates 200+ exchanges, free tier
+ * Returns: { "USD": 65234.50 }
  */
-const fetchBackpackPrice = async (symbol: string): Promise<number> => {
-  const variants = [`${symbol}_USDC_PERP`, `${symbol}_USDC`];
-  let lastErr = "";
-
-  for (const bpSymbol of variants) {
-    try {
-      const res = await fetch(`/api/proxy/backpack?symbol=${bpSymbol}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        lastErr = err.error || `BP ${bpSymbol}: HTTP ${res.status}`;
-        continue;
-      }
-      const data = await res.json();
-      const price = parseFloat(
-        data.lastPrice || data.markPrice || data.price || "0"
-      );
-      if (isNaN(price) || price <= 0) {
-        lastErr = `BP ${bpSymbol}: invalid price`;
-        continue;
-      }
-      return price;
-    } catch (e) {
-      lastErr = `BP ${bpSymbol}: ${(e as Error).message}`;
-    }
+const fetchCryptoComparePrice = async (symbol: string): Promise<number> => {
+  const res = await fetch(`/api/proxy/cryptocompare?fsym=${symbol}&tsyms=USD`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `CC proxy ${res.status}`);
   }
-  throw new Error(lastErr || "Backpack all variants failed");
+  const data = await res.json();
+  const price = parseFloat(data.USD || data.usd || "0");
+  if (isNaN(price) || price <= 0) throw new Error("CC invalid price");
+  return price;
 };
 
 /* ═══════════════════════════════════════════════════════════════
@@ -139,7 +121,7 @@ export default function NexusArbitrage() {
   const [exchangeHealth, setExchangeHealth] = useState<ExchangeHealth[]>([
     { name: "Hyperliquid", status: "live" },
     { name: "Coinbase", status: "live" },
-    { name: "Backpack", status: "live" },
+    { name: "CryptoCompare", status: "live" },
   ]);
 
   const {
@@ -149,7 +131,7 @@ export default function NexusArbitrage() {
     refetch,
     isRefetching,
   } = useQuery({
-    queryKey: ["nexus-arbitrage"],
+    queryKey: ["nexus-arbitrage-v2"],
     queryFn: async (): Promise<Opportunity[]> => {
       const results: Opportunity[] = [];
       let hlMids: Record<string, string> = {};
@@ -174,7 +156,7 @@ export default function NexusArbitrage() {
       }
 
       for (const sym of symbols) {
-        const snapshot: PriceSnapshot = { hl: null, cb: null, bp: null };
+        const snapshot: PriceSnapshot = { hl: null, cb: null, cc: null };
 
         /* ── HL price from cached mids ── */
         if (hlMids[sym]) {
@@ -204,34 +186,33 @@ export default function NexusArbitrage() {
           console.error("[Nexus] Coinbase failed:", e);
         }
 
-        /* ── Backpack ── */
-        const bpStart = performance.now();
+        /* ── CryptoCompare (aggregated) ── */
+        const ccStart = performance.now();
         try {
-          snapshot.bp = await fetchBackpackPrice(sym);
-          if (!health.find((h) => h.name === "Backpack")) {
+          snapshot.cc = await fetchCryptoComparePrice(sym);
+          if (!health.find((h) => h.name === "CryptoCompare")) {
             health.push({
-              name: "Backpack",
+              name: "CryptoCompare",
               status: "live",
-              latency: Math.round(performance.now() - bpStart),
+              latency: Math.round(performance.now() - ccStart),
             });
           }
         } catch (e) {
-          if (!health.find((h) => h.name === "Backpack")) {
+          if (!health.find((h) => h.name === "CryptoCompare")) {
             health.push({
-              name: "Backpack",
+              name: "CryptoCompare",
               status: "dead",
               error: (e as Error).message,
             });
           }
-          console.error("[Nexus] Backpack failed:", e);
+          console.error("[Nexus] CryptoCompare failed:", e);
         }
 
         /* ── Spread calculation ── */
-        const validPrices = [snapshot.hl, snapshot.cb, snapshot.bp].filter(
+        const validPrices = [snapshot.hl, snapshot.cb, snapshot.cc].filter(
           (p): p is number => p !== null && p > 0
         );
 
-        // Need 2+ prices to calculate meaningful spread
         if (validPrices.length < 2) continue;
 
         const maxP = Math.max(...validPrices);
@@ -243,10 +224,9 @@ export default function NexusArbitrage() {
           const activeExchanges: string[] = [];
           if (snapshot.hl) activeExchanges.push("HL");
           if (snapshot.cb) activeExchanges.push("CB");
-          if (snapshot.bp) activeExchanges.push("BP");
+          if (snapshot.cc) activeExchanges.push("CC");
 
           const route = activeExchanges.join("↔");
-          // If HL is highest, short HL / long elsewhere. Otherwise long HL.
           const direction =
             snapshot.hl && snapshot.hl === maxP ? "SHORT" : "LONG";
 
@@ -261,9 +241,9 @@ export default function NexusArbitrage() {
             confidence: spread > 0.35 ? 88 : spread > 0.18 ? 72 : 60,
             hlPrice: snapshot.hl,
             cbPrice: snapshot.cb,
-            bpPrice: snapshot.bp,
-            exchanges: ["hyperliquid", "coinbase", "backpack"].filter(
-              (_, i) => [snapshot.hl, snapshot.cb, snapshot.bp][i] !== null
+            ccPrice: snapshot.cc,
+            exchanges: ["hyperliquid", "coinbase", "cryptocompare"].filter(
+              (_, i) => [snapshot.hl, snapshot.cb, snapshot.cc][i] !== null
             ),
           });
         }
@@ -280,7 +260,6 @@ export default function NexusArbitrage() {
   const selectedOpp =
     opportunities.find((o) => o.id === selected) ?? opportunities[0];
 
-  // Chart data only when we have a selected opportunity
   const chartData = selectedOpp
     ? Array.from({ length: 20 }, (_, i) => ({
         t: i,
@@ -299,30 +278,25 @@ export default function NexusArbitrage() {
 
   const deadExchanges = exchangeHealth.filter((e) => e.status === "dead");
 
-  /* ═══════════════════════════════════════════════════════════════
-     RENDER
-     ═══════════════════════════════════════════════════════════════ */
-
   return (
     <div className="space-y-6 p-4 max-w-7xl mx-auto">
       {/* ── HEADER ── */}
       <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-green-500/10 border border-green-500/20">
-            <BarChart3 className="w-6 h-6 text-green-400" />
+            <Zap className="w-6 h-6 text-green-400" />
           </div>
           <div>
             <h1 className="text-2xl font-bold font-mono tracking-tight">
               ARBITRAGE COMMAND CENTER
             </h1>
             <p className="text-xs text-muted-foreground">
-              HL ↔ Coinbase ↔ Backpack • Real prices • Every 5s
+              HL ↔ Coinbase ↔ CryptoCompare • Real prices • Every 5s
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Exchange Health Badges */}
           {exchangeHealth.map((ex) => (
             <Badge
               key={ex.name}
@@ -489,7 +463,7 @@ export default function NexusArbitrage() {
         </div>
       </Card>
 
-      {/* ── CHART: CONDITIONAL RENDER ── */}
+      {/* ── CHART ── */}
       {selectedOpp && (
         <Card className="bg-black/40 border-green-500/20 backdrop-blur">
           <div className="p-4 border-b border-border/50 flex items-center justify-between">
@@ -520,11 +494,11 @@ export default function NexusArbitrage() {
                   </span>
                 </span>
               )}
-              {selectedOpp.bpPrice && (
+              {selectedOpp.ccPrice && (
                 <span className="text-gray-400">
-                  BP:{" "}
+                  CC:{" "}
                   <span className="text-white">
-                    ${selectedOpp.bpPrice.toLocaleString(undefined, {
+                    ${selectedOpp.ccPrice.toLocaleString(undefined, {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
