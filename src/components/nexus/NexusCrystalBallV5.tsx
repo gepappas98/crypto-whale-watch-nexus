@@ -435,25 +435,40 @@ const formatLargeNumber = (num: number | null | undefined): string => {
   return `$${num.toLocaleString()}`;
 };
 
-const createProxyUrl = (url: string): string => `https://corsproxy.io/?${encodeURIComponent(url)}`;
+// Route all market-data requests through our server-side edge function.
+// This eliminates browser CORS issues and adds server-side caching + retries.
+const EDGE_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/market-data`;
+const EDGE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 
-// Try direct fetch first (CoinGecko & Binance public endpoints support CORS),
-// fall back to a CORS proxy if the direct request fails (network/CORS error).
 const fetchWithFallback = async (url: string, signal: AbortSignal, timeoutMs: number): Promise<Response> => {
-  const withTimeout = (target: string) => {
-    const ctrl = new AbortController();
-    const onAbort = () => ctrl.abort();
-    signal.addEventListener("abort", onAbort);
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    return fetch(target, { signal: ctrl.signal })
-      .finally(() => { clearTimeout(timer); signal.removeEventListener("abort", onAbort); });
-  };
+  // Translate the original direct URL into an edge-function call.
+  let edgeUrl = "";
   try {
-    const direct = await withTimeout(url);
-    if (direct.ok || (direct.status >= 400 && direct.status < 500)) return direct;
-    throw new Error(`upstream ${direct.status}`);
+    const u = new URL(url);
+    if (u.hostname.includes("coingecko")) {
+      const path = u.pathname.replace(/^\/api\/v3/, "");
+      edgeUrl = `${EDGE_BASE}?source=coingecko&path=${encodeURIComponent(path)}&qs=${encodeURIComponent(u.search.slice(1))}`;
+    } else if (u.hostname.includes("binance")) {
+      edgeUrl = `${EDGE_BASE}?source=binance&path=${encodeURIComponent(u.pathname)}&qs=${encodeURIComponent(u.search.slice(1))}`;
+    } else {
+      edgeUrl = url;
+    }
   } catch {
-    return withTimeout(createProxyUrl(url));
+    edgeUrl = url;
+  }
+
+  const ctrl = new AbortController();
+  const onAbort = () => ctrl.abort();
+  signal.addEventListener("abort", onAbort);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(edgeUrl, {
+      signal: ctrl.signal,
+      headers: EDGE_KEY ? { apikey: EDGE_KEY, Authorization: `Bearer ${EDGE_KEY}` } : {},
+    });
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", onAbort);
   }
 };
 
