@@ -2,11 +2,13 @@
  * Re-runs the same opportunity-detection engine used by HLOpportunityPanel,
  * but exposes results keyed by symbol so other panels (e.g. WRScanner) can
  * highlight rows that match an active perps opportunity.
+ * 
+ * FIX v1.1: Added null-safety for all market fields. Prevents render crash
+ * when API returns partial data.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 import { useMemo } from 'react';
 import { useHLMarkets } from '@/hooks/useHyperliquid';
-import type { HLSignal } from '@/components/hyperliquid/HLOpportunityPanel';
 
 const FUNDING_THRESHOLD = 0.0008;
 const EXTREME_FUNDING = 0.002;
@@ -19,6 +21,25 @@ const LIQ_CLUSTER_PCT = 0.015;
 
 const fmtPct = (n: number) => `${(n * 100).toFixed(3)}%`;
 
+// ── Safe type for opportunity signals (mirrors HLSignal without full import) ─
+export interface HLOppSignal {
+  symbol: string;
+  fundingRate: number;
+  premium: number;
+  openInterest: number;
+  dailyVolume: number;
+  markPrice: number;
+  indexPrice: number;
+  opportunityType: string;
+  level: 'critical' | 'high' | 'medium';
+  side: 'LONG' | 'SHORT' | 'NEUTRAL';
+  expectedEdge: string;
+  reason: string;
+  apyEstimate: number;
+  riskScore: number;
+  conviction: number;
+}
+
 interface UseHLOpportunitiesOpts {
   enabled?: boolean;
   minApy?: number;
@@ -26,11 +47,11 @@ interface UseHLOpportunitiesOpts {
 
 export interface UseHLOpportunitiesResult {
   /** Best (highest-conviction) signal per symbol, normalized UPPERCASE. */
-  bySymbol: Map<string, HLSignal>;
+  bySymbol: Map<string, HLOppSignal>;
   /** All signals (across all symbols / types). */
-  all: HLSignal[];
+  all: HLOppSignal[];
   /** Lookup helper — accepts any symbol casing. */
-  match: (symbol: string | undefined | null) => HLSignal | undefined;
+  match: (symbol: string | undefined | null) => HLOppSignal | undefined;
 }
 
 export function useHLOpportunities({
@@ -47,18 +68,23 @@ export function useHLOpportunities({
     };
     if (!enabled || !markets?.length) return empty;
 
-    const opps: HLSignal[] = [];
+    const opps: HLOppSignal[] = [];
 
     markets.forEach((m: any) => {
-      const fundingRate = m.fundingRate || 0;
-      const premium = m.premium || 0;
-      const oi = m.openInterest || 0;
-      const vol = m.dayVolume || 0;
-      const markPrice = m.markPrice || 0;
-      const indexPrice = m.indexPrice || m.oraclePrice || 0;
-      const symbol = m.symbol;
+      // ── Null-safety: skip malformed market data ────────────────────────
+      if (!m || typeof m !== 'object') return;
 
-      const push = (s: Partial<HLSignal> & Pick<HLSignal, 'opportunityType' | 'level' | 'side' | 'reason' | 'expectedEdge'>) => {
+      const fundingRate = typeof m.fundingRate === 'number' ? m.fundingRate : 0;
+      const premium = typeof m.premium === 'number' ? m.premium : 0;
+      const oi = typeof m.openInterest === 'number' ? m.openInterest : 0;
+      const vol = typeof m.dayVolume === 'number' ? m.dayVolume : 0;
+      const markPrice = typeof m.markPrice === 'number' ? m.markPrice : 0;
+      const indexPrice = typeof m.indexPrice === 'number' ? m.indexPrice : (typeof m.oraclePrice === 'number' ? m.oraclePrice : 0);
+      const symbol = typeof m.symbol === 'string' ? m.symbol : '';
+
+      if (!symbol) return;
+
+      const push = (s: Partial<HLOppSignal> & Pick<HLOppSignal, 'opportunityType' | 'level' | 'side' | 'expectedEdge' | 'reason'>) => {
         opps.push({
           symbol,
           fundingRate,
@@ -70,10 +96,8 @@ export function useHLOpportunities({
           apyEstimate: 0,
           riskScore: 50,
           conviction: 60,
-          timeFrame: '—',
-          leverageRec: '—',
           ...s,
-        } as HLSignal);
+        });
       };
 
       // 1. FUNDING ARB
@@ -184,7 +208,7 @@ export function useHLOpportunities({
     });
 
     // Best per symbol
-    const bySymbol = new Map<string, HLSignal>();
+    const bySymbol = new Map<string, HLOppSignal>();
     for (const s of opps) {
       const key = String(s.symbol).toUpperCase();
       const cur = bySymbol.get(key);
