@@ -334,18 +334,32 @@ export function WRScanner({
                                : 'text-wr-green-dim';
               const catCls     = c.category ? `wr-cat-${c.category.toLowerCase()}` : '';
               const aiRow      = aiRows[c.symbol];
+              const hlOpp      = hlOpps.match(c.symbol);
+              const hlMeta     = hlOpp ? HL_OPP_META[hlOpp.opportunityType] : null;
+              const hlRowGlow  = hlOpp?.level === 'critical' ? 'shadow-[inset_3px_0_0_0_hsl(var(--wr-amber))]' : '';
 
               return [
                 <tr
                   key={c.id}
-                  className={`${c.threat === 'CRITICAL' ? 'animate-flash-red' : c.threat === 'HIGH' ? 'animate-flash-amber' : ''} ${aiRow ? 'border-b-0' : ''}`}
+                  className={`${c.threat === 'CRITICAL' ? 'animate-flash-red' : c.threat === 'HIGH' ? 'animate-flash-amber' : ''} ${aiRow ? 'border-b-0' : ''} ${hlRowGlow}`}
                 >
                   <td className="text-wr-muted text-[8px]">{c.rank}</td>
                   <td>
-                    <div className="font-head text-[10px] text-wr-white tracking-widest">
-                      {c.symbol}
-                      {c.isSol   && <span className="text-wr-sol text-[7px] ml-0.5">◎</span>}
-                      {c.dexHot  && <span className="text-[7px] px-0.5 bg-wr-blue/10 border border-wr-blue/30 text-wr-blue ml-1">DEX</span>}
+                    <div className="font-head text-[10px] text-wr-white tracking-widest flex items-center flex-wrap gap-1">
+                      <span>{c.symbol}</span>
+                      {c.isSol   && <span className="text-wr-sol text-[7px]">◎</span>}
+                      {c.dexHot  && <span className="text-[7px] px-0.5 bg-wr-blue/10 border border-wr-blue/30 text-wr-blue">DEX</span>}
+                      {hlOpp && hlMeta && (
+                        <span
+                          className={`text-[7px] px-1 py-px border font-mono tracking-wider inline-flex items-center gap-0.5 ${hlMeta.cls}`}
+                          title={`HL ${hlMeta.title} · ${hlOpp.side} · ${hlOpp.expectedEdge}${hlOpp.apyEstimate ? ` · ~${hlOpp.apyEstimate.toFixed(0)}% APY` : ''} · conv ${hlOpp.conviction}%`}
+                        >
+                          HL·{hlMeta.label}
+                          {hlOpp.side !== 'NEUTRAL' && (
+                            <span className="opacity-80">{hlOpp.side === 'LONG' ? '↑' : '↓'}</span>
+                          )}
+                        </span>
+                      )}
                     </div>
                     <div className="text-[8px] text-wr-muted">{c.name}</div>
                   </td>
