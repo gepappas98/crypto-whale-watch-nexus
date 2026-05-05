@@ -1,11 +1,9 @@
 /* ══ WHALE RADAR — DETECTION ENGINE v1.1 ══════════════════════════════════════
- *  FIX: Added vmcap sanity upper bound (<=10000) to prevent false WASH flags
- *       on garbage API data (e.g. mcap=$1 causing 5 billion % ratios).
+ *  FIX: Recalculated vmcap is now realistic (0-500% range), so thresholds
+ *       lowered from 800/1500 to 400/800 to match real-world manipulation.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 import type { BirdeyeData } from './whaleRadarState';
-
-// ── Types ────────────────────────────────────────────────────────────────────
 
 export interface WhaleScoreInput {
   vmcap: number;
@@ -75,14 +73,13 @@ export function whaleScore(input: WhaleScoreInput): WhaleScoreResult {
   let flagCount = 0;
   const absChg = Math.abs(chg24);
 
-  // ══ FIX: Only score vmcap if it's sane (<=10000). vmcap=0 means invalid data. ══
-  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
-
   // VOL/MCAP ratio — primary whale activity signal
-  if (safeVmcap >= 800)      { score += 40; reasons.push(`VOL/MCAP=${safeVmcap.toFixed(0)}% 🔴`); flagCount++; }
-  else if (safeVmcap >= 400) { score += 28; reasons.push(`VOL/MCAP=${safeVmcap.toFixed(0)}%`);     flagCount++; }
-  else if (safeVmcap >= 200) { score += 16; reasons.push(`VOL/MCAP=${safeVmcap.toFixed(0)}%`);     flagCount++; }
-  else if (safeVmcap >= 80)  { score += 6;                                                       flagCount++; }
+  // FIX: Lowered thresholds for realistic recalculated vmcap (0-500% range)
+  if (vmcap >= 400)      { score += 40; reasons.push(`VOL/MCAP=${vmcap.toFixed(0)}% 🔴`); flagCount++; }
+  else if (vmcap >= 200) { score += 28; reasons.push(`VOL/MCAP=${vmcap.toFixed(0)}%`);     flagCount++; }
+  else if (vmcap >= 100) { score += 16; reasons.push(`VOL/MCAP=${vmcap.toFixed(0)}%`);     flagCount++; }
+  else if (vmcap >= 40)  { score += 8;  reasons.push(`VOL/MCAP=${vmcap.toFixed(0)}%`);      flagCount++; }
+  else if (vmcap >= 15)  { score += 4; }
 
   // Price change magnitude
   if (absChg >= 50)      { score += 25; reasons.push(`ΔP=${chg24.toFixed(1)}% 🔴`); flagCount++; }
@@ -169,14 +166,12 @@ export function detectManipulation(input: ManipulationInput): ManipulationResult
   const absChg = Math.abs(chg24);
   const confidence = Math.min(Math.round((flagCount / 10) * 100), 100);
 
-  // ══ FIX: Add upper bound sanity check — vmcap > 10000 is garbage data ══
-  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
-
   // WASH TRADE: extreme vol relative to tiny mcap — coordinated circular trading
-  if (safeVmcap > 1500 && mcap < 500e6) {
+  // FIX: Lowered thresholds for realistic recalculated vmcap
+  if (vmcap > 800 && mcap < 500e6) {
     return { level: 'CRITICAL', pattern: 'WASH_TRADE', confidence };
   }
-  if (safeVmcap > 800 && mcap < 200e6) {
+  if (vmcap > 400 && mcap < 200e6) {
     return { level: 'HIGH', pattern: 'WASH_TRADE', confidence };
   }
 
@@ -186,7 +181,8 @@ export function detectManipulation(input: ManipulationInput): ManipulationResult
   }
 
   // PUMP & DUMP: big price spike + high vol relative to mcap
-  if (chg24 >= 30 && safeVmcap >= 200) {
+  // FIX: Lowered vmcap threshold from 200 to 120
+  if (chg24 >= 30 && vmcap >= 120) {
     const level: ManipulationResult['level'] = chg24 >= 50 ? 'CRITICAL' : 'HIGH';
     return { level, pattern: 'PUMP_AND_DUMP', confidence };
   }
@@ -221,14 +217,11 @@ export function classifyCategory(
   vmcap: number, chg24: number, volSpike: number, mcap: number, supplyPct: number | null
 ): string | null {
   const absChg = Math.abs(chg24);
-  
-  // ══ FIX: Add sanity upper bound to prevent garbage data triggering WASH ══
-  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
-  
-  if (safeVmcap > 1500 && mcap < 500e6) return 'WASH';
-  if (safeVmcap > 800 && mcap < 200e6)  return 'WASH';
-  if (chg24 >= 30 && safeVmcap >= 200)   return 'PUMP';
-  if (chg24 <= -25 && chg24 < 0 && safeVmcap >= 100) return 'DUMP';
+  // FIX: Lowered thresholds for realistic recalculated vmcap
+  if (vmcap > 800 && mcap < 500e6) return 'WASH';
+  if (vmcap > 400 && mcap < 200e6)  return 'WASH';
+  if (chg24 >= 30 && vmcap >= 120)   return 'PUMP';
+  if (chg24 <= -25 && chg24 < 0 && vmcap >= 100) return 'DUMP';
   if (absChg >= 20 && supplyPct !== null && supplyPct <= 25) return 'SQUEEZE';
   if (volSpike >= 3 && absChg < 10)  return 'ACCUM';
   return null;
@@ -250,12 +243,10 @@ export function buildSignals(input: WhaleScoreInput & { score: number }): Detect
   const absChg = Math.abs(chg24);
   const liqRatio = dsLiq ? vol / (dsLiq.liq || 1) : 0;
 
-  // ══ FIX: Sanitize vmcap before building signals ══
-  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
-
+  // FIX: Lowered thresholds for realistic recalculated vmcap
   return {
-    isWashSuspect:    (safeVmcap > 800 && mcap < 500e6) || (safeVmcap > 1500),
-    isPumpActive:     chg24 >= 30 && safeVmcap >= 200,
+    isWashSuspect:    (vmcap > 400 && mcap < 500e6) || (vmcap > 800),
+    isPumpActive:     chg24 >= 30 && vmcap >= 120,
     isDumpActive:     chg24 <= -25 && vol > 30e6,
     isSqueezeActive:  absChg >= 20 && supplyPct !== null && supplyPct <= 25,
     isAccumulating:   volSpike >= 3 && absChg < 10 && score >= 20,
