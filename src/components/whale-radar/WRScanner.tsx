@@ -6,17 +6,22 @@ import type { AlertItem } from '@/lib/whaleRadarState';
 import { WRAdvancedFilters, type WhaleFilters } from './WRAdvancedFilters';
 import { HLManipulationScanner } from '@/components/hyperliquid/HLManipulationScanner';
 
-// ══ CEO SIGNAL ENGINE v1.0 ════════════════════════════════════════════════
+// ══ CEO SIGNAL ENGINE v1.1 ════════════════════════════════════════════════
+// FIX: Treat vmcap > 10000 as invalid data (0) to prevent false AVOID signals
 function getCeoSignal(score: number, threat: string, category: string, vmcap: number) {
   const t = threat.toUpperCase();
   const cat = (category || '').toUpperCase();
-  if (score >= 88 || vmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) {
+  
+  // ══ FIX: Sanitize vmcap before using in signal logic ══
+  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
+  
+  if (score >= 88 || safeVmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) {
     return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
   }
   if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
     return { label: 'AGGRESSIVE LONG', mark: '★★★★★', cls: 'text-wr-amber border-wr-amber/60 bg-wr-amber/10' };
   }
-  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) {
+  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || safeVmcap > 300)) {
     return { label: 'LONG (tight stop)', mark: '★★★★', cls: 'text-wr-amber border-wr-amber/40 bg-wr-amber/5' };
   }
   if (score >= 45) {
@@ -250,7 +255,16 @@ export function WRScanner({
             ) : paginatedCoins.map(c => {
               const siz = calcSizing(c);
               const isTracked = !!tracked[c.symbol];
-              const vmcapCls = c.vmcap >= 800 ? 'text-wr-red' : c.vmcap >= 400 ? 'text-wr-amber' : c.vmcap >= 200 ? 'text-wr-cyan' : 'text-wr-green-dim';
+              
+              // ══ FIX: Determine vmcap display class and value with sanity check ══
+              const isInvalidVmcap = c.vmcap > 10000 || c.vmcap <= 0;
+              const displayVmcap = isInvalidVmcap ? 'N/A' : `${c.vmcap.toFixed(0)}%`;
+              const vmcapCls = isInvalidVmcap ? 'text-wr-muted' 
+                : c.vmcap >= 800 ? 'text-wr-red' 
+                : c.vmcap >= 400 ? 'text-wr-amber' 
+                : c.vmcap >= 200 ? 'text-wr-cyan' 
+                : 'text-wr-green-dim';
+              
               const catCls = c.category ? `wr-cat-${c.category.toLowerCase()}` : '';
               const aiRow = aiRows[c.symbol];
 
@@ -272,7 +286,9 @@ export function WRScanner({
                   <td className="text-wr-white">{fmtN(c.volume)}</td>
                   <td className="text-wr-muted">{fmtN(c.mcap)}</td>
                   <td>
-                    <span className={vmcapCls}>{c.vmcap.toFixed(0)}%</span>
+                    <span className={vmcapCls} title={isInvalidVmcap ? 'Invalid data: market cap missing or corrupted' : undefined}>
+                      {displayVmcap}
+                    </span>
                     <div className="text-[7px] text-wr-muted">VS:×{c.volSpike.toFixed(1)}</div>
                   </td>
                   <td>
