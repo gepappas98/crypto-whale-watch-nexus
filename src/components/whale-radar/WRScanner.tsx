@@ -141,6 +141,9 @@ export function WRScanner({
   const [sortDir, setSortDir]   = useState(-1);
   const [aiRows, setAiRows]     = useState<Record<string, AiRowData>>({});
 
+  // ── HL perps opportunity overlay (matches by symbol) ──────────────────────
+  const hlOpps = useHLOpportunities({ enabled: hlScannerEnabled, minApy: 12 });
+
   const handleSort = (key: string) => {
     if (sortKey === key) setSortDir(d => -d);
     else { setSortKey(key); setSortDir(-1); }
