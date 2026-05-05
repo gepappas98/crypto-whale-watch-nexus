@@ -1,4 +1,21 @@
-/* ══ WHALE RADAR v9 — STATE MANAGEMENT ═══════════════════════════════════════ */
+/* ══ WHALE RADAR v9 — STATE MANAGEMENT ═══════════════════════════════════════
+ *
+ *  FIXES v1.2 (see bug report):
+ *  - calcThreat(): added MCAP_MIN_RELIABLE guard at top — tokens with mcap <
+ *    $10K return score=0/LOW/null immediately instead of scoring as WASH.
+ *  - calcThreat(): REMOVED the duplicate WASH bonus block (+20/+14 pts).
+ *    The vmcap ≥ 400 branch already awards +40. Adding a second WASH bonus
+ *    on top caused scores 20 pts higher than detection.ts whaleScore() for
+ *    the same token, diverging results depending on which code path ran.
+ *  - calcThreat() category: kept as-is (vmcap > 800 → WASH) but now only
+ *    fires after the mcap guard passes.
+ *  - Recommended: replace all calcThreat() call sites in Index.tsx with
+ *    detect() from detection.ts so both engines stay in sync.
+ *
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+// ── Minimum mcap to trust — mirrors detection.ts constant ────────────────────
+const MCAP_MIN_RELIABLE = 10_000;
 
 export interface CoinData {
   rank: number;
@@ -140,7 +157,7 @@ export function fmtN(n: number): string {
 
 export function fmtP(p: number): string {
   if (p >= 1000) return p.toFixed(0);
-  if (p >= 1) return p.toFixed(2);
+  if (p >= 1)    return p.toFixed(2);
   if (p >= 0.01) return p.toFixed(4);
   return p.toFixed(6);
 }
@@ -149,9 +166,19 @@ export function isSolToken(sym: string): boolean {
   return CFG.SOL_SYMS.has(sym) || sym.endsWith('SOL');
 }
 
-/* ══ THREAT ENGINE v9.1 ═══════════════════════════════════════════════════════
- *  FIX: Lowered vmcap thresholds to match realistic recalculated values (0-500%).
- * ═════════════════════════════════════════════════════════════════════════════ */
+/* ══ THREAT ENGINE v9.2 ═══════════════════════════════════════════════════════
+ *
+ *  FIX BUG-001: mcap < MCAP_MIN_RELIABLE → return score=0, threat='LOW',
+ *               category=null immediately. Prevents API garbage (mcap=1) from
+ *               producing billions-percent vmcap and cascading to CRITICAL/WASH.
+ *
+ *  FIX BUG-003: Removed the duplicate WASH bonus block:
+ *               BEFORE: vmcap>800 → +20 pts on top of vmcap≥400 → +40 pts = +60
+ *               AFTER:  vmcap≥400 → +40 pts only (matches detection.ts)
+ *               The old bonus caused calcThreat() scores to be ~20 pts higher
+ *               than detect() for the same token — two engines disagreed.
+ *
+ * ════════════════════════════════════════════════════════════════════════════ */
 
 export function calcThreat(params: {
   vmcap: number; chg24: number; volSpike: number; supplyPct: number | null;
@@ -159,79 +186,115 @@ export function calcThreat(params: {
   isSol: boolean; birdData: BirdeyeData | null;
 }) {
   const { vmcap, chg24, volSpike, supplyPct, vol, mcap, dexHot, dsLiq, isSol, birdData } = params;
+
+  // FIX BUG-001: Reject tokens with unreliable mcap immediately.
+  // API returns market_cap=0/null for unlisted tokens; a || 1 fallback in the
+  // normalizer makes mcap=1 and vmcap climb to billions, falsely triggering WASH.
+  if (mcap < MCAP_MIN_RELIABLE) {
+    return {
+      score: 0,
+      threat: 'LOW' as const,
+      category: null,
+      confidence: 0,
+      reasons: ['UNVERIFIED MCAP — excluded from scoring'],
+    };
+  }
+
   let score = 0;
   const reasons: string[] = [];
   let ff = 0;
   const absChg = Math.abs(chg24);
 
-  // FIX: Lowered thresholds for realistic recalculated vmcap
-  if (vmcap >= 400) { score += 40; reasons.push('VOL/MCAP=' + vmcap.toFixed(0) + '% 🔴'); ff++; }
-  else if (vmcap >= 200) { score += 28; reasons.push('VOL/MCAP=' + vmcap.toFixed(0) + '%'); ff++; }
-  else if (vmcap >= 100) { score += 16; reasons.push('VOL/MCAP=' + vmcap.toFixed(0) + '%'); ff++; }
-  else if (vmcap >= 40) { score += 8; reasons.push('VOL/MCAP=' + vmcap.toFixed(0) + '%'); ff++; }
-  else if (vmcap >= 15) { score += 4; }
+  // VOL/MCAP ratio (thresholds match detection.ts whaleScore)
+  if (vmcap >= 400)      { score += 40; reasons.push('VOL/MCAP=' + vmcap.toFixed(0) + '% 🔴'); ff++; }
+  else if (vmcap >= 200) { score += 28; reasons.push('VOL/MCAP=' + vmcap.toFixed(0) + '%');     ff++; }
+  else if (vmcap >= 100) { score += 16; reasons.push('VOL/MCAP=' + vmcap.toFixed(0) + '%');     ff++; }
+  else if (vmcap >= 40)  { score += 8;  reasons.push('VOL/MCAP=' + vmcap.toFixed(0) + '%');     ff++; }
+  else if (vmcap >= 15)  { score += 4; }
 
-  if (absChg >= 50) { score += 25; reasons.push('ΔP=' + chg24.toFixed(1) + '% 🔴'); ff++; }
-  else if (absChg >= 30) { score += 18; reasons.push('ΔP=' + chg24.toFixed(1) + '%'); ff++; }
-  else if (absChg >= 15) { score += 10; reasons.push('ΔP=' + chg24.toFixed(1) + '%'); ff++; }
-  else if (absChg >= 8) { score += 4; ff++; }
+  // Price change magnitude
+  if (absChg >= 50)      { score += 25; reasons.push('ΔP=' + chg24.toFixed(1) + '% 🔴'); ff++; }
+  else if (absChg >= 30) { score += 18; reasons.push('ΔP=' + chg24.toFixed(1) + '%');    ff++; }
+  else if (absChg >= 15) { score += 10; reasons.push('ΔP=' + chg24.toFixed(1) + '%');    ff++; }
+  else if (absChg >= 8)  { score += 4;                                                    ff++; }
 
-  if (volSpike >= 5) { score += 20; reasons.push('VOL×' + volSpike.toFixed(1) + ' 🔴'); ff++; }
-  else if (volSpike >= 3) { score += 12; reasons.push('VOL×' + volSpike.toFixed(1)); ff++; }
-  else if (volSpike >= 2) { score += 6; ff++; }
+  // Volume spike
+  if (volSpike >= 5)        { score += 20; reasons.push('VOL×' + volSpike.toFixed(1) + ' 🔴'); ff++; }
+  else if (volSpike >= 3)   { score += 12; reasons.push('VOL×' + volSpike.toFixed(1));          ff++; }
+  else if (volSpike >= 2)   { score += 6;                                                         ff++; }
   else if (volSpike >= 1.5) { score += 3; }
 
+  // Circulating supply
   if (supplyPct !== null) {
-    if (supplyPct <= 15) { score += 22; reasons.push('CIRC=' + supplyPct.toFixed(0) + '% 🔴'); ff++; }
-    else if (supplyPct <= 25) { score += 16; reasons.push('CIRC=' + supplyPct.toFixed(0) + '%'); ff++; }
-    else if (supplyPct <= 40) { score += 8; reasons.push('CIRC=' + supplyPct.toFixed(0) + '%'); ff++; }
+    if (supplyPct <= 15)      { score += 22; reasons.push('CIRC=' + supplyPct.toFixed(0) + '% 🔴'); ff++; }
+    else if (supplyPct <= 25) { score += 16; reasons.push('CIRC=' + supplyPct.toFixed(0) + '%');    ff++; }
+    else if (supplyPct <= 40) { score += 8;  reasons.push('CIRC=' + supplyPct.toFixed(0) + '%');    ff++; }
     else if (supplyPct <= 60) { score += 4; }
   }
 
-  if (mcap < 5e6) { score += 15; reasons.push('NANO CAP'); ff++; }
-  else if (mcap < 20e6) { score += 12; reasons.push('MICRO CAP'); ff++; }
-  else if (mcap < 100e6) { score += 7; reasons.push('SMALL CAP'); ff++; }
+  // Market cap tier
+  if (mcap < 5e6)        { score += 15; reasons.push('NANO CAP');   ff++; }
+  else if (mcap < 20e6)  { score += 12; reasons.push('MICRO CAP');  ff++; }
+  else if (mcap < 100e6) { score += 7;  reasons.push('SMALL CAP');  ff++; }
   else if (mcap < 500e6) { score += 3; }
 
-  // FIX: Lowered WASH thresholds for realistic recalculated vmcap
-  if (vmcap > 800 && mcap < 500e6) { score += 20; reasons.push('WASH SUSPECT 🟣'); ff++; }
-  else if (vmcap > 400 && mcap < 200e6) { score += 14; reasons.push('WASH PATTERN'); ff++; }
+  // NOTE: The WASH bonus block that used to be here (+20/+14 pts) has been
+  // REMOVED. It was double-counting vmcap — the +40 above already captures it.
+  // Category 'WASH' is still set in the classification section below.
 
-  if (chg24 >= 30 && supplyPct !== null && supplyPct <= 30) { score += 15; reasons.push('PUMP+UNLOCK'); ff++; }
+  // PUMP + low-float unlock
+  if (chg24 >= 30 && supplyPct !== null && supplyPct <= 30) {
+    score += 15; reasons.push('PUMP+UNLOCK'); ff++;
+  }
+
+  // DEX trending
   if (dexHot) { score += 10; reasons.push('DEX TRENDING 🔵'); ff++; }
 
+  // Liquidity ratio
   if (dsLiq) {
     const lr = vol / (dsLiq.liq || 1);
-    if (lr >= 20) { score += 15; reasons.push('LOW DEX LIQ(×' + lr.toFixed(0) + ') 🔴'); ff++; }
-    else if (lr >= 8) { score += 8; reasons.push('DEX LIQ THIN(×' + lr.toFixed(0) + ')'); ff++; }
+    if (lr >= 20)     { score += 15; reasons.push('LOW DEX LIQ(×' + lr.toFixed(0) + ') 🔴'); ff++; }
+    else if (lr >= 8) { score += 8;  reasons.push('DEX LIQ THIN(×' + lr.toFixed(0) + ')');   ff++; }
     else if (lr >= 3) { score += 4; }
-  } else if (vol > mcap * 5 && mcap < 50e6) { score += 10; reasons.push('VOL>5×MCAP'); ff++; }
+  } else if (vol > mcap * 5 && mcap < 50e6) {
+    score += 10; reasons.push('VOL>5×MCAP'); ff++;
+  }
 
+  // On-chain Solana signals
   if (isSol && birdData) {
-    if (birdData.rugScore >= 70) { score += 25; reasons.push('RUG=' + birdData.rugScore + '/100 🔴'); ff++; }
-    else if (birdData.rugScore >= 40) { score += 12; reasons.push('RUG=' + birdData.rugScore + '/100'); ff++; }
-    if (birdData.top10pct != null && birdData.top10pct > 60) { score += 18; reasons.push('TOP10=' + birdData.top10pct.toFixed(0) + '%'); ff++; }
-    if (birdData.isMintable) { score += 12; reasons.push('MINTABLE⚠'); ff++; }
-    if (birdData.isFreezable) { score += 8; reasons.push('FREEZABLE'); ff++; }
-    if (birdData.lpBurned != null && birdData.lpBurned < 50) { score += 10; reasons.push('LP=' + birdData.lpBurned.toFixed(0) + '%'); ff++; }
-    if (birdData.ageDays != null && birdData.ageDays < 3) { score += 15; reasons.push('AGE=' + birdData.ageDays + 'd 🔴'); ff++; }
-  } else if (isSol && !birdData) { reasons.push('◎ on-chain pending'); }
+    if (birdData.rugScore >= 70)      { score += 25; reasons.push('RUG=' + birdData.rugScore + '/100 🔴'); ff++; }
+    else if (birdData.rugScore >= 40) { score += 12; reasons.push('RUG=' + birdData.rugScore + '/100');    ff++; }
+    if (birdData.top10pct != null && birdData.top10pct > 60) {
+      score += 18; reasons.push('TOP10=' + birdData.top10pct.toFixed(0) + '%'); ff++;
+    }
+    if (birdData.isMintable)  { score += 12; reasons.push('MINTABLE⚠'); ff++; }
+    if (birdData.isFreezable) { score += 8;  reasons.push('FREEZABLE');  ff++; }
+    if (birdData.lpBurned != null && birdData.lpBurned < 50) {
+      score += 10; reasons.push('LP=' + birdData.lpBurned.toFixed(0) + '%'); ff++;
+    }
+    if (birdData.ageDays != null && birdData.ageDays < 3) {
+      score += 15; reasons.push('AGE=' + birdData.ageDays + 'd 🔴'); ff++;
+    }
+  } else if (isSol && !birdData) {
+    reasons.push('◎ on-chain pending');
+  }
 
   score = Math.min(score, 100);
+
   let threat: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-  if (score >= 70) threat = 'CRITICAL';
+  if (score >= 70)      threat = 'CRITICAL';
   else if (score >= 45) threat = 'HIGH';
   else if (score >= 25) threat = 'MEDIUM';
-  else threat = 'LOW';
+  else                  threat = 'LOW';
 
+  // Category classification (mcap guard already passed above)
   let category: string | null = null;
-  // FIX: Lowered thresholds for realistic recalculated vmcap
-  if (vmcap > 800 && mcap < 500e6) category = 'WASH';
-  else if (vmcap > 400 && mcap < 200e6) category = 'WASH';
-  else if (chg24 >= 30 && vmcap >= 120) category = 'PUMP';
-  else if (chg24 <= -25 && vol > 30e6) category = 'DUMP';
+  if (vmcap > 800 && mcap < 500e6)        category = 'WASH';
+  else if (vmcap > 400 && mcap < 200e6)   category = 'WASH';
+  else if (chg24 >= 30 && vmcap >= 120)   category = 'PUMP';
+  else if (chg24 <= -25 && vol > 30e6)    category = 'DUMP';
   else if (absChg >= 20 && supplyPct !== null && supplyPct <= 25) category = 'SQUEEZE';
-  else if (volSpike >= 3 && absChg < 10 && score >= 20) category = 'ACCUM';
+  else if (volSpike >= 3 && absChg < 10 && score >= 20)          category = 'ACCUM';
 
   const confidence = Math.min(Math.round((ff / 10) * 100), 100);
   return { score, threat, category, confidence, reasons };
@@ -240,9 +303,9 @@ export function calcThreat(params: {
 /* ══ SIZING CALCULATOR ════════════════════════════════════════════════════════ */
 export function calcSizing(coin: CoinData) {
   if (coin.threat === 'CRITICAL') return { label: 'AVOID', cls: 'siz-none', slip: null };
-  if (coin.threat === 'HIGH') return { label: '$50-200', cls: 'siz-micro', slip: '~2-5% slippage' };
-  if (coin.threat === 'MEDIUM') return { label: '$200-1K', cls: 'siz-small', slip: '~1-2% slippage' };
-  return { label: '$1K-5K', cls: 'siz-normal', slip: '<1% slippage' };
+  if (coin.threat === 'HIGH')     return { label: '$50-200',  cls: 'siz-micro',  slip: '~2-5% slippage' };
+  if (coin.threat === 'MEDIUM')   return { label: '$200-1K',  cls: 'siz-small',  slip: '~1-2% slippage' };
+  return                                 { label: '$1K-5K',   cls: 'siz-normal', slip: '<1% slippage' };
 }
 
 /* ══ PERSISTENCE ══════════════════════════════════════════════════════════════ */
