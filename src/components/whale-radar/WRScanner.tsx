@@ -21,6 +21,20 @@ import { analyzeToken } from '@/lib/analyzeToken';
 import type { AlertItem } from '@/lib/whaleRadarState';
 import { WRAdvancedFilters, type WhaleFilters } from './WRAdvancedFilters';
 import { HLManipulationScanner } from '@/components/hyperliquid/HLManipulationScanner';
+import { useHLOpportunities } from '@/hooks/useHLOpportunities';
+import type { HLSignal } from '@/components/hyperliquid/HLOpportunityPanel';
+
+// ── HL opportunity badge config (per opportunityType) ────────────────────────
+const HL_OPP_META: Record<HLSignal['opportunityType'], { label: string; cls: string; title: string }> = {
+  funding_arb:   { label: 'FUND',   cls: 'text-emerald-400 border-emerald-400/40 bg-emerald-400/10', title: 'Funding arbitrage' },
+  basis_trade:   { label: 'BASIS',  cls: 'text-blue-400 border-blue-400/40 bg-blue-400/10',         title: 'Basis trade (delta-neutral)' },
+  squeeze_short: { label: 'SQZ-S',  cls: 'text-red-400 border-red-400/40 bg-red-400/10',            title: 'Short squeeze candidate' },
+  squeeze_long:  { label: 'SQZ-L',  cls: 'text-amber-400 border-amber-400/40 bg-amber-400/10',      title: 'Long squeeze candidate' },
+  whale_impact:  { label: 'WHALE',  cls: 'text-purple-400 border-purple-400/40 bg-purple-400/10',   title: 'Whale impact (illiquid + volume)' },
+  liq_cluster:   { label: 'LIQ',    cls: 'text-rose-400 border-rose-400/40 bg-rose-400/10',         title: 'Liquidation cluster' },
+  order_imb:     { label: 'IMB',    cls: 'text-cyan-400 border-cyan-400/40 bg-cyan-400/10',         title: 'Order book imbalance' },
+  vol_skew:      { label: 'SKEW',   cls: 'text-orange-400 border-orange-400/40 bg-orange-400/10',   title: 'Volatility skew' },
+};
 
 // ══ CEO SIGNAL ENGINE v1.2 ════════════════════════════════════════════════════
 //
