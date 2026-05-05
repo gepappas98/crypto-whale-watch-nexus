@@ -7,21 +7,16 @@ import { WRAdvancedFilters, type WhaleFilters } from './WRAdvancedFilters';
 import { HLManipulationScanner } from '@/components/hyperliquid/HLManipulationScanner';
 
 // ══ CEO SIGNAL ENGINE v1.1 ════════════════════════════════════════════════
-// FIX: Treat vmcap > 10000 as invalid data (0) to prevent false AVOID signals
 function getCeoSignal(score: number, threat: string, category: string, vmcap: number) {
   const t = threat.toUpperCase();
   const cat = (category || '').toUpperCase();
-  
-  // ══ FIX: Sanitize vmcap before using in signal logic ══
-  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
-  
-  if (score >= 88 || safeVmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) {
+  if (score >= 88 || vmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) {
     return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
   }
   if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
     return { label: 'AGGRESSIVE LONG', mark: '★★★★★', cls: 'text-wr-amber border-wr-amber/60 bg-wr-amber/10' };
   }
-  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || safeVmcap > 300)) {
+  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) {
     return { label: 'LONG (tight stop)', mark: '★★★★', cls: 'text-wr-amber border-wr-amber/40 bg-wr-amber/5' };
   }
   if (score >= 45) {
@@ -59,7 +54,6 @@ interface WRScannerProps {
   onAdvancedFiltersChange: (f: WhaleFilters) => void;
   page: number;
   onPageChange: (p: number) => void;
-  // ── Hyperliquid ──
   hlScannerEnabled?: boolean;
   hlMegaTxUsd?: number;
 }
@@ -88,7 +82,6 @@ export function WRScanner({
     else { setSortKey(key); setSortDir(-1); }
   };
 
-  // Issue #7: proper removeAiRow function
   const removeAiRow = useCallback((sym: string) => {
     setAiRows(prev => {
       const next = { ...prev };
@@ -120,7 +113,6 @@ export function WRScanner({
       return 0;
     });
 
-  // Pagination
   const PAGE_SIZE = 20;
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -138,7 +130,6 @@ export function WRScanner({
 
   return (
     <div className="flex flex-col border border-wr-border bg-wr-bg2 min-h-0">
-      {/* Panel header */}
       <div className="wr-panel-header">
         <span className="wr-panel-title">⬡ MANIPULATION SCANNER v9 — TOP 250</span>
         <div className="flex gap-2 items-center flex-wrap">
@@ -146,7 +137,6 @@ export function WRScanner({
         </div>
       </div>
 
-      {/* Quick Actions Bar */}
       <div className="quick-actions">
         <button className="wr-btn" onClick={onScan} disabled={scanning} title="Scan now [S]">
           {scanning ? <span className="inline-block w-2.5 h-2.5 border border-wr-border border-t-wr-green rounded-full animate-spin-fast mr-1" /> : '▶'} SCAN
@@ -197,7 +187,6 @@ export function WRScanner({
           onChange={e => { setSearch(e.target.value); onPageChange(1); }}
         />
 
-        {/* Sliders — hidden on mobile (use bottom sheet instead) */}
         <div className="hidden lg:flex items-center gap-1.5">
           <label className="text-[8px] text-wr-green-dim tracking-widest">VOL/MCAP≥</label>
           <input type="range" className="w-16 h-0.5 accent-wr-green" min={50} max={1000} step={25} value={vmcapThr} onChange={e => onVmcapChange(+e.target.value)} />
@@ -210,14 +199,12 @@ export function WRScanner({
         </div>
       </div>
 
-      {/* Advanced Filters Panel (desktop) */}
       {showAdvFilters && (
         <div className="border-b border-wr-border bg-wr-bg3/50 hidden lg:block">
           <WRAdvancedFilters filters={advancedFilters} onChange={onAdvancedFiltersChange} />
         </div>
       )}
 
-      {/* Table */}
       <div className="flex-1 overflow-auto scrollbar-thin">
         <table className="wr-table">
           <thead>
@@ -255,16 +242,7 @@ export function WRScanner({
             ) : paginatedCoins.map(c => {
               const siz = calcSizing(c);
               const isTracked = !!tracked[c.symbol];
-              
-              // ══ FIX: Determine vmcap display class and value with sanity check ══
-              const isInvalidVmcap = c.vmcap > 10000 || c.vmcap <= 0;
-              const displayVmcap = isInvalidVmcap ? 'N/A' : `${c.vmcap.toFixed(0)}%`;
-              const vmcapCls = isInvalidVmcap ? 'text-wr-muted' 
-                : c.vmcap >= 800 ? 'text-wr-red' 
-                : c.vmcap >= 400 ? 'text-wr-amber' 
-                : c.vmcap >= 200 ? 'text-wr-cyan' 
-                : 'text-wr-green-dim';
-              
+              const vmcapCls = c.vmcap >= 800 ? 'text-wr-red' : c.vmcap >= 400 ? 'text-wr-amber' : c.vmcap >= 200 ? 'text-wr-cyan' : 'text-wr-green-dim';
               const catCls = c.category ? `wr-cat-${c.category.toLowerCase()}` : '';
               const aiRow = aiRows[c.symbol];
 
@@ -286,9 +264,7 @@ export function WRScanner({
                   <td className="text-wr-white">{fmtN(c.volume)}</td>
                   <td className="text-wr-muted">{fmtN(c.mcap)}</td>
                   <td>
-                    <span className={vmcapCls} title={isInvalidVmcap ? 'Invalid data: market cap missing or corrupted' : undefined}>
-                      {displayVmcap}
-                    </span>
+                    <span className={vmcapCls}>{c.vmcap.toFixed(0)}%</span>
                     <div className="text-[7px] text-wr-muted">VS:×{c.volSpike.toFixed(1)}</div>
                   </td>
                   <td>
@@ -337,7 +313,6 @@ export function WRScanner({
                     })()}
                   </td>
                 </tr>,
-                // Issue #7: AI inline row with proper close button
                 aiRow && (
                   <tr key={`ai-${c.symbol}`} className="bg-wr-purple/[.04] border-t-0">
                     <td colSpan={12} className="p-0">
@@ -346,7 +321,6 @@ export function WRScanner({
                           <span className="text-[8px] text-wr-purple tracking-widest">✦ AI ANALYSIS</span>
                           <span className="text-[7px] text-wr-muted">{c.symbol}</span>
                           <div className="flex-1" />
-                          {/* Issue #7: close button calls removeAiRow directly */}
                           <button
                             className="text-[8px] px-1.5 py-0.5 bg-transparent border border-wr-border text-wr-muted hover:text-wr-red hover:border-wr-red cursor-pointer font-mono"
                             onClick={() => removeAiRow(c.symbol)}
@@ -369,7 +343,6 @@ export function WRScanner({
         </table>
       </div>
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between px-3 py-2 border-t border-wr-border bg-wr-bg3/50">
           <span className="text-[8px] text-wr-muted tracking-widest">
@@ -413,7 +386,6 @@ export function WRScanner({
         </div>
       )}
 
-      {/* ── Hyperliquid On-Chain Scanner ───────────────────────────────── */}
       <HLManipulationScanner
         collapsed
         enabled={hlScannerEnabled}
