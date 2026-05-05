@@ -21,6 +21,20 @@ import { analyzeToken } from '@/lib/analyzeToken';
 import type { AlertItem } from '@/lib/whaleRadarState';
 import { WRAdvancedFilters, type WhaleFilters } from './WRAdvancedFilters';
 import { HLManipulationScanner } from '@/components/hyperliquid/HLManipulationScanner';
+import { useHLOpportunities } from '@/hooks/useHLOpportunities';
+import type { HLSignal } from '@/components/hyperliquid/HLOpportunityPanel';
+
+// ── HL opportunity badge config (per opportunityType) ────────────────────────
+const HL_OPP_META: Record<HLSignal['opportunityType'], { label: string; cls: string; title: string }> = {
+  funding_arb:   { label: 'FUND',   cls: 'text-emerald-400 border-emerald-400/40 bg-emerald-400/10', title: 'Funding arbitrage' },
+  basis_trade:   { label: 'BASIS',  cls: 'text-blue-400 border-blue-400/40 bg-blue-400/10',         title: 'Basis trade (delta-neutral)' },
+  squeeze_short: { label: 'SQZ-S',  cls: 'text-red-400 border-red-400/40 bg-red-400/10',            title: 'Short squeeze candidate' },
+  squeeze_long:  { label: 'SQZ-L',  cls: 'text-amber-400 border-amber-400/40 bg-amber-400/10',      title: 'Long squeeze candidate' },
+  whale_impact:  { label: 'WHALE',  cls: 'text-purple-400 border-purple-400/40 bg-purple-400/10',   title: 'Whale impact (illiquid + volume)' },
+  liq_cluster:   { label: 'LIQ',    cls: 'text-rose-400 border-rose-400/40 bg-rose-400/10',         title: 'Liquidation cluster' },
+  order_imb:     { label: 'IMB',    cls: 'text-cyan-400 border-cyan-400/40 bg-cyan-400/10',         title: 'Order book imbalance' },
+  vol_skew:      { label: 'SKEW',   cls: 'text-orange-400 border-orange-400/40 bg-orange-400/10',   title: 'Volatility skew' },
+};
 
 // ══ CEO SIGNAL ENGINE v1.2 ════════════════════════════════════════════════════
 //
@@ -126,6 +140,9 @@ export function WRScanner({
   const [sortKey, setSortKey]   = useState<string>('score');
   const [sortDir, setSortDir]   = useState(-1);
   const [aiRows, setAiRows]     = useState<Record<string, AiRowData>>({});
+
+  // ── HL perps opportunity overlay (matches by symbol) ──────────────────────
+  const hlOpps = useHLOpportunities({ enabled: hlScannerEnabled, minApy: 12 });
 
   const handleSort = (key: string) => {
     if (sortKey === key) setSortDir(d => -d);
@@ -317,18 +334,32 @@ export function WRScanner({
                                : 'text-wr-green-dim';
               const catCls     = c.category ? `wr-cat-${c.category.toLowerCase()}` : '';
               const aiRow      = aiRows[c.symbol];
+              const hlOpp      = hlOpps.match(c.symbol);
+              const hlMeta     = hlOpp ? HL_OPP_META[hlOpp.opportunityType] : null;
+              const hlRowGlow  = hlOpp?.level === 'critical' ? 'shadow-[inset_3px_0_0_0_hsl(var(--wr-amber))]' : '';
 
               return [
                 <tr
                   key={c.id}
-                  className={`${c.threat === 'CRITICAL' ? 'animate-flash-red' : c.threat === 'HIGH' ? 'animate-flash-amber' : ''} ${aiRow ? 'border-b-0' : ''}`}
+                  className={`${c.threat === 'CRITICAL' ? 'animate-flash-red' : c.threat === 'HIGH' ? 'animate-flash-amber' : ''} ${aiRow ? 'border-b-0' : ''} ${hlRowGlow}`}
                 >
                   <td className="text-wr-muted text-[8px]">{c.rank}</td>
                   <td>
-                    <div className="font-head text-[10px] text-wr-white tracking-widest">
-                      {c.symbol}
-                      {c.isSol   && <span className="text-wr-sol text-[7px] ml-0.5">◎</span>}
-                      {c.dexHot  && <span className="text-[7px] px-0.5 bg-wr-blue/10 border border-wr-blue/30 text-wr-blue ml-1">DEX</span>}
+                    <div className="font-head text-[10px] text-wr-white tracking-widest flex items-center flex-wrap gap-1">
+                      <span>{c.symbol}</span>
+                      {c.isSol   && <span className="text-wr-sol text-[7px]">◎</span>}
+                      {c.dexHot  && <span className="text-[7px] px-0.5 bg-wr-blue/10 border border-wr-blue/30 text-wr-blue">DEX</span>}
+                      {hlOpp && hlMeta && (
+                        <span
+                          className={`text-[7px] px-1 py-px border font-mono tracking-wider inline-flex items-center gap-0.5 ${hlMeta.cls}`}
+                          title={`HL ${hlMeta.title} · ${hlOpp.side} · ${hlOpp.expectedEdge}${hlOpp.apyEstimate ? ` · ~${hlOpp.apyEstimate.toFixed(0)}% APY` : ''} · conv ${hlOpp.conviction}%`}
+                        >
+                          HL·{hlMeta.label}
+                          {hlOpp.side !== 'NEUTRAL' && (
+                            <span className="opacity-80">{hlOpp.side === 'LONG' ? '↑' : '↓'}</span>
+                          )}
+                        </span>
+                      )}
                     </div>
                     <div className="text-[8px] text-wr-muted">{c.name}</div>
                   </td>
