@@ -1,4 +1,20 @@
-/* ══ WHALE RADAR v9 — SCANNER TABLE ══════════════════════════════════════════ */
+/* ══ WHALE RADAR v9 — SCANNER TABLE ══════════════════════════════════════════
+ *
+ *  FIXES v1.2 (see bug report):
+ *  - getCeoSignal() BUG-004: Decoupled WASH/bad-data AVOID from legitimate
+ *    CRITICAL signals. Previously `vmcap > 1000 || threat === 'CRITICAL' ||
+ *    cat.includes('WASH')` were all in one branch, making it impossible for
+ *    a real PUMP/SQUEEZE with CRITICAL threat to reach AGGRESSIVE LONG.
+ *
+ *    New priority order:
+ *      1. vmcap > 1000 OR category=WASH  → AVOID/SHORT  (data issue or wash)
+ *      2. CRITICAL + PUMP/SQUEEZE        → AGGRESSIVE LONG (real signal)
+ *      3. score ≥ 88                     → AVOID/SHORT  (extreme score, no pattern)
+ *      4. CRITICAL alone                 → AVOID/SHORT  (RUG/DUMP)
+ *      5. score/category-based tiers     → as before
+ *
+ * ════════════════════════════════════════════════════════════════════════════ */
+
 import { useState, useCallback, useMemo } from 'react';
 import { CoinData, TrackedToken, PortfolioEntry, fmtN, fmtP, calcSizing } from '@/lib/whaleRadarState';
 import { analyzeToken } from '@/lib/analyzeToken';
@@ -6,16 +22,50 @@ import type { AlertItem } from '@/lib/whaleRadarState';
 import { WRAdvancedFilters, type WhaleFilters } from './WRAdvancedFilters';
 import { HLManipulationScanner } from '@/components/hyperliquid/HLManipulationScanner';
 
-// ══ CEO SIGNAL ENGINE v1.1 ════════════════════════════════════════════════
+// ══ CEO SIGNAL ENGINE v1.2 ════════════════════════════════════════════════════
+//
+// FIX BUG-004: Separated WASH/data-error path from real manipulation signals.
+//
+// BEFORE (broken):
+//   if (score>=88 || vmcap>1000 || t==='CRITICAL' || cat.includes('WASH'))
+//     → AVOID/SHORT
+//   // The PUMP/SQUEEZE branches below were unreachable for any CRITICAL token.
+//
+// AFTER (fixed):
+//   Check WASH / bad-data first (vmcap>1000, category=WASH).
+//   Then allow CRITICAL + PUMP/SQUEEZE through to AGGRESSIVE LONG.
+//   CRITICAL alone (RUG/DUMP or no pattern) still → AVOID/SHORT.
+//
 function getCeoSignal(score: number, threat: string, category: string, vmcap: number) {
-  const t = threat.toUpperCase();
+  const t   = threat.toUpperCase();
   const cat = (category || '').toUpperCase();
-  if (score >= 88 || vmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) {
+
+  // ── 1. Wash trade or unreliable vmcap (> 1000% is either wash or bad data)
+  if (vmcap > 1000 || cat.includes('WASH')) {
     return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
   }
+
+  // ── 2. Legitimate CRITICAL pump / squeeze → actionable long signal
+  if (t === 'CRITICAL' && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
+    return { label: 'AGGRESSIVE LONG', mark: '★★★★★', cls: 'text-wr-amber border-wr-amber/60 bg-wr-amber/10' };
+  }
+
+  // ── 3. Extreme score with no positive pattern → avoid
+  if (score >= 88) {
+    return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
+  }
+
+  // ── 4. CRITICAL alone (RUG_PULL, DUMP, or no category) → avoid
+  if (t === 'CRITICAL') {
+    return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
+  }
+
+  // ── 5. HIGH threat pump/squeeze with meaningful vmcap
   if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
     return { label: 'AGGRESSIVE LONG', mark: '★★★★★', cls: 'text-wr-amber border-wr-amber/60 bg-wr-amber/10' };
   }
+
+  // ── 6. Moderate signals
   if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) {
     return { label: 'LONG (tight stop)', mark: '★★★★', cls: 'text-wr-amber border-wr-amber/40 bg-wr-amber/5' };
   }
@@ -72,10 +122,10 @@ export function WRScanner({
   advancedFilters, onAdvancedFiltersChange, page, onPageChange,
   hlScannerEnabled = true, hlMegaTxUsd,
 }: WRScannerProps) {
-  const [search, setSearch] = useState('');
-  const [sortKey, setSortKey] = useState<string>('score');
-  const [sortDir, setSortDir] = useState(-1);
-  const [aiRows, setAiRows] = useState<Record<string, AiRowData>>({});
+  const [search, setSearch]     = useState('');
+  const [sortKey, setSortKey]   = useState<string>('score');
+  const [sortDir, setSortDir]   = useState(-1);
+  const [aiRows, setAiRows]     = useState<Record<string, AiRowData>>({});
 
   const handleSort = (key: string) => {
     if (sortKey === key) setSortDir(d => -d);
@@ -113,8 +163,8 @@ export function WRScanner({
       return 0;
     });
 
-  const PAGE_SIZE = 20;
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const PAGE_SIZE   = 20;
+  const totalPages  = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const paginatedCoins = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
@@ -123,8 +173,8 @@ export function WRScanner({
 
   const [showAdvFilters, setShowAdvFilters] = useState(false);
 
-  const badgeCls = scanBadge === 'LIVE' ? 'text-wr-green border-wr-green-dim bg-wr-green-ghost'
-    : scanBadge === 'SCANNING' ? 'text-wr-cyan border-wr-cyan/30'
+  const badgeCls = scanBadge === 'LIVE'    ? 'text-wr-green border-wr-green-dim bg-wr-green-ghost'
+    : scanBadge === 'SCANNING'             ? 'text-wr-cyan border-wr-cyan/30'
     : scanBadge === 'ERROR' || scanBadge === 'RATE LIMITED' ? 'text-wr-red border-wr-red/30'
     : 'text-wr-muted border-wr-border';
 
@@ -139,7 +189,9 @@ export function WRScanner({
 
       <div className="quick-actions">
         <button className="wr-btn" onClick={onScan} disabled={scanning} title="Scan now [S]">
-          {scanning ? <span className="inline-block w-2.5 h-2.5 border border-wr-border border-t-wr-green rounded-full animate-spin-fast mr-1" /> : '▶'} SCAN
+          {scanning
+            ? <span className="inline-block w-2.5 h-2.5 border border-wr-border border-t-wr-green rounded-full animate-spin-fast mr-1" />
+            : '▶'} SCAN
         </button>
         <button className={`wr-btn ${autoScan ? 'active' : ''}`} onClick={onToggleAuto} title="Toggle auto [A]">
           AUTO: {autoScan ? 'ON' : 'OFF'}
@@ -165,8 +217,12 @@ export function WRScanner({
         <button className="wr-btn ai" onClick={() => onOpenModal('sentiment')} title="AI Sentiment">
           ✦ SENT <span className="pro-badge">PRO</span>
         </button>
-        <button className="wr-btn" onClick={() => onOpenModal('signal-eval')} title="Signal Eval — win rates [E]"
-          style={{ borderColor: 'hsl(var(--wr-cyan) / 0.4)', color: 'hsl(var(--wr-cyan))' }}>
+        <button
+          className="wr-btn"
+          onClick={() => onOpenModal('signal-eval')}
+          title="Signal Eval — win rates [E]"
+          style={{ borderColor: 'hsl(var(--wr-cyan) / 0.4)', color: 'hsl(var(--wr-cyan))' }}
+        >
           📈 EVAL
         </button>
 
@@ -189,12 +245,22 @@ export function WRScanner({
 
         <div className="hidden lg:flex items-center gap-1.5">
           <label className="text-[8px] text-wr-green-dim tracking-widest">VOL/MCAP≥</label>
-          <input type="range" className="w-16 h-0.5 accent-wr-green" min={50} max={1000} step={25} value={vmcapThr} onChange={e => onVmcapChange(+e.target.value)} />
+          <input
+            type="range" className="w-16 h-0.5 accent-wr-green"
+            min={50} max={1000} step={25}
+            value={vmcapThr}
+            onChange={e => onVmcapChange(+e.target.value)}
+          />
           <span className="text-[10px] text-wr-amber w-10">{vmcapThr}%</span>
         </div>
         <div className="hidden lg:flex items-center gap-1.5">
           <label className="text-[8px] text-wr-green-dim tracking-widest">24H≥</label>
-          <input type="range" className="w-16 h-0.5 accent-wr-green" min={5} max={60} step={5} value={pchgThr} onChange={e => onPchgChange(+e.target.value)} />
+          <input
+            type="range" className="w-16 h-0.5 accent-wr-green"
+            min={5} max={60} step={5}
+            value={pchgThr}
+            onChange={e => onPchgChange(+e.target.value)}
+          />
           <span className="text-[10px] text-wr-amber w-8">{pchgThr}%</span>
         </div>
       </div>
@@ -210,18 +276,18 @@ export function WRScanner({
           <thead>
             <tr>
               {[
-                { key: 'rank', label: '#' },
-                { key: 'symbol', label: 'TOKEN' },
-                { key: 'price', label: 'PRICE' },
-                { key: 'change', label: '24H%' },
-                { key: 'volume', label: '24H VOL' },
-                { key: 'mcap', label: 'MKT CAP' },
-                { key: 'vmcap', label: 'VOL/MCAP ⚠' },
-                { key: 'score', label: 'SCORE' },
-                { key: 'threat', label: 'THREAT' },
+                { key: 'rank',     label: '#' },
+                { key: 'symbol',   label: 'TOKEN' },
+                { key: 'price',    label: 'PRICE' },
+                { key: 'change',   label: '24H%' },
+                { key: 'volume',   label: '24H VOL' },
+                { key: 'mcap',     label: 'MKT CAP' },
+                { key: 'vmcap',    label: 'VOL/MCAP ⚠' },
+                { key: 'score',    label: 'SCORE' },
+                { key: 'threat',   label: 'THREAT' },
                 { key: 'category', label: 'CATEGORY' },
-                { key: '', label: 'ACTIONS' },
-                { key: '', label: 'CEO SIGNAL' },
+                { key: '',         label: 'ACTIONS' },
+                { key: '',         label: 'CEO SIGNAL' },
               ].map(col => (
                 <th
                   key={col.label}
@@ -236,24 +302,33 @@ export function WRScanner({
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={12} className="text-center text-wr-muted text-xs py-12 tracking-widest">
-                {coins.length === 0 ? 'Click SCAN to begin surveillance' : 'No tokens match current filters'}
-              </td></tr>
+              <tr>
+                <td colSpan={12} className="text-center text-wr-muted text-xs py-12 tracking-widest">
+                  {coins.length === 0 ? 'Click SCAN to begin surveillance' : 'No tokens match current filters'}
+                </td>
+              </tr>
             ) : paginatedCoins.map(c => {
-              const siz = calcSizing(c);
-              const isTracked = !!tracked[c.symbol];
-              const vmcapCls = c.vmcap >= 800 ? 'text-wr-red' : c.vmcap >= 400 ? 'text-wr-amber' : c.vmcap >= 200 ? 'text-wr-cyan' : 'text-wr-green-dim';
-              const catCls = c.category ? `wr-cat-${c.category.toLowerCase()}` : '';
-              const aiRow = aiRows[c.symbol];
+              const siz        = calcSizing(c);
+              const isTracked  = !!tracked[c.symbol];
+              // vmcapCls: consistent with detection thresholds (400 / 200 / 100)
+              const vmcapCls   = c.vmcap >= 800 ? 'text-wr-red'
+                               : c.vmcap >= 400 ? 'text-wr-amber'
+                               : c.vmcap >= 200 ? 'text-wr-cyan'
+                               : 'text-wr-green-dim';
+              const catCls     = c.category ? `wr-cat-${c.category.toLowerCase()}` : '';
+              const aiRow      = aiRows[c.symbol];
 
               return [
-                <tr key={c.id} className={`${c.threat === 'CRITICAL' ? 'animate-flash-red' : c.threat === 'HIGH' ? 'animate-flash-amber' : ''} ${aiRow ? 'border-b-0' : ''}`}>
+                <tr
+                  key={c.id}
+                  className={`${c.threat === 'CRITICAL' ? 'animate-flash-red' : c.threat === 'HIGH' ? 'animate-flash-amber' : ''} ${aiRow ? 'border-b-0' : ''}`}
+                >
                   <td className="text-wr-muted text-[8px]">{c.rank}</td>
                   <td>
                     <div className="font-head text-[10px] text-wr-white tracking-widest">
                       {c.symbol}
-                      {c.isSol && <span className="text-wr-sol text-[7px] ml-0.5">◎</span>}
-                      {c.dexHot && <span className="text-[7px] px-0.5 bg-wr-blue/10 border border-wr-blue/30 text-wr-blue ml-1">DEX</span>}
+                      {c.isSol   && <span className="text-wr-sol text-[7px] ml-0.5">◎</span>}
+                      {c.dexHot  && <span className="text-[7px] px-0.5 bg-wr-blue/10 border border-wr-blue/30 text-wr-blue ml-1">DEX</span>}
                     </div>
                     <div className="text-[8px] text-wr-muted">{c.name}</div>
                   </td>
@@ -271,7 +346,11 @@ export function WRScanner({
                     <div className="text-[9px] text-wr-amber">{c.score}/100</div>
                     <div className="flex gap-0.5 mt-0.5">
                       {Array.from({ length: 10 }).map((_, i) => (
-                        <div key={i} className={`w-1 h-1 rounded-[1px] ${i < Math.ceil(c.score / 10) ? 'bg-wr-amber' : 'bg-wr-border'}`} style={{ background: i < Math.ceil(c.score / 10) ? 'hsl(var(--wr-amber))' : 'hsl(var(--wr-border))' }} />
+                        <div
+                          key={i}
+                          className={`w-1 h-1 rounded-[1px] ${i < Math.ceil(c.score / 10) ? 'bg-wr-amber' : 'bg-wr-border'}`}
+                          style={{ background: i < Math.ceil(c.score / 10) ? 'hsl(var(--wr-amber))' : 'hsl(var(--wr-border))' }}
+                        />
                       ))}
                     </div>
                     <div className="text-[7px] text-wr-muted mt-0.5">CONF:{c.confidence}%</div>
@@ -358,10 +437,10 @@ export function WRScanner({
             </button>
             {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
               let pageNum: number;
-              if (totalPages <= 5) pageNum = i + 1;
-              else if (currentPage <= 3) pageNum = i + 1;
+              if (totalPages <= 5)          pageNum = i + 1;
+              else if (currentPage <= 3)    pageNum = i + 1;
               else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
-              else pageNum = currentPage - 2 + i;
+              else                          pageNum = currentPage - 2 + i;
               return (
                 <button
                   key={pageNum}
@@ -390,9 +469,7 @@ export function WRScanner({
         collapsed
         enabled={hlScannerEnabled}
         megaTxUsd={hlMegaTxUsd}
-        onGlobalAlert={(alert) =>
-          onAddAlert(alert.level, alert.tag, alert.text)
-        }
+        onGlobalAlert={(alert) => onAddAlert(alert.level, alert.tag, alert.text)}
       />
     </div>
   );
