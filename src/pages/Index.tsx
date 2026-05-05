@@ -33,15 +33,12 @@ import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
 
 // ── CEO Signal label (mirrors WRScanner getCeoSignal) ─────────────────────────
-// Kept here so processData can record signal outcomes without importing WRScanner.
 function getCeoSignalLabel(score: number, threat: string, category: string, vmcap: number): string {
   const t = threat.toUpperCase();
   const cat = (category || '').toUpperCase();
-  // FIX: Treat insane vmcap (>10000) as invalid data — don't flag as AVOID
-  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
-  if (score >= 88 || safeVmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) return 'AVOID / SHORT';
+  if (score >= 88 || vmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) return 'AVOID / SHORT';
   if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE')))         return 'AGGRESSIVE LONG';
-  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || safeVmcap > 300)) return 'LONG (tight stop)';
+  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) return 'LONG (tight stop)';
   if (score >= 45) return 'LONG';
   if (score >= 35) return 'WATCH';
   return 'HOLD';
@@ -62,7 +59,7 @@ export default function WhaleRadarApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [autoScan, setAutoScan] = useState(false);
-  const [autoPaused, setAutoPaused] = useState(false); // Issue #6: track paused state
+  const [autoPaused, setAutoPaused] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanBadge, setScanBadge] = useState('IDLE');
   const [kbdOpen, setKbdOpen] = useState(false);
@@ -86,7 +83,6 @@ export default function WhaleRadarApp() {
   // WebSocket config
   const [bybitEnabled, setBybitEnabled] = useState(false);
   const [whaleFeedEx, setWhaleFeedEx] = useState('all');
-  // ── Hyperliquid settings ─────────────────────────────────────────────────
   const [hlScannerEnabled, setHlScannerEnabled] = useState(true);
   const [hlMegaTxUsd, setHlMegaTxUsd] = useState(500_000);
   const [supabaseUrl, setSupabaseUrl] = useState('');
@@ -126,22 +122,16 @@ export default function WhaleRadarApp() {
     if (saved.prevVolumes) setPrevVolumes(saved.prevVolumes as Record<string, number>);
     if (saved.bybitEnabled) setBybitEnabled(saved.bybitEnabled as boolean);
     if (saved.whaleFeedEx) setWhaleFeedEx(saved.whaleFeedEx as string);
-    // ── HL settings ──
     if (saved.hlScannerEnabled !== undefined) setHlScannerEnabled(saved.hlScannerEnabled as boolean);
     if (saved.hlMegaTxUsd) setHlMegaTxUsd(saved.hlMegaTxUsd as number);
-    // Supabase URL/key stored in separate localStorage keys (mirrors hlFetch)
     const sbUrl = localStorage.getItem('wr_supabase_url') ?? '';
     const sbKey = localStorage.getItem('wr_supabase_anon_key') ?? '';
     if (sbUrl) setSupabaseUrl(sbUrl);
     if (sbKey) setSupabaseAnonKey(sbKey);
-
-    // Issue #6: Restore autoScan but preserve paused state — don't auto-resume
     if (saved.autoScan) {
       setAutoScan(true);
-      // If it was previously running, restore as paused so it doesn't auto-resume
       setAutoPaused(saved.autoPaused as boolean ?? true);
     }
-
     if (!localStorage.getItem('wr_v9_onboarded')) setShowOnboarding(true);
   }, []);
 
@@ -152,19 +142,12 @@ export default function WhaleRadarApp() {
   }, []);
 
   // ══ BACKEND CHECK + SIGNAL PRICE FILLER ══════════════════════════════════
-  // Runs once on mount: pings backend, then starts periodic CoinGecko price filling.
   useEffect(() => {
-    // 1. Check backend availability (suppresses noisy toasts when offline)
     initBackendCheck();
-
-    // 2. Fill outcome prices immediately on mount (catches any pending fills)
     fillSignalPrices().catch(() => {});
-
-    // 3. Re-fill every 30 minutes (mirrors backend priceFiller schedule)
     const fillTimer = setInterval(() => {
       fillSignalPrices().catch(() => {});
     }, 30 * 60 * 1000);
-
     return () => clearInterval(fillTimer);
   }, []);
 
@@ -175,7 +158,7 @@ export default function WhaleRadarApp() {
         theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
         vmcapThr, pchgThr, whaleThr, soundOn, scanHistory: scanHistory.slice(-CFG.HISTORY_MAX),
         prevVolumes, aggressiveMode, watchlistOnly, bybitEnabled, whaleFeedEx,
-        autoScan, autoPaused, // Issue #6: persist auto scan + paused state
+        autoScan, autoPaused,
         hlScannerEnabled, hlMegaTxUsd,
       });
     }, 500);
@@ -202,32 +185,23 @@ export default function WhaleRadarApp() {
   }, []);
 
   // ══ SCAN ══════════════════════════════════════════════════════════════════
-  // Stable refs so enrichCoins doesn't need birdKey in its dep array
   const birdKeyRef = useRef('');
   useEffect(() => { birdKeyRef.current = birdKey; }, [birdKey]);
 
-  // ── Enrich coins with Birdeye (SOL) + DexScreener (high-vmcap) ──────────────
-  // Called after processData. Updates individual coins in state asynchronously.
-  // Each fetch is independently cached so a re-scan doesn't burn API quota.
   const enrichCoins = useCallback(async (mapped: CoinData[]) => {
     const key = birdKeyRef.current;
-
-    // ── DexScreener: small/mid caps where DEX liquidity matters ──────────────
     const dexTargets = mapped
-      .filter(c => c.vmcap > 50 && c.mcap < 2e9)  // skip mega-caps — they don't rug on DEX
-      .slice(0, 15);                                // cap: 15 req per scan
+      .filter(c => c.vmcap > 50 && c.mcap < 2e9)
+      .slice(0, 15);
 
-    // ── Birdeye: only tokens we have addresses for ────────────────────────────
     const solTargets = mapped.filter(c => c.isSol && CFG.SOL_ADDRS[c.symbol]);
 
-    // Fire DexScreener requests — no key needed, throttle to 15/scan
     for (const coin of dexTargets) {
       try {
         const dex = await fetchDexData(coin.symbol, coin.volume);
-        if (!dex.dexHot && !dex.dsLiq) continue; // nothing new — skip state update
+        if (!dex.dexHot && !dex.dsLiq) continue;
         setCoins(prev => prev.map(c => {
           if (c.symbol !== coin.symbol) return c;
-          // Re-run detection with enriched DEX data
           const det = detect({
             vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
             supplyPct: c.supplyPct, vol: c.volume, mcap: c.mcap,
@@ -237,10 +211,9 @@ export default function WhaleRadarApp() {
             score: det.score, threat: det.threat, category: det.category,
             confidence: det.confidence, reasons: det.reasons };
         }));
-      } catch { /* ignore per-coin errors */ }
+      } catch { /* ignore */ }
     }
 
-    // Fire Birdeye requests — requires key, rate limited
     if (!key) return;
     for (const coin of solTargets) {
       const addr = CFG.SOL_ADDRS[coin.symbol];
@@ -249,7 +222,6 @@ export default function WhaleRadarApp() {
         if (!bird) continue;
         setCoins(prev => prev.map(c => {
           if (c.symbol !== coin.symbol) return c;
-          // Re-run detection with on-chain data — this is the real Solana score
           const det = detect({
             vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
             supplyPct: c.supplyPct, vol: c.volume, mcap: c.mcap,
@@ -259,20 +231,17 @@ export default function WhaleRadarApp() {
             score: det.score, threat: det.threat, category: det.category,
             confidence: det.confidence, reasons: det.reasons };
         }));
-      } catch { /* ignore per-coin errors */ }
+      } catch { /* ignore */ }
     }
-  }, []);  // birdKeyRef is a ref — no dep needed
+  }, []);
 
-  // ── Data source status ──────────────────────────────────────────────────────
   const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
 
   const triggerScan = useCallback(async () => {
     if (scanning) return;
-
     setScanning(true);
     setScanBadge('SCANNING');
 
-    // Detect CoinGecko key type: demo keys start with "CG-", pro keys are UUIDs
     const isCgDemoKey = apiKey && apiKey.startsWith('CG-');
     const isCgProKey  = apiKey && !apiKey.startsWith('CG-');
 
@@ -280,13 +249,9 @@ export default function WhaleRadarApp() {
       let scanData: unknown[] | null = null;
       let source: 'live' | 'cached' | 'fallback' = 'live';
 
-      // Strategy 1: Try backend proxy first (handles rate limits server-side).
-      // NOTE: do NOT gate this on isRateLimited() — the proxy has its own
-      // server-side cache and the local rate-limit state reflects *direct* CG calls.
       try {
         const proxyHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
         if (apiKey) proxyHeaders['x-cg-api-key'] = apiKey;
-        // 20s — backend itself retries up to 3× with 8s timeouts
         const proxyRes = await fetch('/api/scan', { headers: proxyHeaders, signal: AbortSignal.timeout(20000) });
         if (proxyRes.ok) {
           const result = await proxyRes.json();
@@ -295,14 +260,9 @@ export default function WhaleRadarApp() {
             source = result.source || 'live';
           }
         }
-      } catch {
-        // Backend unavailable — fall through to direct fetch
-      }
+      } catch { /* backend unavailable */ }
 
-      // Strategy 2: Direct CoinGecko call (works when no backend).
-      // Use the correct base URL and header for the key type.
       if (!scanData) {
-        // Only gate direct CG calls on rate-limit (not the proxy path above)
         if (isRateLimited(RL_KEYS.COINGECKO)) {
           const rem = getCooldownRemaining(RL_KEYS.COINGECKO);
           setScanBadge(`WAIT ${rem}s`);
@@ -345,7 +305,6 @@ export default function WhaleRadarApp() {
       setScanBadge(source === 'live' ? 'LIVE' : source === 'cached' ? 'CACHED' : 'DEGRADED');
       setLastScanTs(Date.now());
 
-      // Persist + enrich (fire-and-forget)
       saveScan(mapped).catch(() => {});
       enrichCoins(mapped).catch(() => {});
     } catch (e: unknown) {
@@ -357,27 +316,19 @@ export default function WhaleRadarApp() {
     }
   }, [scanning, apiKey, prevVolumes]);
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // FIX: Always recalculate vmcap from vol/mcap — ignore garbage c.vmcap from API
+  // ════════════════════════════════════════════════════════════════════════════
   const processData = useCallback((data: unknown[]): CoinData[] => {
     const newVols: Record<string, number> = {};
     const mapped: CoinData[] = (data as Record<string, unknown>[]).map((c, i) => {
       const vol = (c.total_volume as number) || (c.volume as number) || 0;
-      
-      // ══ FIX #1: Don't default mcap to 1 — that's catastrophic for division ══
-      // When API returns null/undefined/0, use 0 as raw value, then derive fallback
-      const mcapRaw = (c.market_cap as number) || (c.mcap as number) || 0;
-      // If mcap is missing but we have volume, estimate mcap from volume (rough heuristic)
-      // This prevents division-by-near-zero that creates astronomical vmcap ratios
-      const mcap = mcapRaw > 0 ? mcapRaw : vol > 0 ? vol : 1;
-      
-      // ══ FIX #2: Calculate vmcap with sanity checks ══
-      let vmcap = (c.vmcap as number) || ((vol / mcap) * 100);
-      
-      // Sanity cap: anything >10,000% is almost certainly bad data or a dead token
-      // Real-world max for legitimate tokens is ~5,000% (extreme memecoin pumps)
-      if (vmcap > 10000 || !isFinite(vmcap) || vmcap < 0) {
-        vmcap = 0; // 0 = invalid/missing data, won't trigger false WASH flags
-      }
-      
+      const mcap = (c.market_cap as number) || (c.mcap as number) || 1;
+
+      // ══ FIX: Force correct vmcap calculation — ignore pre-filled garbage from API ══
+      const safeMcap = Math.max(mcap, 1);
+      const vmcap = Math.max(0, (vol / safeMcap) * 100);
+
       const chg24 = (c.price_change_percentage_24h as number) || (c.change_24h as number) || (c.change as number) || 0;
       const prevVol = prevVolumes[(c.id as string)] || vol;
       const volSpike = prevVol > 0 && prevVol !== vol ? vol / prevVol : 1;
@@ -430,7 +381,7 @@ export default function WhaleRadarApp() {
 
     // Generate alerts for critical/high
     mapped.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
-      addAlert('critical', c.symbol, `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap > 10000 ? 'N/A' : c.vmcap.toFixed(0) + '%'} ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
+      addAlert('critical', c.symbol, `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
     });
     mapped.filter(c => c.threat === 'HIGH' && c.category).slice(0, 3).forEach(c => {
       addAlert('high', c.symbol, `[${c.category}] SCORE=${c.score}/100 — ${c.reasons.join(' · ')}`);
@@ -459,13 +410,11 @@ export default function WhaleRadarApp() {
   }, []);
 
   // ══ WHALE WEBSOCKET ══════════════════════════════════════════════════════
-  // Throttle: 1 DB write per symbol per 30s — avoids flooding on high-volume pairs
   const whaleEventThrottle = useRef<Map<string, number>>(new Map());
 
   const handleWhaleTrade = useCallback((trade: WhaleTrade) => {
     setWhaleFeed(prev => [trade, ...prev].slice(0, CFG.WFEED_MAX));
 
-    // ── Persist to whale_events (Fix #2: wire dead table) ──────────────────
     const lastWrite = whaleEventThrottle.current.get(trade.sym) ?? 0;
     if (Date.now() - lastWrite > 30_000) {
       whaleEventThrottle.current.set(trade.sym, Date.now());
@@ -497,8 +446,6 @@ export default function WhaleRadarApp() {
   });
 
   // ══ AUTO SCAN ═════════════════════════════════════════════════════════════
-  // Use a stable ref so the interval always calls the LATEST triggerScan
-  // without needing it in the effect dep array (avoids restart on every scan).
   const triggerScanRef = useRef(triggerScan);
   useEffect(() => { triggerScanRef.current = triggerScan; }, [triggerScan]);
 
@@ -543,7 +490,7 @@ export default function WhaleRadarApp() {
   // ══ TOGGLE HANDLERS ══════════════════════════════════════════════════════
   const handleToggleAuto = useCallback(() => {
     setAutoScan(p => {
-      if (!p) setAutoPaused(false); // Starting fresh = not paused
+      if (!p) setAutoPaused(false);
       return !p;
     });
   }, []);
@@ -560,10 +507,8 @@ export default function WhaleRadarApp() {
   const filteredCoins = coins.filter(c => {
     if (c.vmcap < vmcapThr && Math.abs(c.change) < pchgThr && c.score < 20) return false;
     if (watchlistOnly && !tracked[c.symbol]) return false;
-    // Advanced filters: chain
     if (advancedFilters.chain === 'solana' && !c.isSol) return false;
     if (['ethereum', 'bsc', 'polygon'].includes(advancedFilters.chain) && c.isSol) return false;
-    // Advanced filters: min volume threshold
     if (advancedFilters.minThreshold > 0 && c.volume < advancedFilters.minThreshold) return false;
     return true;
   });
@@ -579,10 +524,8 @@ export default function WhaleRadarApp() {
     <div className="min-h-screen flex flex-col">
       {showOnboarding && <WROnboarding onFinish={finishOnboarding} />}
 
-      {/* HL setup banner — shown only when Supabase is not configured */}
       <HLConfigBanner onOpenSettings={() => setSettingsOpen(true)} />
 
-      {/* Degraded mode banner */}
       {dataSource === 'fallback' && (
         <div className="bg-wr-red/20 border-b-2 border-wr-red/60 px-4 py-2 text-center text-[10px] text-wr-red tracking-widest">
           ⚠ RUNNING IN DEGRADED MODE — Showing simulated whale activity. Live data temporarily unavailable.
@@ -594,14 +537,12 @@ export default function WhaleRadarApp() {
         </div>
       )}
 
-      {/* Reconnecting banner — shown after 2+ failed attempts */}
       {wsReconnects >= 2 && (
         <div className="bg-wr-amber/20 border-b border-wr-amber/40 px-4 py-1.5 text-center text-[10px] text-wr-amber tracking-widest animate-pulse">
           ⚠ RECONNECTING… (attempt {wsReconnects}) — Data may be delayed
         </div>
       )}
 
-      {/* WS Status indicator */}
       <div className="flex items-center gap-2 px-4 py-0.5 bg-wr-bg3 border-b border-wr-border/50 text-[8px] tracking-widest">
         <span className="text-wr-muted">WS:</span>
         {wsStatus === 'live' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-green animate-blink" /> <span className="text-wr-green">LIVE</span></span>}
