@@ -150,8 +150,7 @@ export function isSolToken(sym: string): boolean {
 }
 
 /* ══ THREAT ENGINE v9.1 ═══════════════════════════════════════════════════════
- *  FIX: Added vmcap sanity upper bound (<=10000) to prevent false WASH flags
- *       on garbage API data where mcap falls back to $1.
+ *  FIX: Lowered vmcap thresholds to match realistic recalculated values (0-500%).
  * ═════════════════════════════════════════════════════════════════════════════ */
 
 export function calcThreat(params: {
@@ -165,13 +164,12 @@ export function calcThreat(params: {
   let ff = 0;
   const absChg = Math.abs(chg24);
 
-  // ══ FIX: Sanitize vmcap — treat >10000 as invalid (0) ══
-  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
-
-  if (safeVmcap >= 800) { score += 40; reasons.push('VOL/MCAP=' + safeVmcap.toFixed(0) + '% 🔴'); ff++; }
-  else if (safeVmcap >= 400) { score += 28; reasons.push('VOL/MCAP=' + safeVmcap.toFixed(0) + '%'); ff++; }
-  else if (safeVmcap >= 200) { score += 16; reasons.push('VOL/MCAP=' + safeVmcap.toFixed(0) + '%'); ff++; }
-  else if (safeVmcap >= 80) { score += 6; ff++; }
+  // FIX: Lowered thresholds for realistic recalculated vmcap
+  if (vmcap >= 400) { score += 40; reasons.push('VOL/MCAP=' + vmcap.toFixed(0) + '% 🔴'); ff++; }
+  else if (vmcap >= 200) { score += 28; reasons.push('VOL/MCAP=' + vmcap.toFixed(0) + '%'); ff++; }
+  else if (vmcap >= 100) { score += 16; reasons.push('VOL/MCAP=' + vmcap.toFixed(0) + '%'); ff++; }
+  else if (vmcap >= 40) { score += 8; reasons.push('VOL/MCAP=' + vmcap.toFixed(0) + '%'); ff++; }
+  else if (vmcap >= 15) { score += 4; }
 
   if (absChg >= 50) { score += 25; reasons.push('ΔP=' + chg24.toFixed(1) + '% 🔴'); ff++; }
   else if (absChg >= 30) { score += 18; reasons.push('ΔP=' + chg24.toFixed(1) + '%'); ff++; }
@@ -195,9 +193,9 @@ export function calcThreat(params: {
   else if (mcap < 100e6) { score += 7; reasons.push('SMALL CAP'); ff++; }
   else if (mcap < 500e6) { score += 3; }
 
-  // ══ FIX: Add upper bound to WASH detection — safeVmcap must be <= 10000 ══
-  if (safeVmcap > 1500 && safeVmcap <= 10000 && mcap < 500e6) { score += 20; reasons.push('WASH SUSPECT 🟣'); ff++; }
-  else if (safeVmcap > 800 && safeVmcap <= 10000 && mcap < 200e6) { score += 14; reasons.push('WASH PATTERN'); ff++; }
+  // FIX: Lowered WASH thresholds for realistic recalculated vmcap
+  if (vmcap > 800 && mcap < 500e6) { score += 20; reasons.push('WASH SUSPECT 🟣'); ff++; }
+  else if (vmcap > 400 && mcap < 200e6) { score += 14; reasons.push('WASH PATTERN'); ff++; }
 
   if (chg24 >= 30 && supplyPct !== null && supplyPct <= 30) { score += 15; reasons.push('PUMP+UNLOCK'); ff++; }
   if (dexHot) { score += 10; reasons.push('DEX TRENDING 🔵'); ff++; }
@@ -227,10 +225,10 @@ export function calcThreat(params: {
   else threat = 'LOW';
 
   let category: string | null = null;
-  // ══ FIX: Use safeVmcap for category classification too ══
-  if (safeVmcap > 1500 && safeVmcap <= 10000 && mcap < 500e6) category = 'WASH';
-  else if (safeVmcap > 800 && safeVmcap <= 10000 && mcap < 200e6) category = 'WASH';
-  else if (chg24 >= 30 && safeVmcap >= 200) category = 'PUMP';
+  // FIX: Lowered thresholds for realistic recalculated vmcap
+  if (vmcap > 800 && mcap < 500e6) category = 'WASH';
+  else if (vmcap > 400 && mcap < 200e6) category = 'WASH';
+  else if (chg24 >= 30 && vmcap >= 120) category = 'PUMP';
   else if (chg24 <= -25 && vol > 30e6) category = 'DUMP';
   else if (absChg >= 20 && supplyPct !== null && supplyPct <= 25) category = 'SQUEEZE';
   else if (volSpike >= 3 && absChg < 10 && score >= 20) category = 'ACCUM';
