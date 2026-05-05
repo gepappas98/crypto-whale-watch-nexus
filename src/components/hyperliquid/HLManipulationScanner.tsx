@@ -1,12 +1,14 @@
-/* ══ HYPERLIQUID — Manipulation Scanner Panel ════════════════════════════════
- *  Renders HL on-chain alerts produced by useHLManipulationScanner.
- *  Designed to slot into WRScanner below the main coin table.
+/* ══ HYPERLIQUID — Manipulation Scanner Panel v2.0 ════════════════════════════
+ * Renders HL on-chain alerts + opportunity signals.
+ * Now includes integrated HLOpportunityPanel for perps profit opportunities.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 import { useState, useCallback, useRef } from 'react';
 import { useHLManipulationScanner } from '@/hooks/useHLManipulationScanner';
 import { useHLBlocks, useHLTxs, useAgeMsLive } from '@/hooks/useHyperliquid';
+import { HLOpportunityPanel } from './HLOpportunityPanel';
 import type { AlertItem } from '@/lib/whaleRadarState';
+import { Zap, Shield, TrendingUp, ChevronDown, ChevronUp, Settings, BarChart3, Bell } from 'lucide-react';
 
 const MAX_HL_ALERTS = 50;
 
@@ -15,9 +17,9 @@ const MAX_HL_ALERTS = 50;
 function HLAlertRow({ alert, onPin }: { alert: AlertItem & { pinned: boolean }; onPin: () => void }) {
   const levelColor = {
     critical: 'border-l-wr-red bg-wr-red/[.04] text-wr-red',
-    high:     'border-l-wr-amber bg-wr-amber/[.03] text-wr-amber',
-    medium:   'border-l-wr-cyan text-wr-cyan',
-    info:     'border-l-wr-muted text-wr-muted',
+    high: 'border-l-wr-amber bg-wr-amber/[.03] text-wr-amber',
+    medium: 'border-l-wr-cyan text-wr-cyan',
+    info: 'border-l-wr-muted text-wr-muted',
   }[alert.level];
 
   const tcColor = {
@@ -28,29 +30,22 @@ function HLAlertRow({ alert, onPin }: { alert: AlertItem & { pinned: boolean }; 
   }[alert.tc] ?? 'bg-wr-border/30 text-wr-muted';
 
   return (
-    <div
-      className={`px-3 py-2 border-b border-wr-border/40 border-l-2 relative animate-slide-in text-[8px]
-        ${levelColor}
-        ${alert.pinned ? '!border-l-wr-gold !bg-wr-gold/[.03]' : ''}`}
-    >
+    <div className={`flex items-start gap-2 px-3 py-2 border-l-2 text-[10px] ${levelColor} hover:bg-wr-bg3/40 transition-colors`}>
       <button
-        className={`absolute right-1.5 top-1 text-[9px] cursor-pointer bg-transparent border-none
-          ${alert.pinned ? 'text-wr-gold opacity-90' : 'text-wr-gold opacity-20 hover:opacity-80'}`}
         onClick={onPin}
+        className={`mt-0.5 shrink-0 ${alert.pinned ? 'text-wr-amber' : 'text-wr-muted/30 hover:text-wr-muted'}`}
         title={alert.pinned ? 'Unpin' : 'Pin'}
       >
-        {alert.pinned ? '📌' : '📍'}
+        <Zap className="w-3 h-3" />
       </button>
-      <span className="text-[7px] text-wr-muted block mb-0.5">
-        {new Date(alert.ts).toLocaleTimeString()}
-      </span>
-      <span>
-        <span className={`inline-block text-[6px] px-1 mr-1 rounded-sm font-mono ${tcColor}`}>
-          {alert.tc}
-        </span>
-        <strong className="text-wr-white">{alert.tag}</strong>
-        <span className="text-wr-white/70 ml-1">{alert.text}</span>
-      </span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 mb-0.5">
+          <span className="text-[9px] text-wr-muted font-mono">{new Date(alert.ts).toLocaleTimeString()}</span>
+          <span className={`px-1 py-0 rounded text-[8px] font-bold ${tcColor}`}>{alert.tc}</span>
+          <span className="font-bold">{alert.tag}</span>
+        </div>
+        <div className="text-wr-white/90 leading-tight">{alert.text}</div>
+      </div>
     </div>
   );
 }
@@ -71,25 +66,17 @@ function HLStatsBar() {
       : 0;
 
   return (
-    <div className="flex items-center gap-3 px-3 py-1.5 bg-wr-bg3 border-b border-wr-border text-[7px] font-mono">
-      <span className="flex items-center gap-1">
-        <span className="w-1 h-1 rounded-full bg-wr-cyan animate-blink inline-block" />
-        <span className="text-wr-muted">BLOCK:</span>
-        <span className="text-wr-cyan">#{latestBlock?.height?.toLocaleString() ?? '—'}</span>
-      </span>
-      <span>
-        <span className="text-wr-muted">TXS/BLK:</span>
-        <span className="text-wr-white ml-1">{avgBlockTx}</span>
-      </span>
-      <span>
-        <span className="text-wr-muted">RECENT TXS:</span>
-        <span className="text-wr-white ml-1">{totalTxs}</span>
-      </span>
-      <div className="flex-1" />
+    <div className="flex items-center justify-between px-3 py-1.5 border-b border-wr-border/40 bg-wr-bg3/20 text-[9px] text-wr-muted font-mono">
+      <div className="flex items-center gap-4">
+        <span>BLOCK: <span className="text-wr-white">#{latestBlock?.height?.toLocaleString() ?? '—'}</span></span>
+        <span>TXS/BLK: <span className="text-wr-white">{avgBlockTx}</span></span>
+        <span>RECENT TXS: <span className="text-wr-white">{totalTxs}</span></span>
+      </div>
       {serverTs && (
-        <span className={`text-[6px] tracking-widest ${cached ? 'text-wr-cyan/60' : 'text-wr-green/60'}`}>
-          {cached ? '⚡' : '✓'} {liveAge < 1000 ? `${liveAge}ms` : `${(liveAge / 1000).toFixed(1)}s`} ago
-        </span>
+        <div className="flex items-center gap-1">
+          <span>{cached ? '⚡' : '✓'}</span>
+          <span>{liveAge < 1000 ? `${liveAge}ms` : `${(liveAge / 1000).toFixed(1)}s`} ago</span>
+        </div>
       )}
     </div>
   );
@@ -103,6 +90,8 @@ interface HLManipulationScannerProps {
   enabled?: boolean;
   megaTxUsd?: number;
   collapsed?: boolean;
+  showOpportunities?: boolean;
+  minApy?: number;
 }
 
 export function HLManipulationScanner({
@@ -110,109 +99,212 @@ export function HLManipulationScanner({
   enabled = true,
   megaTxUsd,
   collapsed: initialCollapsed = false,
+  showOpportunities = true,
+  minApy = 12,
 }: HLManipulationScannerProps) {
   const [hlAlerts, setHlAlerts] = useState<(AlertItem & { pinned: boolean })[]>([]);
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [filter, setFilter] = useState<'ALL' | 'C' | 'H' | 'M'>('ALL');
+  const [activeTab, setActiveTab] = useState<'alerts' | 'opportunities'>('opportunities');
+  const [showSettings, setShowSettings] = useState(false);
+  const [hlMegaTxUsd, setHlMegaTxUsd] = useState(megaTxUsd ?? 300_000);
+  const [hlMinApy, setHlMinApy] = useState(minApy);
   const seenKeys = useRef<Set<string>>(new Set());
 
   const handleAlert = useCallback(
     (alert: AlertItem) => {
-      // Dedup by tag+text fingerprint to prevent duplicate rows during re-renders
       const key = `${alert.tc}-${alert.tag}-${alert.text.slice(0, 30)}`;
       if (seenKeys.current.has(key)) return;
       seenKeys.current.add(key);
-      // Trim the set to avoid unbounded growth
       if (seenKeys.current.size > 200) {
         seenKeys.current = new Set([...seenKeys.current].slice(-100));
       }
 
       const pinnable = { ...alert, pinned: false };
-      setHlAlerts(prev => [pinnable, ...prev].slice(0, MAX_HL_ALERTS));
+      setHlAlerts((prev) => [pinnable, ...prev].slice(0, MAX_HL_ALERTS));
       onGlobalAlert?.(alert);
     },
     [onGlobalAlert],
   );
 
-  useHLManipulationScanner({ enabled, megaTxUsd, onAlert: handleAlert });
+  const { opportunities } = useHLManipulationScanner({
+    enabled,
+    megaTxUsd: hlMegaTxUsd,
+    onAlert: handleAlert,
+    minApy: hlMinApy,
+  });
 
   const togglePin = useCallback((idx: number) => {
-    setHlAlerts(prev => prev.map((a, i) => i === idx ? { ...a, pinned: !a.pinned } : a));
+    setHlAlerts((prev) => prev.map((a, i) => (i === idx ? { ...a, pinned: !a.pinned } : a)));
   }, []);
 
-  const filtered = hlAlerts.filter(a => filter === 'ALL' || a.tc === filter);
+  const filtered = hlAlerts.filter((a) => filter === 'ALL' || a.tc === filter);
   const counts = {
-    C: hlAlerts.filter(a => a.tc === 'C').length,
-    H: hlAlerts.filter(a => a.tc === 'H').length,
-    M: hlAlerts.filter(a => a.tc === 'M').length,
+    C: hlAlerts.filter((a) => a.tc === 'C').length,
+    H: hlAlerts.filter((a) => a.tc === 'H').length,
+    M: hlAlerts.filter((a) => a.tc === 'M').length,
   };
 
   return (
-    <div className="border-t border-wr-border bg-wr-bg">
-
+    <div className="flex flex-col h-full border border-wr-border bg-wr-bg2 rounded-sm">
       {/* Header */}
-      <button
-        className="w-full flex items-center gap-2 px-3 py-1.5 wr-panel-header cursor-pointer hover:bg-wr-bg3 transition-colors text-left"
-        onClick={() => setCollapsed(p => !p)}
-      >
-        <span className="wr-panel-title text-wr-cyan flex items-center gap-1.5">
-          <span className={`w-1.5 h-1.5 rounded-full inline-block ${enabled ? 'bg-wr-cyan animate-blink' : 'bg-wr-muted'}`} />
-          🔗 HL ON-CHAIN SCANNER
-        </span>
-        <span className="flex items-center gap-1 ml-1">
-          {counts.C > 0 && <span className="text-[7px] px-1 bg-wr-red/20 text-wr-red rounded font-mono">{counts.C}C</span>}
-          {counts.H > 0 && <span className="text-[7px] px-1 bg-wr-amber/20 text-wr-amber rounded font-mono">{counts.H}H</span>}
-          {counts.M > 0 && <span className="text-[7px] px-1 bg-wr-cyan/10 text-wr-cyan rounded font-mono">{counts.M}M</span>}
-        </span>
-        <div className="flex-1" />
-        <span className="text-[8px] text-wr-muted font-mono">{collapsed ? '▼' : '▲'}</span>
-      </button>
+      <div className="wr-panel-header flex items-center justify-between px-3 py-2">
+        <div className="flex items-center gap-2">
+          <Shield className="w-4 h-4 text-wr-cyan" />
+          <span className="wr-panel-title text-[11px] font-bold tracking-wide">
+            HYPERLIQUID SCANNER
+          </span>
+          {counts.C > 0 && (
+            <span className="px-1.5 py-0 rounded bg-wr-red/20 text-wr-red text-[9px] font-bold">
+              {counts.C} CRIT
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="p-1 rounded hover:bg-wr-bg3 transition-colors"
+            title="Settings"
+          >
+            <Settings className="w-3 h-3 text-wr-muted" />
+          </button>
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="p-1 rounded hover:bg-wr-bg3 transition-colors"
+          >
+            {collapsed ? <ChevronDown className="w-3 h-3 text-wr-muted" /> : <ChevronUp className="w-3 h-3 text-wr-muted" />}
+          </button>
+        </div>
+      </div>
 
+      {/* Settings panel */}
+      {showSettings && !collapsed && (
+        <div className="px-3 py-2 border-b border-wr-border/40 bg-wr-bg3/30">
+          <div className="flex items-center gap-3 text-[10px]">
+            <label className="text-wr-muted">Mega TX:</label>
+            <select
+              value={hlMegaTxUsd}
+              onChange={(e) => setHlMegaTxUsd(Number(e.target.value))}
+              className="bg-wr-bg2 border border-wr-border rounded px-2 py-1 text-wr-white text-[10px]"
+            >
+              <option value={100_000}>$100K</option>
+              <option value={300_000}>$300K</option>
+              <option value={500_000}>$500K</option>
+              <option value={1_000_000}>$1M</option>
+            </select>
+            <label className="text-wr-muted ml-2">Min APY:</label>
+            <select
+              value={hlMinApy}
+              onChange={(e) => setHlMinApy(Number(e.target.value))}
+              className="bg-wr-bg2 border border-wr-border rounded px-2 py-1 text-wr-white text-[10px]"
+            >
+              <option value={5}>5%</option>
+              <option value={12}>12%</option>
+              <option value={25}>25%</option>
+              <option value={50}>50%</option>
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* Tab bar */}
+      {!collapsed && showOpportunities && (
+        <div className="flex items-center border-b border-wr-border/40">
+          <button
+            onClick={() => setActiveTab('opportunities')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold transition-colors ${
+              activeTab === 'opportunities'
+                ? 'text-wr-amber border-b-2 border-wr-amber bg-wr-amber/5'
+                : 'text-wr-muted hover:text-wr-white'
+            }`}
+          >
+            <TrendingUp className="w-3 h-3" />
+            OPPORTUNITIES
+            {opportunities.length > 0 && (
+              <span className="ml-1 px-1 rounded bg-wr-amber/20 text-wr-amber text-[8px]">
+                {opportunities.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('alerts')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold transition-colors ${
+              activeTab === 'alerts'
+                ? 'text-wr-cyan border-b-2 border-wr-cyan bg-wr-cyan/5'
+                : 'text-wr-muted hover:text-wr-white'
+            }`}
+          >
+            <Bell className="w-3 h-3" />
+            ALERTS
+            {hlAlerts.length > 0 && (
+              <span className="ml-1 px-1 rounded bg-wr-cyan/20 text-wr-cyan text-[8px]">
+                {hlAlerts.length}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Content */}
       {!collapsed && (
         <>
-          {/* Live stats */}
-          <HLStatsBar />
+          {activeTab === 'opportunities' && showOpportunities ? (
+            <HLOpportunityPanel
+              enabled={enabled}
+              minApy={hlMinApy}
+              maxSignals={12}
+            />
+          ) : (
+            <>
+              {/* Live stats */}
+              <HLStatsBar />
 
-          {/* Filter tabs */}
-          <div className="flex border-b border-wr-border px-2 py-1 gap-1">
-            {(['ALL', 'C', 'H', 'M'] as const).map(f => (
-              <button
-                key={f}
-                className={`text-[7px] px-1.5 py-0.5 border cursor-pointer font-mono tracking-widest transition-all
-                  ${filter === f
-                    ? 'bg-wr-cyan/10 border-wr-cyan text-wr-cyan'
-                    : 'border-wr-border text-wr-muted hover:border-wr-cyan/40'}`}
-                onClick={() => setFilter(f)}
-              >
-                {f === 'ALL' ? 'ALL' : f === 'C' ? '🔴 CRIT' : f === 'H' ? '🟡 HIGH' : '🔵 MED'}
-              </button>
-            ))}
-            <div className="flex-1" />
-            {hlAlerts.length > 0 && (
-              <button
-                className="text-[7px] text-wr-muted/60 hover:text-wr-muted font-mono border border-transparent hover:border-wr-border px-1.5 cursor-pointer transition-colors"
-                onClick={() => { setHlAlerts([]); seenKeys.current.clear(); }}
-                title="Clear alerts"
-              >
-                CLR
-              </button>
-            )}
-          </div>
-
-          {/* Alert list */}
-          <div className="max-h-44 overflow-y-auto scrollbar-thin">
-            {filtered.length === 0 ? (
-              <div className="text-center text-wr-muted text-[9px] py-5 tracking-widest">
-                {enabled
-                  ? 'Monitoring Hyperliquid on-chain activity…'
-                  : 'Scanner disabled — enable in settings'}
+              {/* Filter tabs */}
+              <div className="flex items-center gap-1 px-3 py-1 border-b border-wr-border/40">
+                {(['ALL', 'C', 'H', 'M'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setFilter(f)}
+                    className={`px-2 py-0.5 rounded text-[9px] font-mono transition-colors ${
+                      filter === f
+                        ? 'bg-wr-cyan/20 text-wr-cyan'
+                        : 'text-wr-muted hover:text-wr-white'
+                    }`}
+                  >
+                    {f === 'ALL' ? 'ALL' : `${f} (${counts[f as keyof typeof counts]})`}
+                  </button>
+                ))}
+                {hlAlerts.length > 0 && (
+                  <button
+                    onClick={() => setHlAlerts([])}
+                    className="ml-auto text-[9px] text-wr-muted hover:text-wr-red transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
               </div>
-            ) : (
-              filtered.map((a, i) => (
-                <HLAlertRow key={i} alert={a} onPin={() => togglePin(hlAlerts.indexOf(a))} />
-              ))
-            )}
-          </div>
+
+              {/* Alert list */}
+              <div className="flex-1 overflow-auto scrollbar-thin">
+                {filtered.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-32 text-wr-muted text-[10px]">
+                    <BarChart3 className="w-5 h-5 mb-2 opacity-30" />
+                    {enabled
+                      ? 'Monitoring Hyperliquid on-chain activity…'
+                      : 'Scanner disabled — enable in settings'}
+                  </div>
+                ) : (
+                  filtered.map((a, i) => (
+                    <HLAlertRow
+                      key={`${a.ts}-${i}`}
+                      alert={a}
+                      onPin={() => togglePin(hlAlerts.indexOf(a))}
+                    />
+                  ))
+                )}
+              </div>
+            </>
+          )}
         </>
       )}
     </div>
