@@ -469,6 +469,8 @@ export function WRScanner({
         collapsed
         enabled={hlScannerEnabled}
         megaTxUsd={hlMegaTxUsd}
+        showOpportunities
+        minApy={12}
         onGlobalAlert={(alert) => onAddAlert(alert.level, alert.tag, alert.text)}
       />
     </div>
