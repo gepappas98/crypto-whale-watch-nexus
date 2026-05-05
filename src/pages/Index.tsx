@@ -37,9 +37,11 @@ import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
 function getCeoSignalLabel(score: number, threat: string, category: string, vmcap: number): string {
   const t = threat.toUpperCase();
   const cat = (category || '').toUpperCase();
-  if (score >= 88 || vmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) return 'AVOID / SHORT';
+  // FIX: Treat insane vmcap (>10000) as invalid data — don't flag as AVOID
+  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
+  if (score >= 88 || safeVmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH')) return 'AVOID / SHORT';
   if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE')))         return 'AGGRESSIVE LONG';
-  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) return 'LONG (tight stop)';
+  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || safeVmcap > 300)) return 'LONG (tight stop)';
   if (score >= 45) return 'LONG';
   if (score >= 35) return 'WATCH';
   return 'HOLD';
@@ -359,8 +361,23 @@ export default function WhaleRadarApp() {
     const newVols: Record<string, number> = {};
     const mapped: CoinData[] = (data as Record<string, unknown>[]).map((c, i) => {
       const vol = (c.total_volume as number) || (c.volume as number) || 0;
-      const mcap = (c.market_cap as number) || (c.mcap as number) || 1;
-      const vmcap = (c.vmcap as number) || ((vol / mcap) * 100);
+      
+      // ══ FIX #1: Don't default mcap to 1 — that's catastrophic for division ══
+      // When API returns null/undefined/0, use 0 as raw value, then derive fallback
+      const mcapRaw = (c.market_cap as number) || (c.mcap as number) || 0;
+      // If mcap is missing but we have volume, estimate mcap from volume (rough heuristic)
+      // This prevents division-by-near-zero that creates astronomical vmcap ratios
+      const mcap = mcapRaw > 0 ? mcapRaw : vol > 0 ? vol : 1;
+      
+      // ══ FIX #2: Calculate vmcap with sanity checks ══
+      let vmcap = (c.vmcap as number) || ((vol / mcap) * 100);
+      
+      // Sanity cap: anything >10,000% is almost certainly bad data or a dead token
+      // Real-world max for legitimate tokens is ~5,000% (extreme memecoin pumps)
+      if (vmcap > 10000 || !isFinite(vmcap) || vmcap < 0) {
+        vmcap = 0; // 0 = invalid/missing data, won't trigger false WASH flags
+      }
+      
       const chg24 = (c.price_change_percentage_24h as number) || (c.change_24h as number) || (c.change as number) || 0;
       const prevVol = prevVolumes[(c.id as string)] || vol;
       const volSpike = prevVol > 0 && prevVol !== vol ? vol / prevVol : 1;
@@ -413,7 +430,7 @@ export default function WhaleRadarApp() {
 
     // Generate alerts for critical/high
     mapped.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
-      addAlert('critical', c.symbol, `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
+      addAlert('critical', c.symbol, `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap > 10000 ? 'N/A' : c.vmcap.toFixed(0) + '%'} ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
     });
     mapped.filter(c => c.threat === 'HIGH' && c.category).slice(0, 3).forEach(c => {
       addAlert('high', c.symbol, `[${c.category}] SCORE=${c.score}/100 — ${c.reasons.join(' · ')}`);
