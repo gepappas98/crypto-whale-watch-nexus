@@ -1,17 +1,18 @@
 /* ══ WHALE RADAR v9 — SCANNER TABLE ══════════════════════════════════════════
  *
- *  FIXES v1.2 (see bug report):
- *  - getCeoSignal() BUG-004: Decoupled WASH/bad-data AVOID from legitimate
- *    CRITICAL signals. Previously `vmcap > 1000 || threat === 'CRITICAL' ||
- *    cat.includes('WASH')` were all in one branch, making it impossible for
- *    a real PUMP/SQUEEZE with CRITICAL threat to reach AGGRESSIVE LONG.
+ *  FIXES v1.3 (CRITICAL BUG FIX — Tokens Not Rendering):
+ *  - Added defensive null-checks for all coin fields before rendering
+ *  - Wrapped getCeoSignal in try-catch to prevent render crashes
+ *  - Added fallback keys when c.id is missing (uses c.symbol + index)
+ *  - Added coin data validation — skips malformed entries instead of crashing
+ *  - Added debug logging in dev mode to catch data shape issues
+ *  - Fixed hlOpps.match() to safely handle undefined returns
+ *  - Added min-height to table rows to prevent CSS collapse
+ *  - Ensured paginatedCoins always has valid data even if coins array has gaps
  *
- *    New priority order:
- *      1. vmcap > 1000 OR category=WASH  → AVOID/SHORT  (data issue or wash)
- *      2. CRITICAL + PUMP/SQUEEZE        → AGGRESSIVE LONG (real signal)
- *      3. score ≥ 88                     → AVOID/SHORT  (extreme score, no pattern)
- *      4. CRITICAL alone                 → AVOID/SHORT  (RUG/DUMP)
- *      5. score/category-based tiers     → as before
+ *  FIXES v1.2:
+ *  - getCeoSignal() BUG-004: Decoupled WASH/bad-data AVOID from legitimate
+ *    CRITICAL signals.
  *
  * ════════════════════════════════════════════════════════════════════════════ */
 
@@ -25,7 +26,7 @@ import { useHLOpportunities } from '@/hooks/useHLOpportunities';
 import type { HLSignal } from '@/components/hyperliquid/HLOpportunityPanel';
 
 // ── HL opportunity badge config (per opportunityType) ────────────────────────
-const HL_OPP_META: Record<HLSignal['opportunityType'], { label: string; cls: string; title: string }> = {
+const HL_OPP_META: Record<string, { label: string; cls: string; title: string }> = {
   funding_arb:   { label: 'FUND',   cls: 'text-emerald-400 border-emerald-400/40 bg-emerald-400/10', title: 'Funding arbitrage' },
   basis_trade:   { label: 'BASIS',  cls: 'text-blue-400 border-blue-400/40 bg-blue-400/10',         title: 'Basis trade (delta-neutral)' },
   squeeze_short: { label: 'SQZ-S',  cls: 'text-red-400 border-red-400/40 bg-red-400/10',            title: 'Short squeeze candidate' },
@@ -37,59 +38,64 @@ const HL_OPP_META: Record<HLSignal['opportunityType'], { label: string; cls: str
 };
 
 // ══ CEO SIGNAL ENGINE v1.2 ════════════════════════════════════════════════════
-//
-// FIX BUG-004: Separated WASH/data-error path from real manipulation signals.
-//
-// BEFORE (broken):
-//   if (score>=88 || vmcap>1000 || t==='CRITICAL' || cat.includes('WASH'))
-//     → AVOID/SHORT
-//   // The PUMP/SQUEEZE branches below were unreachable for any CRITICAL token.
-//
-// AFTER (fixed):
-//   Check WASH / bad-data first (vmcap>1000, category=WASH).
-//   Then allow CRITICAL + PUMP/SQUEEZE through to AGGRESSIVE LONG.
-//   CRITICAL alone (RUG/DUMP or no pattern) still → AVOID/SHORT.
-//
-function getCeoSignal(score: number, threat: string, category: string, vmcap: number) {
-  const t   = threat.toUpperCase();
-  const cat = (category || '').toUpperCase();
+function getCeoSignal(score: number, threat: string, category: string | null, vmcap: number) {
+  try {
+    const t   = (threat || '').toUpperCase();
+    const cat = (category || '').toUpperCase();
+    const sc  = typeof score === 'number' ? score : 0;
+    const vm  = typeof vmcap === 'number' ? vmcap : 0;
 
-  // ── 1. Wash trade or unreliable vmcap (> 1000% is either wash or bad data)
-  if (vmcap > 1000 || cat.includes('WASH')) {
-    return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
-  }
+    // 1. Wash trade or unreliable vmcap
+    if (vm > 1000 || cat.includes('WASH')) {
+      return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
+    }
 
-  // ── 2. Legitimate CRITICAL pump / squeeze → actionable long signal
-  if (t === 'CRITICAL' && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
-    return { label: 'AGGRESSIVE LONG', mark: '★★★★★', cls: 'text-wr-amber border-wr-amber/60 bg-wr-amber/10' };
-  }
+    // 2. Legitimate CRITICAL pump / squeeze
+    if (t === 'CRITICAL' && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
+      return { label: 'AGGRESSIVE LONG', mark: '★★★★★', cls: 'text-wr-amber border-wr-amber/60 bg-wr-amber/10' };
+    }
 
-  // ── 3. Extreme score with no positive pattern → avoid
-  if (score >= 88) {
-    return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
-  }
+    // 3. Extreme score with no positive pattern
+    if (sc >= 88) {
+      return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
+    }
 
-  // ── 4. CRITICAL alone (RUG_PULL, DUMP, or no category) → avoid
-  if (t === 'CRITICAL') {
-    return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
-  }
+    // 4. CRITICAL alone
+    if (t === 'CRITICAL') {
+      return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
+    }
 
-  // ── 5. HIGH threat pump/squeeze with meaningful vmcap
-  if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
-    return { label: 'AGGRESSIVE LONG', mark: '★★★★★', cls: 'text-wr-amber border-wr-amber/60 bg-wr-amber/10' };
-  }
+    // 5. HIGH threat pump/squeeze
+    if (sc >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
+      return { label: 'AGGRESSIVE LONG', mark: '★★★★★', cls: 'text-wr-amber border-wr-amber/60 bg-wr-amber/10' };
+    }
 
-  // ── 6. Moderate signals
-  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) {
-    return { label: 'LONG (tight stop)', mark: '★★★★', cls: 'text-wr-amber border-wr-amber/40 bg-wr-amber/5' };
+    // 6. Moderate signals
+    if (sc >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vm > 300)) {
+      return { label: 'LONG (tight stop)', mark: '★★★★', cls: 'text-wr-amber border-wr-amber/40 bg-wr-amber/5' };
+    }
+    if (sc >= 45) {
+      return { label: 'LONG', mark: '★★★', cls: 'text-wr-amber border-wr-amber/30 bg-transparent' };
+    }
+    if (sc >= 35) {
+      return { label: 'WATCH', mark: '★★', cls: 'text-wr-muted border-wr-border bg-transparent' };
+    }
+    return { label: 'HOLD', mark: '★', cls: 'text-wr-muted border-wr-border bg-transparent' };
+  } catch (e) {
+    console.error('[WRScanner] getCeoSignal error:', e);
+    return { label: 'ERROR', mark: '?', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
   }
-  if (score >= 45) {
-    return { label: 'LONG', mark: '★★★', cls: 'text-wr-amber border-wr-amber/30 bg-transparent' };
-  }
-  if (score >= 35) {
-    return { label: 'WATCH', mark: '★★', cls: 'text-wr-muted border-wr-border bg-transparent' };
-  }
-  return { label: 'HOLD', mark: '★', cls: 'text-wr-muted border-wr-border bg-transparent' };
+}
+
+// ── Validate coin data ──────────────────────────────────────────────────────
+function isValidCoin(c: unknown): c is CoinData {
+  if (!c || typeof c !== 'object') return false;
+  const coin = c as Record<string, unknown>;
+  return (
+    typeof coin.symbol === 'string' && coin.symbol.length > 0 &&
+    typeof coin.price === 'number' &&
+    typeof coin.score === 'number'
+  );
 }
 
 interface WRScannerProps {
@@ -140,8 +146,9 @@ export function WRScanner({
   const [sortKey, setSortKey]   = useState<string>('score');
   const [sortDir, setSortDir]   = useState(-1);
   const [aiRows, setAiRows]     = useState<Record<string, AiRowData>>({});
+  const [showAdvFilters, setShowAdvFilters] = useState(false);
 
-  // ── HL perps opportunity overlay (matches by symbol) ──────────────────────
+  // ── HL perps opportunity overlay ──────────────────────────────────────────
   const hlOpps = useHLOpportunities({ enabled: hlScannerEnabled, minApy: 12 });
 
   const handleSort = (key: string) => {
@@ -163,22 +170,47 @@ export function WRScanner({
       return;
     }
     setAiRows(prev => ({ ...prev, [coin.symbol]: { symbol: coin.symbol, text: '', loading: true } }));
-    const text = await analyzeToken(coin, aiKey);
-    setAiRows(prev => ({
-      ...prev,
-      [coin.symbol]: { symbol: coin.symbol, text: text || 'No response', loading: false },
-    }));
+    try {
+      const text = await analyzeToken(coin, aiKey);
+      setAiRows(prev => ({
+        ...prev,
+        [coin.symbol]: { symbol: coin.symbol, text: text || 'No response', loading: false },
+      }));
+    } catch (e) {
+      setAiRows(prev => ({
+        ...prev,
+        [coin.symbol]: { symbol: coin.symbol, text: 'AI analysis failed', loading: false },
+      }));
+    }
   }, [aiKey, onAddAlert]);
 
-  const filtered = coins
-    .filter(c => !search || c.symbol.includes(search.toUpperCase()) || c.name.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => {
-      const av = (a as unknown as Record<string, unknown>)[sortKey];
-      const bv = (b as unknown as Record<string, unknown>)[sortKey];
-      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sortDir;
-      if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * sortDir;
-      return 0;
-    });
+  // ── Filter & sort with validation ────────────────────────────────────────
+  const filtered = useMemo(() => {
+    const validCoins = Array.isArray(coins) ? coins.filter(isValidCoin) : [];
+
+    if (validCoins.length === 0) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[WRScanner] No valid coins. Raw coins:', coins);
+      }
+      return [];
+    }
+
+    const searchUpper = search.toUpperCase();
+    const searchLower = search.toLowerCase();
+
+    return validCoins
+      .filter(c => {
+        if (!search) return true;
+        return c.symbol.includes(searchUpper) || c.name.toLowerCase().includes(searchLower);
+      })
+      .sort((a, b) => {
+        const av = (a as unknown as Record<string, unknown>)[sortKey];
+        const bv = (b as unknown as Record<string, unknown>)[sortKey];
+        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sortDir;
+        if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * sortDir;
+        return 0;
+      });
+  }, [coins, search, sortKey, sortDir]);
 
   const PAGE_SIZE   = 20;
   const totalPages  = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -188,7 +220,12 @@ export function WRScanner({
     return filtered.slice(start, start + PAGE_SIZE);
   }, [filtered, currentPage]);
 
-  const [showAdvFilters, setShowAdvFilters] = useState(false);
+  // ── Debug logging ─────────────────────────────────────────────────────────
+  if (process.env.NODE_ENV === 'development') {
+    useMemo(() => {
+      console.log('[WRScanner] coins:', coins?.length, 'filtered:', filtered.length, 'page:', currentPage, 'paginated:', paginatedCoins.length);
+    }, [coins, filtered, currentPage, paginatedCoins]);
+  }
 
   const badgeCls = scanBadge === 'LIVE'    ? 'text-wr-green border-wr-green-dim bg-wr-green-ghost'
     : scanBadge === 'SCANNING'             ? 'text-wr-cyan border-wr-cyan/30'
@@ -324,130 +361,151 @@ export function WRScanner({
                   {coins.length === 0 ? 'Click SCAN to begin surveillance' : 'No tokens match current filters'}
                 </td>
               </tr>
-            ) : paginatedCoins.map(c => {
+            ) : paginatedCoins.map((c, rowIdx) => {
+              // ── Defensive: skip invalid coins ────────────────────────────
+              if (!isValidCoin(c)) {
+                console.warn('[WRScanner] Skipping invalid coin at index', rowIdx, c);
+                return null;
+              }
+
+              const rowKey = c.id || `${c.symbol}-${rowIdx}`;
               const siz        = calcSizing(c);
               const isTracked  = !!tracked[c.symbol];
-              // vmcapCls: consistent with detection thresholds (400 / 200 / 100)
-              const vmcapCls   = c.vmcap >= 800 ? 'text-wr-red'
-                               : c.vmcap >= 400 ? 'text-wr-amber'
-                               : c.vmcap >= 200 ? 'text-wr-cyan'
+              const vmcapCls   = (c.vmcap || 0) >= 800 ? 'text-wr-red'
+                               : (c.vmcap || 0) >= 400 ? 'text-wr-amber'
+                               : (c.vmcap || 0) >= 200 ? 'text-wr-cyan'
                                : 'text-wr-green-dim';
               const catCls     = c.category ? `wr-cat-${c.category.toLowerCase()}` : '';
               const aiRow      = aiRows[c.symbol];
-              const hlOpp      = hlOpps.match(c.symbol);
-              const hlMeta     = hlOpp ? HL_OPP_META[hlOpp.opportunityType] : null;
+
+              // Safe HL opportunity lookup
+              let hlOpp: HLSignal | undefined = undefined;
+              let hlMeta: typeof HL_OPP_META[string] | null = null;
+              try {
+                hlOpp = hlOpps.match(c.symbol);
+                hlMeta = hlOpp ? HL_OPP_META[hlOpp.opportunityType] : null;
+              } catch (e) {
+                console.warn('[WRScanner] HL opp lookup failed for', c.symbol, e);
+              }
+
               const hlRowGlow  = hlOpp?.level === 'critical' ? 'shadow-[inset_3px_0_0_0_hsl(var(--wr-amber))]' : '';
 
-              return [
-                <tr
-                  key={c.id}
-                  className={`${c.threat === 'CRITICAL' ? 'animate-flash-red' : c.threat === 'HIGH' ? 'animate-flash-amber' : ''} ${aiRow ? 'border-b-0' : ''} ${hlRowGlow}`}
-                >
-                  <td className="text-wr-muted text-[8px]">{c.rank}</td>
-                  <td>
-                    <div className="font-head text-[10px] text-wr-white tracking-widest flex items-center flex-wrap gap-1">
-                      <span>{c.symbol}</span>
-                      {c.isSol   && <span className="text-wr-sol text-[7px]">◎</span>}
-                      {c.dexHot  && <span className="text-[7px] px-0.5 bg-wr-blue/10 border border-wr-blue/30 text-wr-blue">DEX</span>}
-                      {hlOpp && hlMeta && (
-                        <span
-                          className={`text-[7px] px-1 py-px border font-mono tracking-wider inline-flex items-center gap-0.5 ${hlMeta.cls}`}
-                          title={`HL ${hlMeta.title} · ${hlOpp.side} · ${hlOpp.expectedEdge}${hlOpp.apyEstimate ? ` · ~${hlOpp.apyEstimate.toFixed(0)}% APY` : ''} · conv ${hlOpp.conviction}%`}
-                        >
-                          HL·{hlMeta.label}
-                          {hlOpp.side !== 'NEUTRAL' && (
-                            <span className="opacity-80">{hlOpp.side === 'LONG' ? '↑' : '↓'}</span>
-                          )}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[8px] text-wr-muted">{c.name}</div>
-                  </td>
-                  <td className="text-wr-cyan">${fmtP(c.price)}</td>
-                  <td className={c.change >= 0 ? 'text-wr-green' : 'text-wr-red'}>
-                    {c.change >= 0 ? '+' : ''}{c.change.toFixed(2)}%
-                  </td>
-                  <td className="text-wr-white">{fmtN(c.volume)}</td>
-                  <td className="text-wr-muted">{fmtN(c.mcap)}</td>
-                  <td>
-                    <span className={vmcapCls}>{c.vmcap.toFixed(0)}%</span>
-                    <div className="text-[7px] text-wr-muted">VS:×{c.volSpike.toFixed(1)}</div>
-                  </td>
-                  <td>
-                    <div className="text-[9px] text-wr-amber">{c.score}/100</div>
-                    <div className="flex gap-0.5 mt-0.5">
-                      {Array.from({ length: 10 }).map((_, i) => (
-                        <div
-                          key={i}
-                          className={`w-1 h-1 rounded-[1px] ${i < Math.ceil(c.score / 10) ? 'bg-wr-amber' : 'bg-wr-border'}`}
-                          style={{ background: i < Math.ceil(c.score / 10) ? 'hsl(var(--wr-amber))' : 'hsl(var(--wr-border))' }}
-                        />
-                      ))}
-                    </div>
-                    <div className="text-[7px] text-wr-muted mt-0.5">CONF:{c.confidence}%</div>
-                  </td>
-                  <td><span className={`wr-badge wr-badge-${c.threat.toLowerCase()}`}>{c.threat}</span></td>
-                  <td>
-                    {c.category ? (
-                      <span className={`wr-badge ${catCls}`}>{c.category}</span>
-                    ) : (
-                      <span className="text-wr-muted text-[7px]">—</span>
-                    )}
-                  </td>
-                  <td>
-                    <div className="flex gap-1">
-                      <button
-                        className={`wr-btn text-[8px] px-1.5 py-0.5 ${isTracked ? 'active' : ''}`}
-                        onClick={() => isTracked ? onUntrack(c.symbol) : onTrack(c.id, c.symbol, c.price)}
-                        title={isTracked ? 'Untrack' : 'Track price'}
-                      >
-                        {isTracked ? '✓' : '+'}
-                      </button>
-                      <button
-                        className="wr-btn ai text-[8px] px-1.5 py-0.5"
-                        onClick={() => handleAiAnalyze(c)}
-                        title="AI Analysis"
-                      >
-                        ✦
-                      </button>
-                    </div>
-                  </td>
-                  <td className="text-right">
-                    {(() => {
-                      const sig = getCeoSignal(c.score, c.threat, c.category || '', c.vmcap);
-                      return (
-                        <div className={`inline-flex items-center gap-1 border px-2 py-0.5 text-[8px] font-mono tracking-wider ${sig.cls}`}>
-                          {sig.label} <span className="text-[10px]">{sig.mark}</span>
-                        </div>
-                      );
-                    })()}
-                  </td>
-                </tr>,
-                aiRow && (
-                  <tr key={`ai-${c.symbol}`} className="bg-wr-purple/[.04] border-t-0">
-                    <td colSpan={12} className="p-0">
-                      <div className="px-3 py-2 border-l-2 border-l-wr-purple">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-[8px] text-wr-purple tracking-widest">✦ AI ANALYSIS</span>
-                          <span className="text-[7px] text-wr-muted">{c.symbol}</span>
-                          <div className="flex-1" />
-                          <button
-                            className="text-[8px] px-1.5 py-0.5 bg-transparent border border-wr-border text-wr-muted hover:text-wr-red hover:border-wr-red cursor-pointer font-mono"
-                            onClick={() => removeAiRow(c.symbol)}
+              return (
+                <React.Fragment key={rowKey}>
+                  <tr
+                    className={`${c.threat === 'CRITICAL' ? 'animate-flash-red' : c.threat === 'HIGH' ? 'animate-flash-amber' : ''} ${aiRow ? 'border-b-0' : ''} ${hlRowGlow}`}
+                    style={{ minHeight: '40px' }}
+                  >
+                    <td className="text-wr-muted text-[8px]">{c.rank || '—'}</td>
+                    <td>
+                      <div className="font-head text-[10px] text-wr-white tracking-widest flex items-center flex-wrap gap-1">
+                        <span>{c.symbol}</span>
+                        {c.isSol   && <span className="text-wr-sol text-[7px]">◎</span>}
+                        {c.dexHot  && <span className="text-[7px] px-0.5 bg-wr-blue/10 border border-wr-blue/30 text-wr-blue">DEX</span>}
+                        {hlOpp && hlMeta && (
+                          <span
+                            className={`text-[7px] px-1 py-px border font-mono tracking-wider inline-flex items-center gap-0.5 ${hlMeta.cls}`}
+                            title={`HL ${hlMeta.title} · ${hlOpp.side} · ${hlOpp.expectedEdge}${hlOpp.apyEstimate ? ` · ~${hlOpp.apyEstimate.toFixed(0)}% APY` : ''} · conv ${hlOpp.conviction}%`}
                           >
-                            ✕
-                          </button>
-                        </div>
-                        {aiRow.loading ? (
-                          <span className="text-[9px] text-wr-purple animate-pulse">analyzing {c.symbol}…</span>
-                        ) : (
-                          <p className="text-[9px] text-wr-white leading-relaxed whitespace-pre-wrap">{aiRow.text}</p>
+                            HL·{hlMeta.label}
+                            {hlOpp.side !== 'NEUTRAL' && (
+                              <span className="opacity-80">{hlOpp.side === 'LONG' ? '↑' : '↓'}</span>
+                            )}
+                          </span>
                         )}
                       </div>
+                      <div className="text-[8px] text-wr-muted">{c.name || '—'}</div>
+                    </td>
+                    <td className="text-wr-cyan">${fmtP(c.price || 0)}</td>
+                    <td className={c.change >= 0 ? 'text-wr-green' : 'text-wr-red'}>
+                      {c.change >= 0 ? '+' : ''}{(c.change || 0).toFixed(2)}%
+                    </td>
+                    <td className="text-wr-white">{fmtN(c.volume || 0)}</td>
+                    <td className="text-wr-muted">{fmtN(c.mcap || 0)}</td>
+                    <td>
+                      <span className={vmcapCls}>{(c.vmcap || 0).toFixed(0)}%</span>
+                      <div className="text-[7px] text-wr-muted">VS:×{(c.volSpike || 0).toFixed(1)}</div>
+                    </td>
+                    <td>
+                      <div className="text-[9px] text-wr-amber">{(c.score || 0)}/100</div>
+                      <div className="flex gap-0.5 mt-0.5">
+                        {Array.from({ length: 10 }).map((_, i) => (
+                          <div
+                            key={i}
+                            className={`w-1 h-1 rounded-[1px] ${i < Math.ceil((c.score || 0) / 10) ? 'bg-wr-amber' : 'bg-wr-border'}`}
+                            style={{ background: i < Math.ceil((c.score || 0) / 10) ? 'hsl(var(--wr-amber))' : 'hsl(var(--wr-border))' }}
+                          />
+                        ))}
+                      </div>
+                      <div className="text-[7px] text-wr-muted mt-0.5">CONF:{c.confidence || 0}%</div>
+                    </td>
+                    <td>
+                      <span className={`wr-badge wr-badge-${(c.threat || 'low').toLowerCase()}`}>
+                        {c.threat || 'LOW'}
+                      </span>
+                    </td>
+                    <td>
+                      {c.category ? (
+                        <span className={`wr-badge ${catCls}`}>{c.category}</span>
+                      ) : (
+                        <span className="text-wr-muted text-[7px]">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="flex gap-1">
+                        <button
+                          className={`wr-btn text-[8px] px-1.5 py-0.5 ${isTracked ? 'active' : ''}`}
+                          onClick={() => isTracked ? onUntrack(c.symbol) : onTrack(c.id || c.symbol, c.symbol, c.price || 0)}
+                          title={isTracked ? 'Untrack' : 'Track price'}
+                        >
+                          {isTracked ? '✓' : '+'}
+                        </button>
+                        <button
+                          className="wr-btn ai text-[8px] px-1.5 py-0.5"
+                          onClick={() => handleAiAnalyze(c)}
+                          title="AI Analysis"
+                        >
+                          ✦
+                        </button>
+                      </div>
+                    </td>
+                    <td className="text-right">
+                      {(() => {
+                        const sig = getCeoSignal(c.score || 0, c.threat || 'LOW', c.category, c.vmcap || 0);
+                        return (
+                          <div className={`inline-flex items-center gap-1 border px-2 py-0.5 text-[8px] font-mono tracking-wider ${sig.cls}`}>
+                            {sig.label} <span className="text-[10px]">{sig.mark}</span>
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
-                ),
-              ];
+                  {aiRow && (
+                    <tr key={`ai-${c.symbol}`} className="bg-wr-purple/[.04] border-t-0">
+                      <td colSpan={12} className="p-0">
+                        <div className="px-3 py-2 border-l-2 border-l-wr-purple">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[8px] text-wr-purple tracking-widest">✦ AI ANALYSIS</span>
+                            <span className="text-[7px] text-wr-muted">{c.symbol}</span>
+                            <div className="flex-1" />
+                            <button
+                              className="text-[8px] px-1.5 py-0.5 bg-transparent border border-wr-border text-wr-muted hover:text-wr-red hover:border-wr-red cursor-pointer font-mono"
+                              onClick={() => removeAiRow(c.symbol)}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          {aiRow.loading ? (
+                            <span className="text-[9px] text-wr-purple animate-pulse">analyzing {c.symbol}…</span>
+                          ) : (
+                            <p className="text-[9px] text-wr-white leading-relaxed whitespace-pre-wrap">{aiRow.text}</p>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
             })}
           </tbody>
         </table>
