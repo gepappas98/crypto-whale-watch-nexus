@@ -1,7 +1,6 @@
-/* ══ WHALE RADAR — DETECTION ENGINE v1.0 ══════════════════════════════════════
- *  Structured detection package extracted from inline whaleRadarState logic.
- *  Provides: whaleScore · detectManipulation · classifyCategory · buildThreat
- *  Used by: analyzeToken.ts (AI prompt enrichment) + whaleRadarState.ts (scoring)
+/* ══ WHALE RADAR — DETECTION ENGINE v1.1 ══════════════════════════════════════
+ *  FIX: Added vmcap sanity upper bound (<=10000) to prevent false WASH flags
+ *       on garbage API data (e.g. mcap=$1 causing 5 billion % ratios).
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 import type { BirdeyeData } from './whaleRadarState';
@@ -22,15 +21,15 @@ export interface WhaleScoreInput {
 }
 
 export interface WhaleScoreResult {
-  score: number;           // 0–100 manipulation score
-  reasons: string[];       // human-readable flag descriptions
-  flagCount: number;       // number of distinct flags triggered
+  score: number;
+  reasons: string[];
+  flagCount: number;
 }
 
 export interface ManipulationResult {
   level: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'NORMAL';
   pattern: ManipulationPattern;
-  confidence: number;      // 0–100
+  confidence: number;
 }
 
 export type ManipulationPattern =
@@ -68,7 +67,6 @@ export interface DetectionSignals {
 }
 
 // ── 1. Whale Score ────────────────────────────────────────────────────────────
-// Scores a token's whale-activity indicators independently of manipulation.
 
 export function whaleScore(input: WhaleScoreInput): WhaleScoreResult {
   const { vmcap, chg24, volSpike, vol, mcap, supplyPct, dexHot, dsLiq, isSol, birdData } = input;
@@ -77,11 +75,14 @@ export function whaleScore(input: WhaleScoreInput): WhaleScoreResult {
   let flagCount = 0;
   const absChg = Math.abs(chg24);
 
+  // ══ FIX: Only score vmcap if it's sane (<=10000). vmcap=0 means invalid data. ══
+  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
+
   // VOL/MCAP ratio — primary whale activity signal
-  if (vmcap >= 800)      { score += 40; reasons.push(`VOL/MCAP=${vmcap.toFixed(0)}% 🔴`); flagCount++; }
-  else if (vmcap >= 400) { score += 28; reasons.push(`VOL/MCAP=${vmcap.toFixed(0)}%`);     flagCount++; }
-  else if (vmcap >= 200) { score += 16; reasons.push(`VOL/MCAP=${vmcap.toFixed(0)}%`);     flagCount++; }
-  else if (vmcap >= 80)  { score += 6;                                                       flagCount++; }
+  if (safeVmcap >= 800)      { score += 40; reasons.push(`VOL/MCAP=${safeVmcap.toFixed(0)}% 🔴`); flagCount++; }
+  else if (safeVmcap >= 400) { score += 28; reasons.push(`VOL/MCAP=${safeVmcap.toFixed(0)}%`);     flagCount++; }
+  else if (safeVmcap >= 200) { score += 16; reasons.push(`VOL/MCAP=${safeVmcap.toFixed(0)}%`);     flagCount++; }
+  else if (safeVmcap >= 80)  { score += 6;                                                       flagCount++; }
 
   // Price change magnitude
   if (absChg >= 50)      { score += 25; reasons.push(`ΔP=${chg24.toFixed(1)}% 🔴`); flagCount++; }
@@ -150,7 +151,6 @@ export function whaleScore(input: WhaleScoreInput): WhaleScoreResult {
 }
 
 // ── 2. Manipulation Detector ──────────────────────────────────────────────────
-// Pattern-based cluster analysis. Identifies the dominant manipulation type.
 
 export interface ManipulationInput {
   vmcap: number;
@@ -169,11 +169,14 @@ export function detectManipulation(input: ManipulationInput): ManipulationResult
   const absChg = Math.abs(chg24);
   const confidence = Math.min(Math.round((flagCount / 10) * 100), 100);
 
+  // ══ FIX: Add upper bound sanity check — vmcap > 10000 is garbage data ══
+  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
+
   // WASH TRADE: extreme vol relative to tiny mcap — coordinated circular trading
-  if (vmcap > 1500 && mcap < 500e6) {
+  if (safeVmcap > 1500 && mcap < 500e6) {
     return { level: 'CRITICAL', pattern: 'WASH_TRADE', confidence };
   }
-  if (vmcap > 800 && mcap < 200e6) {
+  if (safeVmcap > 800 && mcap < 200e6) {
     return { level: 'HIGH', pattern: 'WASH_TRADE', confidence };
   }
 
@@ -183,7 +186,7 @@ export function detectManipulation(input: ManipulationInput): ManipulationResult
   }
 
   // PUMP & DUMP: big price spike + high vol relative to mcap
-  if (chg24 >= 30 && vmcap >= 200) {
+  if (chg24 >= 30 && safeVmcap >= 200) {
     const level: ManipulationResult['level'] = chg24 >= 50 ? 'CRITICAL' : 'HIGH';
     return { level, pattern: 'PUMP_AND_DUMP', confidence };
   }
@@ -218,10 +221,14 @@ export function classifyCategory(
   vmcap: number, chg24: number, volSpike: number, mcap: number, supplyPct: number | null
 ): string | null {
   const absChg = Math.abs(chg24);
-  if (vmcap > 1500 && mcap < 500e6) return 'WASH';
-  if (vmcap > 800 && mcap < 200e6)  return 'WASH';
-  if (chg24 >= 30 && vmcap >= 200)   return 'PUMP';
-  if (chg24 <= -25 && chg24 < 0 && vmcap >= 100) return 'DUMP';   // fixed: was checking vol directly
+  
+  // ══ FIX: Add sanity upper bound to prevent garbage data triggering WASH ══
+  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
+  
+  if (safeVmcap > 1500 && mcap < 500e6) return 'WASH';
+  if (safeVmcap > 800 && mcap < 200e6)  return 'WASH';
+  if (chg24 >= 30 && safeVmcap >= 200)   return 'PUMP';
+  if (chg24 <= -25 && chg24 < 0 && safeVmcap >= 100) return 'DUMP';
   if (absChg >= 20 && supplyPct !== null && supplyPct <= 25) return 'SQUEEZE';
   if (volSpike >= 3 && absChg < 10)  return 'ACCUM';
   return null;
@@ -237,16 +244,18 @@ export function calcThreatLevel(score: number): ThreatLevel {
 }
 
 // ── 5. Build Detection Signals ────────────────────────────────────────────────
-// Flat boolean signals for CEO SIGNAL engine and UI color logic.
 
 export function buildSignals(input: WhaleScoreInput & { score: number }): DetectionSignals {
   const { vmcap, chg24, volSpike, mcap, supplyPct, dsLiq, vol, birdData, score } = input;
   const absChg = Math.abs(chg24);
   const liqRatio = dsLiq ? vol / (dsLiq.liq || 1) : 0;
 
+  // ══ FIX: Sanitize vmcap before building signals ══
+  const safeVmcap = vmcap > 10000 ? 0 : vmcap;
+
   return {
-    isWashSuspect:    (vmcap > 800 && mcap < 500e6) || (vmcap > 1500),
-    isPumpActive:     chg24 >= 30 && vmcap >= 200,
+    isWashSuspect:    (safeVmcap > 800 && mcap < 500e6) || (safeVmcap > 1500),
+    isPumpActive:     chg24 >= 30 && safeVmcap >= 200,
     isDumpActive:     chg24 <= -25 && vol > 30e6,
     isSqueezeActive:  absChg >= 20 && supplyPct !== null && supplyPct <= 25,
     isAccumulating:   volSpike >= 3 && absChg < 10 && score >= 20,
@@ -258,8 +267,6 @@ export function buildSignals(input: WhaleScoreInput & { score: number }): Detect
 }
 
 // ── 6. Master detect() — single entry point ───────────────────────────────────
-// Replaces the inline calcThreat() in whaleRadarState.ts.
-// Returns everything needed for rendering + AI prompting.
 
 export function detect(input: WhaleScoreInput): DetectionResult {
   const whale = whaleScore(input);
