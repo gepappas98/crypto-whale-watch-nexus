@@ -29,6 +29,7 @@ import { WRAdvancedFilters, type WhaleFilters } from './WRAdvancedFilters';
 import { HLManipulationScanner } from '@/components/hyperliquid/HLManipulationScanner';
 import { useHLOpportunities } from '@/hooks/useHLOpportunities';
 import type { HLSignal } from '@/components/hyperliquid/HLOpportunityPanel';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 
 // ── HL opportunity badge config (per opportunityType) ────────────────────────
 const HL_OPP_META: Record<string, { label: string; cls: string; title: string }> = {
