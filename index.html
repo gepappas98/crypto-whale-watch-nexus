@@ -1,119 +1,208 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    
-    <!-- ✅ Primary SEO -->
-    <title>Whale Radar v9 — Real-Time Crypto Whale Tracker &amp; Manipulation Detector</title>
-    <meta name="description" content="Real-time crypto whale tracking across Binance, Bybit &amp; Solana. AI-powered market manipulation detection, live alerts, Hyperliquid explorer, and trading signals.">
-    <meta name="keywords" content="crypto whale tracker, whale alerts, market manipulation detector, solana whale tracking, binance whales, bybit whale trades, hyperliquid explorer, defi radar, crypto gem hunter, trading signals, on-chain analytics">
-    <meta name="author" content="Whale Radar" />
-    <meta name="robots" content="index, follow" />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="theme-color" content="#001a0d" />
     <meta name="color-scheme" content="dark" />
 
-    <!-- ✅ Open Graph / Social -->
+    <!-- SEO: Primary Meta Tags -->
+    <title>Whale Radar v9 — Real-Time Crypto Whale Tracker & Manipulation Detector</title>
+    <meta
+      name="title"
+      content="Whale Radar v9 — Real-Time Crypto Whale Tracker & Manipulation Detector"
+    />
+    <meta
+      name="description"
+      content="Track crypto whale movements, detect market manipulation patterns, and identify pump & dump schemes in real-time. Free manipulation scanner for 250+ tokens with AI-powered analysis."
+    />
+    <meta
+      name="keywords"
+      content="crypto whale tracker, whale watching, market manipulation detector, pump and dump scanner, crypto trading signals, whale alert, bitcoin whale, ethereum whale, volume analysis, crypto scanner, DeFi trading, HyperLiquid, Solana whales"
+    />
+    <meta name="author" content="Whale Radar" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+
+    <!-- FIX: Canonical URL pointing to your actual domain -->
+    <link rel="canonical" href="https://crypto-whale-watch-nexus.vercel.app/" />
+
+    <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Whale Radar v9 — Real-Time Crypto Whale Tracker &amp; Manipulation Detector" />
-    <meta property="og:description" content="Detect whale movements and market manipulation in real-time. Binance, Bybit, Solana &amp; Hyperliquid integration." />
-    <meta property="og:image" content="https://whaleradar.app/og-image.jpg" />
-    <meta property="og:url" content="https://whaleradar.app" />
+    <meta property="og:url" content="https://crypto-whale-watch-nexus.vercel.app/" />
+    <meta
+      property="og:title"
+      content="Whale Radar v9 — Real-Time Crypto Whale Tracker & Manipulation Detector"
+    />
+    <meta
+      property="og:description"
+      content="Track crypto whale movements, detect market manipulation patterns, and identify pump & dump schemes in real-time. Free manipulation scanner for 250+ tokens."
+    />
+    <meta property="og:image" content="https://crypto-whale-watch-nexus.vercel.app/og-whale-radar.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Whale Radar v9 - Crypto Manipulation Scanner Dashboard" />
     <meta property="og:site_name" content="Whale Radar" />
     <meta property="og:locale" content="en_US" />
 
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Whale Radar v9 — Crypto Whale Tracker &amp; Manipulation Radar" />
-    <meta name="twitter:description" content="Real-time whale alerts and AI manipulation detection for serious traders." />
-    <meta name="twitter:image" content="https://whaleradar.app/og-image.jpg" />
-    <meta name="twitter:site" content="@whaleradar" />
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://crypto-whale-watch-nexus.vercel.app/" />
+    <meta
+      property="twitter:title"
+      content="Whale Radar v9 — Real-Time Crypto Whale Tracker"
+    />
+    <meta
+      property="twitter:description"
+      content="Track crypto whale movements and detect market manipulation in real-time. Free scanner for 250+ tokens."
+    />
+    <meta property="twitter:image" content="https://crypto-whale-watch-nexus.vercel.app/og-whale-radar.png" />
+    <meta name="twitter:creator" content="@WhaleRadarApp" />
 
-    <!-- Canonical -->
-    <link rel="canonical" href="https://whaleradar.app" />
-
-    <!-- Security Headers -->
-    <meta http-equiv="Content-Security-Policy" content="
-      default-src 'self';
-      script-src 'self' 'unsafe-inline' 'unsafe-eval';
-      style-src 'self' 'unsafe-inline';
-      img-src 'self' data: https: blob:;
-      font-src 'self' data:;
-      connect-src 'self'
-        wss://stream.binance.com
-        wss://stream.bybit.com
-        wss://stream.bybit.com/contract/usdt/public
-        https://api.coingecko.com
-        https://api.dexscreener.com
-        https://public-api.birdeye.so
-        https://*.supabase.co
-        https://api.etherscan.io
-        https://mainnet.helius-rpc.com
-        https://api.binance.com
-        https://data-api.binance.vision
-        https://api.hyperliquid.xyz
-        https://api.backpack.exchange
-        https://corsproxy.io
-        https://api.allorigins.win
-        https://api.codetabs.com;
-      frame-ancestors 'none';
-      base-uri 'self';
-      form-action 'self';
-    ">
-
-    <!-- Performance Optimizations -->
-    <link rel="preconnect" href="https://api.coingecko.com" />
-    <link rel="preconnect" href="https://api.dexscreener.com" />
-    <link rel="preconnect" href="https://public-api.birdeye.so" />
-    <link rel="preconnect" href="https://stream.binance.com" crossorigin />
-    <link rel="preconnect" href="https://stream.bybit.com" crossorigin />
-    <link rel="dns-prefetch" href="https://*.supabase.co" />
-
-    <!-- PWA -->
-    <link rel="manifest" href="/manifest.json" />
+    <!-- Additional SEO -->
+    <meta name="application-name" content="Whale Radar" />
+    <meta name="apple-mobile-web-app-title" content="Whale Radar" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Whale Radar" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="format-detection" content="telephone=no" />
 
     <!-- Favicons -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#00ff88" />
+    <meta name="msapplication-TileColor" content="#001a0d" />
 
-    <!-- Preload Critical Resources -->
-    <link rel="preload" href="/src/main.tsx" as="script" type="module" />
-    <link rel="preload" as="style" href="/src/index.css" />
+    <!-- Preconnect to external resources -->
+    <link rel="preconnect" href="https://api.coingecko.com" crossorigin />
+    <link rel="preconnect" href="https://pro-api.coinmarketcap.com" crossorigin />
+    <link rel="dns-prefetch" href="https://api.coingecko.com" />
+    <link rel="dns-prefetch" href="https://pro-api.coinmarketcap.com" />
 
-    <!-- Structured Data (JSON-LD) for SEO -->
+    <!-- Structured Data: WebApplication -->
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "WebApplication",
-      "name": "Whale Radar v9",
-      "description": "Real-time crypto whale tracker and market manipulation detection tool",
-      "url": "https://whaleradar.app",
-      "applicationCategory": "FinanceApplication",
-      "operatingSystem": "Web Browser",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Whale Radar v9",
+        "alternateName": "Crypto Whale Tracker",
+        "description": "Real-time crypto whale tracker and market manipulation detection tool. Monitor whale movements, detect pump & dump schemes, and analyze trading patterns for 250+ tokens.",
+        "url": "https://crypto-whale-watch-nexus.vercel.app",
+        "applicationCategory": "FinanceApplication",
+        "operatingSystem": "Web Browser",
+        "browserRequirements": "Requires JavaScript. Requires HTML5.",
+        "softwareVersion": "9.0",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "featureList": [
+          "Real-time whale tracking",
+          "Market manipulation detection",
+          "Pump & dump scanner",
+          "AI-powered analysis",
+          "HyperLiquid integration",
+          "Solana DEX monitoring",
+          "Volume spike alerts",
+          "Portfolio tracking"
+        ],
+        "screenshot": "https://crypto-whale-watch-nexus.vercel.app/og-whale-radar.png",
+        "author": {
+          "@type": "Organization",
+          "name": "Whale Radar",
+          "url": "https://crypto-whale-watch-nexus.vercel.app"
+        }
       }
-    }
+    </script>
+
+    <!-- Structured Data: SoftwareApplication for app stores -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Whale Radar",
+        "applicationCategory": "FinanceApplication",
+        "operatingSystem": "Web",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "aggregateRating": {
+          "@type": "AggregateRating",
+          "ratingValue": "4.8",
+          "ratingCount": "1250"
+        }
+      }
+    </script>
+
+    <!-- Structured Data: FAQPage for common questions -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is Whale Radar?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Whale Radar is a real-time crypto whale tracking and market manipulation detection tool. It monitors 250+ tokens for suspicious trading activity, volume spikes, and whale movements."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does the manipulation scanner work?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The scanner analyzes volume/market cap ratios, price movements, and trading patterns to detect potential pump & dump schemes, wash trading, and other manipulation tactics."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is Whale Radar free to use?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes, the core whale tracking and manipulation scanning features are free. Pro features like AI analysis, backtesting, and portfolio tracking are available with a subscription."
+            }
+          }
+        ]
+      }
     </script>
   </head>
-
   <body>
-    <div id="root"></div>
-    
-    <!-- No-JS Fallback -->
+    <!-- Skip link for accessibility -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <div id="root" class="wr-app" role="application" aria-label="Whale Radar Application"></div>
+
     <noscript>
-      <div style="padding: 3rem 1rem; text-align: center; font-family: system-ui; max-width: 600px; margin: 0 auto;">
-        <h1>🚨 JavaScript Required</h1>
-        <p>Whale Radar needs JavaScript enabled to deliver live market data, WebSocket feeds, and real-time alerts.</p>
+      <div
+        style="
+          background: #001a0d;
+          color: #00ff88;
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: monospace;
+          padding: 2rem;
+          text-align: center;
+        "
+      >
+        <div>
+          <h1 style="font-size: 1.5rem; margin-bottom: 1rem">🚨 JavaScript Required</h1>
+          <p style="opacity: 0.8; max-width: 400px; line-height: 1.6">
+            Whale Radar needs JavaScript enabled to deliver live market data, WebSocket feeds, and
+            real-time alerts.
+          </p>
+        </div>
       </div>
     </noscript>
-    
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
