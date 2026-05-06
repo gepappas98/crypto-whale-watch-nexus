@@ -205,6 +205,23 @@ export function useHLOpportunities({
           reason: `Mark/index divergence on strong volume.`,
         });
       }
+
+      // 8. VOLATILITY SKEW — mirrors HLOpportunityPanel logic
+      // BUG-FIX: this opportunity type existed in HL_OPP_META (WRScanner) but was
+      // never pushed here, so SKEW badges never appeared in the scanner table.
+      if (Math.abs(fundingRate) > 0.001 && Math.abs(premium) > 0.004) {
+        const skew = Math.abs(fundingRate) + Math.abs(premium);
+        push({
+          opportunityType: 'vol_skew',
+          level: 'high',
+          side: 'NEUTRAL',
+          apyEstimate: skew * 100 * 365,
+          riskScore: 65,
+          conviction: 60,
+          expectedEdge: `Vol Skew ${fmtPct(skew)}`,
+          reason: `Funding ${fmtPct(fundingRate)} + Premium ${fmtPct(premium)} = ${fmtPct(skew)} total skew. Options arb possible.`,
+        });
+      }
     });
 
     // Best per symbol
