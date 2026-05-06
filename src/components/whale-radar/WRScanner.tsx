@@ -624,6 +624,70 @@ export function WRScanner({
           </div>
         </div>
       ))}
+
+      {/* HL Opportunity Detail Drawer */}
+      <Sheet open={!!hlDrawer} onOpenChange={(o) => !o && setHlDrawer(null)}>
+        <SheetContent side="right" className="bg-wr-bg2 border-wr-border text-wr-white w-full sm:max-w-md overflow-y-auto">
+          {hlDrawer && (
+            <>
+              <SheetHeader>
+                <SheetTitle className="flex items-center gap-2 text-wr-white">
+                  <span className={`wr-badge border ${hlDrawer.meta.cls}`}>HL·{hlDrawer.meta.label}</span>
+                  <span className="text-wr-green font-bold">{hlDrawer.symbol}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                    hlDrawer.opp.side === 'LONG' ? 'text-wr-green border-wr-green-dim bg-wr-green-ghost'
+                    : hlDrawer.opp.side === 'SHORT' ? 'text-wr-red border-wr-red/40 bg-wr-red/10'
+                    : 'text-wr-muted border-wr-border'
+                  }`}>{hlDrawer.opp.side}</span>
+                </SheetTitle>
+                <SheetDescription className="text-wr-muted text-[11px]">
+                  {hlDrawer.meta.title}
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="mt-4 space-y-4 text-[11px]">
+                <div className="grid grid-cols-2 gap-2">
+                  <Stat label="Expected Edge" value={hlDrawer.opp.expectedEdge} accent="amber" />
+                  <Stat label="APY Estimate" value={`${hlDrawer.opp.apyEstimate.toFixed(1)}%`} accent="green" />
+                  <Stat label="Conviction" value={`${hlDrawer.opp.conviction}/100`} accent="cyan" />
+                  <Stat label="Risk Score" value={`${hlDrawer.opp.riskScore}/100`} accent={hlDrawer.opp.riskScore > 60 ? 'red' : 'muted'} />
+                  <Stat label="Funding" value={`${(hlDrawer.opp.fundingRate * 100).toFixed(4)}%`} />
+                  <Stat label="Premium" value={`${(hlDrawer.opp.premium * 100).toFixed(3)}%`} />
+                  <Stat label="Open Interest" value={`$${(hlDrawer.opp.openInterest / 1e6).toFixed(2)}M`} />
+                  <Stat label="24h Volume" value={`$${(hlDrawer.opp.dailyVolume / 1e6).toFixed(2)}M`} />
+                  <Stat label="Mark Price" value={`$${hlDrawer.opp.markPrice.toFixed(4)}`} />
+                  <Stat label="Index Price" value={`$${hlDrawer.opp.indexPrice.toFixed(4)}`} />
+                </div>
+
+                <div>
+                  <div className="text-wr-muted text-[9px] uppercase tracking-wide mb-1">Reason</div>
+                  <div className="text-wr-white/90 leading-relaxed border border-wr-border rounded p-2 bg-wr-bg3/40">
+                    {hlDrawer.opp.reason}
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    className="wr-btn flex-1"
+                    onClick={() => {
+                      onAddAlert(
+                        hlDrawer.opp.level === 'critical' ? 'critical' : hlDrawer.opp.level === 'high' ? 'high' : 'medium',
+                        `HL·${hlDrawer.meta.label}`,
+                        `📌 ${hlDrawer.symbol} · ${hlDrawer.opp.side} · ${hlDrawer.opp.expectedEdge}`
+                      );
+                    }}
+                  >
+                    🔔 Pin Alert
+                  </button>
+                  <button className="wr-btn" onClick={() => setHlDrawer(null)}>
+                    Close
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </section>
   );
 }
