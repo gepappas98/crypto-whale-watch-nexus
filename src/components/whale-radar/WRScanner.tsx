@@ -458,7 +458,7 @@ export function WRScanner({
                 const aiRow = aiRows[c.symbol];
 
                 // Safe HL opportunity lookup
-                let hlOpp: HLSignal | undefined = undefined;
+                let hlOpp: HLOppSignal | undefined = undefined;
                 let hlMeta: (typeof HL_OPP_META)[string] | null = null;
                 try {
                   hlOpp = hlOpps.match(c.symbol);
