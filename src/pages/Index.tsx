@@ -15,9 +15,9 @@ import { WRMobileFilterSheet } from '@/components/whale-radar/WRMobileFilterShee
 import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
 import { DEFAULT_FILTERS, type WhaleFilters } from '@/components/whale-radar/WRAdvancedFilters';
 import {
- CoinData, AlertItem, WhaleTrade, TrackedToken, PortfolioEntry,
- WalletEntry, ScanSnapshot, CFG, fmtN, fmtP, isSolToken,
- calcSizing, saveState, loadState,
+  CoinData, AlertItem, WhaleTrade, TrackedToken, PortfolioEntry,
+  WalletEntry, ScanSnapshot, CFG, fmtN, fmtP, isSolToken,
+  calcSizing, saveState, loadState,
 } from '@/lib/whaleRadarState';
 import { handleRateLimit, isRateLimited, getCooldownRemaining, getActiveCooldowns, onRateLimitChange, RL_KEYS } from '@/lib/rateLimit';
 import { detect } from '@/lib/detection';
@@ -36,896 +36,932 @@ import { HLManipulationScanner } from '@/components/hyperliquid/HLManipulationSc
 const MCAP_MIN_RELIABLE = 10_000;
 
 function getCeoSignalLabel(score: number, threat: string, category: string, vmcap: number): string {
- const t = threat.toUpperCase();
- const cat = (category || '').toUpperCase();
+  const t = threat.toUpperCase();
+  const cat = (category || '').toUpperCase();
 
- if (vmcap > 1000 || cat.includes('WASH')) return 'AVOID / SHORT';
- if (t === 'CRITICAL' && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) return 'AGGRESSIVE LONG';
- if (score >= 88) return 'AVOID / SHORT';
- if (t === 'CRITICAL') return 'AVOID / SHORT';
- if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) return 'AGGRESSIVE LONG';
- if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) return 'LONG (tight stop)';
- if (score >= 45) return 'LONG';
- if (score >= 35) return 'WATCH';
- return 'HOLD';
+  if (vmcap > 1000 || cat.includes('WASH')) return 'AVOID / SHORT';
+  if (t === 'CRITICAL' && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) return 'AGGRESSIVE LONG';
+  if (score >= 88) return 'AVOID / SHORT';
+  if (t === 'CRITICAL') return 'AVOID / SHORT';
+  if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) return 'AGGRESSIVE LONG';
+  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) return 'LONG (tight stop)';
+  if (score >= 45) return 'LONG';
+  if (score >= 35) return 'WATCH';
+  return 'HOLD';
 }
 
 export default function WhaleRadarApp() {
- const [coins, setCoins] = useState<CoinData[]>([]);
- const [alerts, setAlerts] = useState<AlertItem[]>([]);
- const [whaleFeed, setWhaleFeed] = useState<WhaleTrade[]>([]);
- const [tracked, setTracked] = useState<Record<string, TrackedToken>>({});
- const [portfolio, setPortfolio] = useState<Record<string, PortfolioEntry>>({});
- const [wallets, setWallets] = useState<WalletEntry[]>([]);
- const [scanHistory, setScanHistory] = useState<ScanSnapshot[]>([]);
-
- const [theme, setTheme] = useState<'cyber' | 'matrix' | 'dark'>('cyber');
- const [settingsOpen, setSettingsOpen] = useState(false);
- const [soundOn, setSoundOn] = useState(true);
- const [autoScan, setAutoScan] = useState(false);
- const [autoPaused, setAutoPaused] = useState(false);
- const [scanning, setScanning] = useState(false);
- const [scanBadge, setScanBadge] = useState('IDLE');
- const [kbdOpen, setKbdOpen] = useState(false);
- const [alertFilter, setAlertFilter] = useState('ALL');
- const [watchlistOnly, setWatchlistOnly] = useState(false);
- const [showOnboarding, setShowOnboarding] = useState(false);
- const [copiedBtc, setCopiedBtc] = useState(false);
-
- const [apiKey, setApiKey] = useState('');
- const [aiKey, setAiKey] = useState('');
- const [birdKey, setBirdKey] = useState('');
- const [heliusKey, setHeliusKey] = useState('');
-
- const [vmcapThr, setVmcapThr] = useState(200);
- const [pchgThr, setPchgThr] = useState(15);
- const [whaleThr, setWhaleThr] = useState(150000);
- const [aggressiveMode, setAggressiveMode] = useState(false);
-
- const [bybitEnabled, setBybitEnabled] = useState(false);
- const [whaleFeedEx, setWhaleFeedEx] = useState('all');
- const [hlScannerEnabled, setHlScannerEnabled] = useState(true);
- const [hlMegaTxUsd, setHlMegaTxUsd] = useState(500_000);
- const [supabaseUrl, setSupabaseUrl] = useState('');
- const [supabaseAnonKey, setSupabaseAnonKey] = useState('');
- const [subscribedPairs] = useState(() => new Set<string>());
- const [advancedFilters, setAdvancedFilters] = useState<WhaleFilters>(DEFAULT_FILTERS);
- const [scanPage, setScanPage] = useState(1);
-
- const [apiCallCount, setApiCallCount] = useState(0);
- const [aiCallCount, setAiCallCount] = useState(0);
- const [nextScan, setNextScan] = useState('—');
- const [lastScanTs, setLastScanTs] = useState(0);
-
- const [activeModal, setActiveModal] = useState<string | null>(null);
-
- const [prevVolumes, setPrevVolumes] = useState<Record<string, number>>({});
-
- useEffect(() => {
- const saved = loadState();
- if (saved.theme) setTheme(saved.theme as 'cyber' | 'matrix' | 'dark');
- if (saved.apiKey) setApiKey(saved.apiKey as string);
- if (saved.aiKey) setAiKey(saved.aiKey as string);
- if (saved.birdKey) setBirdKey(saved.birdKey as string);
- if (saved.heliusKey) setHeliusKey(saved.heliusKey as string);
- if (saved.tracked) setTracked(saved.tracked as Record<string, TrackedToken>);
- if (saved.portfolio) setPortfolio(saved.portfolio as Record<string, PortfolioEntry>);
- if (saved.wallets) setWallets(saved.wallets as WalletEntry[]);
- if (saved.vmcapThr) setVmcapThr(saved.vmcapThr as number);
- if (saved.pchgThr) setPchgThr(saved.pchgThr as number);
- if (saved.whaleThr) setWhaleThr(saved.whaleThr as number);
- if (saved.soundOn !== undefined) setSoundOn(saved.soundOn as boolean);
- if (saved.scanHistory) setScanHistory(saved.scanHistory as ScanSnapshot[]);
- if (saved.prevVolumes) setPrevVolumes(saved.prevVolumes as Record<string, number>);
- if (saved.bybitEnabled) setBybitEnabled(saved.bybitEnabled as boolean);
- if (saved.whaleFeedEx) setWhaleFeedEx(saved.whaleFeedEx as string);
- if (saved.hlScannerEnabled !== undefined) setHlScannerEnabled(saved.hlScannerEnabled as boolean);
- if (saved.hlMegaTxUsd) setHlMegaTxUsd(saved.hlMegaTxUsd as number);
- const sbUrl = localStorage.getItem('wr_supabase_url') ?? '';
- const sbKey = localStorage.getItem('wr_supabase_anon_key') ?? '';
- if (sbUrl) setSupabaseUrl(sbUrl);
- if (sbKey) setSupabaseAnonKey(sbKey);
- if (saved.autoScan) {
- setAutoScan(true);
- setAutoPaused(saved.autoPaused as boolean ?? true);
- }
- if (!localStorage.getItem('wr_v9_onboarded')) setShowOnboarding(true);
- }, []);
-
- useEffect(() => {
- const cleanup = startPerfMonitoring();
- return cleanup;
- }, []);
-
- useEffect(() => {
- initBackendCheck();
- fillSignalPrices().catch(() => {});
- const fillTimer = setInterval(() => {
- fillSignalPrices().catch(() => {});
- }, 30 * 60 * 1000);
- return () => clearInterval(fillTimer);
- }, []);
-
- useEffect(() => {
- const timer = setTimeout(() => {
- saveState({
- theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
- vmcapThr, pchgThr, whaleThr, soundOn, scanHistory: scanHistory.slice(-CFG.HISTORY_MAX),
- prevVolumes, aggressiveMode, watchlistOnly, bybitEnabled, whaleFeedEx,
- autoScan, autoPaused,
- hlScannerEnabled, hlMegaTxUsd,
- });
- }, 500);
- return () => clearTimeout(timer);
- }, [theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
- vmcapThr, pchgThr, whaleThr, soundOn, scanHistory, prevVolumes, aggressiveMode,
- watchlistOnly, bybitEnabled, whaleFeedEx, autoScan, autoPaused,
- hlScannerEnabled, hlMegaTxUsd]);
-
- useEffect(() => {
- document.body.classList.remove('theme-matrix', 'theme-dark');
- if (theme === 'matrix') document.body.classList.add('theme-matrix');
- else if (theme === 'dark') document.body.classList.add('theme-dark');
- }, [theme]);
-
- const [rateLimitInfo, setRateLimitInfo] = useState<{ key: string; source: string; remaining: number }[]>([]);
-
- useEffect(() => {
- const tick = setInterval(() => setRateLimitInfo(getActiveCooldowns()), 1000);
- const unsub = onRateLimitChange(() => setRateLimitInfo(getActiveCooldowns()));
- return () => { clearInterval(tick); unsub(); };
- }, []);
-
- const birdKeyRef = useRef('');
- useEffect(() => { birdKeyRef.current = birdKey; }, [birdKey]);
-
- const enrichCoins = useCallback(async (mapped: CoinData[]) => {
- const key = birdKeyRef.current;
- const dexTargets = mapped
- .filter(c => c.vmcap > 50 && c.mcap < 2e9)
- .slice(0, 15);
-
- const solTargets = mapped.filter(c => c.isSol && CFG.SOL_ADDRS[c.symbol]);
-
- for (const coin of dexTargets) {
- try {
- const dex = await fetchDexData(coin.symbol, coin.volume);
- if (!dex.dexHot && !dex.dsLiq) continue;
- setCoins(prev => prev.map(c => {
- if (c.symbol !== coin.symbol) return c;
- const det = detect({
- vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
- supplyPct: c.supplyPct, vol: c.volume, mcap: c.mcap,
- dexHot: dex.dexHot, dsLiq: dex.dsLiq, isSol: c.isSol, birdData: c.birdData,
- });
- return { ...c, dexHot: dex.dexHot, dsLiq: dex.dsLiq,
- score: det.score, threat: det.threat, category: det.category,
- confidence: det.confidence, reasons: det.reasons };
- }));
- } catch { /* ignore */ }
- }
-
- if (!key) return;
- for (const coin of solTargets) {
- const addr = CFG.SOL_ADDRS[coin.symbol];
- try {
- const bird = await fetchBirdeyeToken(addr, coin.symbol, key);
- if (!bird) continue;
- setCoins(prev => prev.map(c => {
- if (c.symbol !== coin.symbol) return c;
- const det = detect({
- vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
- supplyPct: c.supplyPct, vol: c.volume, mcap: c.mcap,
- dexHot: c.dexHot, dsLiq: c.dsLiq, isSol: true, birdData: bird,
- });
- return { ...c, birdData: bird,
- score: det.score, threat: det.threat, category: det.category,
- confidence: det.confidence, reasons: det.reasons };
- }));
- } catch { /* ignore */ }
- }
- }, []);
-
- const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
-
- const triggerScan = useCallback(async () => {
- if (scanning) return;
- setScanning(true);
- setScanBadge('SCANNING');
-
- const isCgDemoKey = apiKey && apiKey.startsWith('CG-');
- const isCgProKey = apiKey && !apiKey.startsWith('CG-');
-
- try {
- let scanData: unknown[] | null = null;
- let source: 'live' | 'cached' | 'fallback' = 'live';
-
- try {
- const proxyHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
- if (apiKey) proxyHeaders['x-cg-api-key'] = apiKey;
- const proxyRes = await fetch('/api/scan', { headers: proxyHeaders, signal: AbortSignal.timeout(20000) });
- if (proxyRes.ok) {
- const result = await proxyRes.json();
- if (result.success && result.data?.length) {
- scanData = result.data;
- source = result.source || 'live';
- }
- }
- } catch { /* backend unavailable */ }
-
- if (!scanData) {
- if (isRateLimited(RL_KEYS.COINGECKO)) {
- const rem = getCooldownRemaining(RL_KEYS.COINGECKO);
- setScanBadge(`WAIT ${rem}s`);
- setScanning(false);
- return;
- }
-
- const cgBase = isCgProKey
- ? 'https://pro-api.coingecko.com/api/v3'
- : 'https://api.coingecko.com/api/v3';
- const cgUrl = `${cgBase}/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h&include_platform=false`;
- const cgHeaders: Record<string, string> = {};
- if (isCgProKey) cgHeaders['x-cg-pro-api-key'] = apiKey;
- if (isCgDemoKey) cgHeaders['x-cg-demo-api-key'] = apiKey;
-
- const result = await cachedFetch(cgUrl, {
- headers: cgHeaders,
- signal: AbortSignal.timeout(18000),
- cacheTtl: 10_000,
- swrTtl: 30_000,
- rateLimitKey: RL_KEYS.COINGECKO,
- rateLimitName: 'CoinGecko',
- });
-
- if (result.data?.length) {
- scanData = result.data;
- source = result.fromCache ? 'cached' : 'live';
- } else if (result.error) {
- throw new Error(result.error);
- }
- }
-
- if (!scanData?.length) {
- throw new Error('No data from any source');
- }
-
- setDataSource(source);
- setApiCallCount(c => c + (source === 'live' ? 1 : 0));
- const mapped = processData(scanData);
- setScanBadge(source === 'live' ? 'LIVE' : source === 'cached' ? 'CACHED' : 'DEGRADED');
- setLastScanTs(Date.now());
-
- saveScan(mapped).catch(() => {});
- enrichCoins(mapped).catch(() => {});
- } catch (e: unknown) {
- setScanBadge('ERROR');
- setDataSource('fallback');
- addAlert('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
- } finally {
- setScanning(false);
- }
- }, [scanning, apiKey, prevVolumes]);
-
- const processData = useCallback((data: unknown[]): CoinData[] => {
- const newVols: Record<string, number> = {};
-
- const mapped: CoinData[] = (data as Record<string, unknown>[]).flatMap((c, i) => {
- const vol = (c.total_volume as number) || (c.volume as number) || 0;
- const rawMcap = (c.market_cap as number) || (c.mcap as number) || 0;
-
- if (rawMcap < MCAP_MIN_RELIABLE) {
- newVols[(c.id as string)] = vol;
- return [];
- }
-
- const mcap = rawMcap;
- const vmcap = Math.round(Math.max(0, (vol / mcap) * 100));
- const chg24 = (c.price_change_percentage_24h as number) || (c.change_24h as number) || (c.change as number) || 0;
- const prevVol = prevVolumes[(c.id as string)] || vol;
- const volSpike = prevVol > 0 && prevVol !== vol ? vol / prevVol : 1;
- const supplyPct = c.total_supply
- ? (((c.circulating_supply as number) / (c.total_supply as number)) * 100)
- : null;
- const sym = ((c.symbol as string) || '').toUpperCase();
- const dexHot = false;
- const dsLiq = null;
- const isSol = isSolToken(sym);
- const birdData = null;
-
- newVols[(c.id as string)] = vol;
-
- const det = detect({ vmcap, chg24, volSpike, supplyPct, vol, mcap, dexHot, dsLiq, isSol, birdData });
- const { score, threat, category, confidence, reasons } = det;
-
- return [{
- rank: (c.rank as number) || (i + 1),
- id: c.id as string,
- symbol: sym,
- name: c.name as string,
- price: (c.current_price as number) || (c.price as number) || 0,
- change: chg24,
- volume: vol,
- mcap,
- vmcap,
- volSpike,
- supplyPct,
- score,
- threat,
- category,
- confidence,
- reasons,
- dexHot,
- dsLiq,
- isSol,
- birdData,
- }];
- });
-
- setPrevVolumes(newVols);
- setCoins(mapped);
-
- const critCount = mapped.filter(c => c.threat === 'CRITICAL').length;
- const highCount = mapped.filter(c => c.threat === 'HIGH').length;
- setScanHistory(prev => {
- const snap: ScanSnapshot = {
- ts: Date.now(),
- coins: mapped.map(c => ({
- symbol: c.symbol, score: c.score, threat: c.threat,
- category: c.category, price: c.price, change: c.change, vmcap: c.vmcap,
- })),
- critCount,
- highCount,
- };
- return [snap, ...prev].slice(0, CFG.HISTORY_MAX);
- });
-
- mapped
- .filter(c => c.score >= 35)
- .slice(0, 20)
- .forEach(c => {
- const signal = getCeoSignalLabel(c.score, c.threat, c.category || '', c.vmcap);
- recordSignalOutcome({
- symbol: c.symbol,
- coin_id: c.id,
- signal,
- score: c.score,
- category: c.category,
- vmcap: c.vmcap,
- entry_price: c.price,
- });
- });
-
- mapped.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
- addAlert('critical', c.symbol, `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
- });
- mapped.filter(c => c.threat === 'HIGH' && c.category).slice(0, 3).forEach(c => {
- addAlert('high', c.symbol, `[${c.category}] SCORE=${c.score}/100 — ${c.reasons.join(' · ')}`);
- });
-
- return mapped;
- }, [prevVolumes]);
-
- const addAlert = useCallback((level: AlertItem['level'], tag: string, text: string, sizing?: string) => {
- const tc = level === 'critical' ? 'C' : level === 'high' ? 'H' : level === 'medium' ? 'M' : 'I';
- setAlerts(prev => [{ ts: Date.now(), level, tag, text, tc, sizing, pinned: false }, ...prev].slice(0, CFG.AFEED_MAX * 2));
- }, []);
-
- const trackToken = useCallback((id: string, symbol: string, price: number) => {
- setTracked(prev => ({ ...prev, [symbol]: { id, price, basePrice: price, lastPrice: price } }));
- }, []);
-
- const untrackToken = useCallback((symbol: string) => {
- setTracked(prev => {
- const n = { ...prev };
- delete n[symbol];
- return n;
- });
- }, []);
-
- const whaleEventThrottle = useRef<Map<string, number>>(new Map());
-
- const handleWhaleTrade = useCallback((trade: WhaleTrade) => {
- setWhaleFeed(prev => [trade, ...prev].slice(0, CFG.WFEED_MAX));
-
- const lastWrite = whaleEventThrottle.current.get(trade.sym) ?? 0;
- if (Date.now() - lastWrite > 30_000) {
- whaleEventThrottle.current.set(trade.sym, Date.now());
- saveWhaleEvent({
- symbol: trade.sym,
- side: trade.side,
- price: trade.price,
- qty: trade.qty,
- usdt: trade.usdt,
- exchange: trade.ex,
- });
- }
- }, []);
-
- const handleTrackerPrice = useCallback((sym: string, price: number) => {
- setTracked(prev => {
- if (!prev[sym]) return prev;
- return { ...prev, [sym]: { ...prev[sym], price, lastPrice: prev[sym].price } };
- });
- }, []);
-
- const { binanceReady, bybitReady, wsStatus, wsLagMs, reconnectAttempts: wsReconnects } = useWhaleWebSocket({
- subscribedPairs,
- bybitEnabled,
- whaleThr,
- whaleFeedEx,
- onWhaleTrade: handleWhaleTrade,
- onTrackerPrice: handleTrackerPrice,
- });
-
- const triggerScanRef = useRef(triggerScan);
- useEffect(() => { triggerScanRef.current = triggerScan; }, [triggerScan]);
-
- useEffect(() => {
- if (!autoScan || autoPaused) return;
- const ms = aggressiveMode ? CFG.SCAN_MS_AGG : CFG.SCAN_MS_NORMAL;
- triggerScanRef.current();
- const timer = setInterval(() => triggerScanRef.current(), ms);
- const cdTimer = setInterval(() => {
- const r = Math.max(0, Math.ceil((ms - (Date.now() % ms)) / 1000));
- setNextScan(r > 0 ? r + 's' : 'NOW');
- }, 1000);
- return () => { clearInterval(timer); clearInterval(cdTimer); };
- }, [autoScan, autoPaused, aggressiveMode]);
-
- useEffect(() => {
- const handler = (e: KeyboardEvent) => {
- const tag = (e.target as HTMLElement).tagName.toLowerCase();
- if (['input', 'select', 'textarea'].includes(tag)) return;
- const k = e.key.toLowerCase();
- if (k === 's') { e.preventDefault(); triggerScan(); }
- else if (k === 'a') { e.preventDefault(); setAutoScan(p => !p); setAutoPaused(false); }
- else if (k === 'w') { e.preventDefault(); setWatchlistOnly(p => !p); }
- else if (k === 'b') { e.preventDefault(); setActiveModal('backtest'); }
- else if (k === 'p') { e.preventDefault(); setActiveModal('portfolio'); }
- else if (k === 'h') { e.preventDefault(); setActiveModal('history'); }
- else if (k === '?' || k === '/') { e.preventDefault(); setKbdOpen(p => !p); }
- else if (k === 'e') { e.preventDefault(); setActiveModal('signal-eval'); }
- else if (k === 'escape') { setActiveModal(null); setKbdOpen(false); }
- };
- document.addEventListener('keydown', handler);
- return () => document.removeEventListener('keydown', handler);
- }, [triggerScan]);
-
- const finishOnboarding = useCallback(() => {
- setShowOnboarding(false);
- localStorage.setItem('wr_v9_onboarded', '1');
- }, []);
-
- const handleToggleAuto = useCallback(() => {
- setAutoScan(p => {
- if (!p) setAutoPaused(false);
- return !p;
- });
- }, []);
-
- const handleTogglePause = useCallback(() => {
- setAutoPaused(p => !p);
- }, []);
-
- const handleToggleBybit = useCallback(() => {
- setBybitEnabled(p => !p);
- }, []);
-
- const filteredCoins = coins.filter(c => {
- if (c.vmcap < vmcapThr && Math.abs(c.change) < pchgThr && c.score < 20) return false;
- if (watchlistOnly && !tracked[c.symbol]) return false;
- if (advancedFilters.chain === 'solana' && !c.isSol) return false;
- if (['ethereum', 'bsc', 'polygon'].includes(advancedFilters.chain) && c.isSol) return false;
- if (advancedFilters.minThreshold > 0 && c.volume < advancedFilters.minThreshold) return false;
- return true;
- });
-
- const filteredAlerts = alerts.filter(a => {
- if (alertFilter === 'PIN') return a.pinned;
- if (alertFilter !== 'ALL' && a.tc !== alertFilter) return false;
- return true;
- });
-
- return (
- <div className="wr-app min-h-screen flex flex-col bg-wr-bg relative z-10" style={{ isolation: 'isolate' }}>
- {showOnboarding && <WROnboarding onFinish={finishOnboarding} />}
-
- <WRHeader
- theme={theme}
- onThemeChange={setTheme}
- soundOn={soundOn}
- onToggleSound={() => setSoundOn(p => !p)}
- onToggleSettings={() => setSettingsOpen(p => !p)}
- onToggleKbd={() => setKbdOpen(p => !p)}
- />
-
- {settingsOpen && (
- <WRSettingsPanel
- theme={theme}
- onThemeChange={setTheme}
- apiKey={apiKey}
- onApiKeyChange={setApiKey}
- aiKey={aiKey}
- onAiKeyChange={setAiKey}
- birdKey={birdKey}
- onBirdKeyChange={setBirdKey}
- heliusKey={heliusKey}
- onHeliusKeyChange={setHeliusKey}
- aggressiveMode={aggressiveMode}
- onToggleAggressive={() => setAggressiveMode(p => !p)}
- supabaseUrl={supabaseUrl}
- onSupabaseUrlChange={(v) => {
- setSupabaseUrl(v);
- if (v.startsWith('https://')) localStorage.setItem('wr_supabase_url', v);
- else localStorage.removeItem('wr_supabase_url');
- }}
- supabaseAnonKey={supabaseAnonKey}
- onSupabaseAnonKeyChange={(v) => {
- setSupabaseAnonKey(v);
- if (v.length > 20) localStorage.setItem('wr_supabase_anon_key', v);
- else localStorage.removeItem('wr_supabase_anon_key');
- }}
- />
- )}
-
- <WRTicker coins={filteredCoins} tracked={tracked} onTrack={trackToken} />
-
- {dataSource === 'fallback' && (
- <div className="px-4 py-2 bg-wr-bg3 border-b border-wr-border text-wr-amber text-[10px] text-center">
- ⚠ RUNNING IN DEGRADED MODE — Showing simulated whale activity. Live data temporarily unavailable.
- </div>
- )}
- {dataSource === 'cached' && scanBadge === 'CACHED' && (
- <div className="px-4 py-2 bg-wr-bg3 border-b border-wr-border text-wr-cyan text-[10px] text-center">
- 📦 Serving cached data — API rate limited or slow
- </div>
- )}
-
- {wsReconnects >= 2 && (
- <div className="px-4 py-2 bg-wr-bg3 border-b border-wr-border text-wr-orange text-[10px] text-center">
- ⚠ RECONNECTING… (attempt {wsReconnects}) — Data may be delayed
- </div>
- )}
-
- <WRStatsBar
- stats={[
- { label: 'WS', value: `${wsStatus === 'live' ? 'LIVE' : wsStatus === 'delayed' ? `DELAYED (${Math.round(wsLagMs / 1000)}s)` : wsStatus === 'fallback' ? 'FALLBACK (HTTP POLL)' : wsStatus === 'reconnecting' ? 'RECONNECTING…' : 'OFFLINE'}` },
- { label: 'BIN', value: binanceReady ? '✓' : '—' },
- { label: 'BYB', value: bybitReady ? '✓' : '—' },
- ]}
- rateLimits={rateLimitInfo}
- />
-
- <main className="wr-layout grid grid-cols-1 lg:grid-cols-[1fr_340px] flex-1 min-h-0 overflow-hidden">
- {/* Left column: Scanner + HL Scanner */}
- <div className="flex flex-col min-h-0 overflow-hidden relative z-10" style={{ isolation: 'isolate' }}>
- <WRScanner
- coins={filteredCoins}
- scanBadge={scanBadge}
- scanning={scanning}
- autoScan={autoScan}
- autoPaused={autoPaused}
- watchlistOnly={watchlistOnly}
- tracked={tracked}
- portfolio={portfolio}
- aiKey={aiKey}
- vmcapThr={vmcapThr}
- pchgThr={pchgThr}
- onScan={triggerScan}
- onToggleAuto={handleToggleAuto}
- onTogglePause={handleTogglePause}
- onToggleWatchlist={() => setWatchlistOnly(p => !p)}
- onTrack={trackToken}
- onUntrack={untrackToken}
- onVmcapChange={setVmcapThr}
- onPchgChange={setPchgThr}
- onOpenModal={setActiveModal}
- onAddAlert={addAlert}
- advancedFilters={advancedFilters}
- onAdvancedFiltersChange={setAdvancedFilters}
- page={scanPage}
- onPageChange={setScanPage}
- hlScannerEnabled={hlScannerEnabled}
- hlMegaTxUsd={hlMegaTxUsd}
- />
-
- {/* HYPERLIQUID MANIPULATION SCANNER */}
- {hlScannerEnabled && (
- <HLManipulationScanner
- enabled={hlScannerEnabled}
- megaTxUsd={hlMegaTxUsd}
- onGlobalAlert={(alert) => addAlert(alert.level, alert.tag, alert.text)}
- showOpportunities={true}
- minApy={12}
- />
- )}
- </div>
-
- {/* Right panel */}
- <WRRightPanel
- whaleFeed={whaleFeed}
- alerts={filteredAlerts}
- alertFilter={alertFilter}
- onAlertFilterChange={setAlertFilter}
- wallets={wallets}
- onAddWallet={(w) => setWallets(prev => [...prev, w])}
- onRemoveWallet={(addr) => setWallets(prev => prev.filter(w => w.address !== addr))}
- onTogglePin={(idx) => setAlerts(prev => prev.map((a, i) => i === idx ? { ...a, pinned: !a.pinned } : a))}
- onClearAlerts={() => setAlerts([])}
- bybitEnabled={bybitEnabled}
- onToggleBybit={handleToggleBybit}
- whaleFeedEx={whaleFeedEx}
- onWhaleFeedExChange={setWhaleFeedEx}
- />
- </main>
-
- <WRTracker
- tracked={tracked}
- coins={coins}
- onUntrack={untrackToken}
- onAddAlert={addAlert}
- portfolio={portfolio}
- portValue={portfolio && Object.entries(portfolio).reduce((s, [sym, p]) => {
- const coin = coins.find(c => c.symbol === sym);
- return s + p.amount * (coin?.price || p.entryPrice);
- }, 0)}
- />
-
- {kbdOpen && <WRKeyboardHelp onClose={() => setKbdOpen(false)} />}
-
- {activeModal === 'backtest' && (
- <WRModal title="BACKTEST" onClose={() => setActiveModal(null)}>
- <BacktestContent scanHistory={scanHistory} />
- </WRModal>
- )}
-
- {activeModal === 'portfolio' && (
- <WRModal title="PORTFOLIO" onClose={() => setActiveModal(null)}>
- <PortfolioContent
- portfolio={portfolio}
- coins={coins}
- onAdd={(sym, amt, entry) => setPortfolio(p => ({ ...p, [sym]: { amount: amt, entryPrice: entry } }))}
- onRemove={(sym) => setPortfolio(p => { const n = { ...p }; delete n[sym]; return n; })}
- onClear={() => setPortfolio({})}
- />
- </WRModal>
- )}
-
- {activeModal === 'sentiment' && (
- <WRModal title="SENTIMENT" onClose={() => setActiveModal(null)}>
- <SentimentContent coins={filteredCoins} aiKey={aiKey} />
- </WRModal>
- )}
-
- {activeModal === 'signal-eval' && (
- <WRModal title="SIGNAL EVAL" onClose={() => setActiveModal(null)}>
- <WRSignalEval />
- </WRModal>
- )}
-
- <div className="border-t border-wr-border px-4 py-3 bg-wr-bg text-center text-[8px] text-wr-muted">
- <div className="text-wr-green-dim font-head letter-spacing-2 mb-2">Support the Developer</div>
- <div className="mb-2">☕ Found Whale Radar useful?</div>
- <div className="text-[7px] mb-3 leading-relaxed">
- If this tool helped your trading or development workflow, consider tipping the CEO. Every sat counts. 🙏
- </div>
- <div className="mb-3 p-2 bg-wr-bg3 border border-wr-border rounded">
- <div className="text-wr-muted text-[7px] mb-2">BTC Address</div>
- <input
- type="text"
- value="bc1q0d0ccaxuw065ezdulr68azp2fjhc0avaqf0pyz"
- onFocus={(e) => {
- e.currentTarget.select();
- navigator.clipboard.writeText('bc1q0d0ccaxuw065ezdulr68azp2fjhc0avaqf0pyz');
- setCopiedBtc(true);
- setTimeout(() => setCopiedBtc(false), 2000);
- }}
- className="font-mono text-[10px] text-wr-green bg-wr-bg3 border border-wr-border rounded px-3 py-2 hover:border-wr-cyan transition-colors cursor-pointer select-all break-all max-w-xs mx-auto block w-full"
- title="Click to copy"
- readOnly
- />
- {copiedBtc && <div className="text-wr-green text-[8px] mt-1">✓ Copied to clipboard!</div>}
- </div>
- <div className="text-wr-muted text-[7px]">WHALE RADAR v9 — Built with 🔥 by the CEO</div>
- </div>
- </div>
- );
+  const [coins, setCoins] = useState<CoinData[]>([]);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [whaleFeed, setWhaleFeed] = useState<WhaleTrade[]>([]);
+  const [tracked, setTracked] = useState<Record<string, TrackedToken>>({});
+  const [portfolio, setPortfolio] = useState<Record<string, PortfolioEntry>>({});
+  const [wallets, setWallets] = useState<WalletEntry[]>([]);
+  const [scanHistory, setScanHistory] = useState<ScanSnapshot[]>([]);
+
+  const [theme, setTheme] = useState<'cyber' | 'matrix' | 'dark'>('cyber');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
+  const [autoScan, setAutoScan] = useState(false);
+  const [autoPaused, setAutoPaused] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanBadge, setScanBadge] = useState('IDLE');
+  const [kbdOpen, setKbdOpen] = useState(false);
+  const [alertFilter, setAlertFilter] = useState('ALL');
+  const [watchlistOnly, setWatchlistOnly] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [copiedBtc, setCopiedBtc] = useState(false);
+
+  const [apiKey, setApiKey] = useState('');
+  const [aiKey, setAiKey] = useState('');
+  const [birdKey, setBirdKey] = useState('');
+  const [heliusKey, setHeliusKey] = useState('');
+
+  const [vmcapThr, setVmcapThr] = useState(200);
+  const [pchgThr, setPchgThr] = useState(15);
+  const [whaleThr, setWhaleThr] = useState(150000);
+  const [aggressiveMode, setAggressiveMode] = useState(false);
+
+  const [bybitEnabled, setBybitEnabled] = useState(false);
+  const [whaleFeedEx, setWhaleFeedEx] = useState('all');
+  const [hlScannerEnabled, setHlScannerEnabled] = useState(true);
+  const [hlMegaTxUsd, setHlMegaTxUsd] = useState(500_000);
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState('');
+  const [subscribedPairs] = useState(() => new Set<string>());
+  const [advancedFilters, setAdvancedFilters] = useState<WhaleFilters>(DEFAULT_FILTERS);
+  const [scanPage, setScanPage] = useState(1);
+
+  const [apiCallCount, setApiCallCount] = useState(0);
+  const [aiCallCount, setAiCallCount] = useState(0);
+  const [nextScan, setNextScan] = useState('—');
+  const [lastScanTs, setLastScanTs] = useState(0);
+
+  const [activeModal, setActiveModal] = useState<string | null>(null);
+
+  const [prevVolumes, setPrevVolumes] = useState<Record<string, number>>({});
+
+  // Calculate portfolio value
+  const portfolioValue = useMemo(() => {
+    return Object.entries(portfolio).reduce((sum, [sym, p]) => {
+      const coin = coins.find(c => c.symbol === sym);
+      return sum + p.amount * (coin?.price || p.entryPrice);
+    }, 0);
+  }, [portfolio, coins]);
+
+  // Calculate alerts today count
+  const alertsToday = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    return alerts.filter(a => a.ts >= todayStart.getTime()).length;
+  }, [alerts]);
+
+  useEffect(() => {
+    const saved = loadState();
+    if (saved.theme) setTheme(saved.theme as 'cyber' | 'matrix' | 'dark');
+    if (saved.apiKey) setApiKey(saved.apiKey as string);
+    if (saved.aiKey) setAiKey(saved.aiKey as string);
+    if (saved.birdKey) setBirdKey(saved.birdKey as string);
+    if (saved.heliusKey) setHeliusKey(saved.heliusKey as string);
+    if (saved.tracked) setTracked(saved.tracked as Record<string, TrackedToken>);
+    if (saved.portfolio) setPortfolio(saved.portfolio as Record<string, PortfolioEntry>);
+    if (saved.wallets) setWallets(saved.wallets as WalletEntry[]);
+    if (saved.vmcapThr) setVmcapThr(saved.vmcapThr as number);
+    if (saved.pchgThr) setPchgThr(saved.pchgThr as number);
+    if (saved.whaleThr) setWhaleThr(saved.whaleThr as number);
+    if (saved.soundOn !== undefined) setSoundOn(saved.soundOn as boolean);
+    if (saved.scanHistory) setScanHistory(saved.scanHistory as ScanSnapshot[]);
+    if (saved.prevVolumes) setPrevVolumes(saved.prevVolumes as Record<string, number>);
+    if (saved.bybitEnabled) setBybitEnabled(saved.bybitEnabled as boolean);
+    if (saved.whaleFeedEx) setWhaleFeedEx(saved.whaleFeedEx as string);
+    if (saved.hlScannerEnabled !== undefined) setHlScannerEnabled(saved.hlScannerEnabled as boolean);
+    if (saved.hlMegaTxUsd) setHlMegaTxUsd(saved.hlMegaTxUsd as number);
+    const sbUrl = localStorage.getItem('wr_supabase_url') ?? '';
+    const sbKey = localStorage.getItem('wr_supabase_anon_key') ?? '';
+    if (sbUrl) setSupabaseUrl(sbUrl);
+    if (sbKey) setSupabaseAnonKey(sbKey);
+    if (saved.autoScan) {
+      setAutoScan(true);
+      setAutoPaused(saved.autoPaused as boolean ?? true);
+    }
+    if (!localStorage.getItem('wr_v9_onboarded')) setShowOnboarding(true);
+  }, []);
+
+  useEffect(() => {
+    const cleanup = startPerfMonitoring();
+    return cleanup;
+  }, []);
+
+  useEffect(() => {
+    initBackendCheck();
+    fillSignalPrices().catch(() => {});
+    const fillTimer = setInterval(() => {
+      fillSignalPrices().catch(() => {});
+    }, 30 * 60 * 1000);
+    return () => clearInterval(fillTimer);
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveState({
+        theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
+        vmcapThr, pchgThr, whaleThr, soundOn, scanHistory: scanHistory.slice(-CFG.HISTORY_MAX),
+        prevVolumes, aggressiveMode, watchlistOnly, bybitEnabled, whaleFeedEx,
+        autoScan, autoPaused,
+        hlScannerEnabled, hlMegaTxUsd,
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
+    vmcapThr, pchgThr, whaleThr, soundOn, scanHistory, prevVolumes, aggressiveMode,
+    watchlistOnly, bybitEnabled, whaleFeedEx, autoScan, autoPaused,
+    hlScannerEnabled, hlMegaTxUsd]);
+
+  useEffect(() => {
+    document.body.classList.remove('theme-matrix', 'theme-dark');
+    if (theme === 'matrix') document.body.classList.add('theme-matrix');
+    else if (theme === 'dark') document.body.classList.add('theme-dark');
+  }, [theme]);
+
+  const [rateLimitInfo, setRateLimitInfo] = useState<{ key: string; source: string; remaining: number }[]>([]);
+
+  useEffect(() => {
+    const tick = setInterval(() => setRateLimitInfo(getActiveCooldowns()), 1000);
+    const unsub = onRateLimitChange(() => setRateLimitInfo(getActiveCooldowns()));
+    return () => { clearInterval(tick); unsub(); };
+  }, []);
+
+  const birdKeyRef = useRef('');
+  useEffect(() => { birdKeyRef.current = birdKey; }, [birdKey]);
+
+  const enrichCoins = useCallback(async (mapped: CoinData[]) => {
+    const key = birdKeyRef.current;
+    const dexTargets = mapped
+      .filter(c => c.vmcap > 50 && c.mcap < 2e9)
+      .slice(0, 15);
+
+    const solTargets = mapped.filter(c => c.isSol && CFG.SOL_ADDRS[c.symbol]);
+
+    for (const coin of dexTargets) {
+      try {
+        const dex = await fetchDexData(coin.symbol, coin.volume);
+        if (!dex.dexHot && !dex.dsLiq) continue;
+        setCoins(prev => prev.map(c => {
+          if (c.symbol !== coin.symbol) return c;
+          const det = detect({
+            vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
+            supplyPct: c.supplyPct, vol: c.volume, mcap: c.mcap,
+            dexHot: dex.dexHot, dsLiq: dex.dsLiq, isSol: c.isSol, birdData: c.birdData,
+          });
+          return { ...c, dexHot: dex.dexHot, dsLiq: dex.dsLiq,
+            score: det.score, threat: det.threat, category: det.category,
+            confidence: det.confidence, reasons: det.reasons };
+        }));
+      } catch { /* ignore */ }
+    }
+
+    if (!key) return;
+    for (const coin of solTargets) {
+      const addr = CFG.SOL_ADDRS[coin.symbol];
+      try {
+        const bird = await fetchBirdeyeToken(addr, coin.symbol, key);
+        if (!bird) continue;
+        setCoins(prev => prev.map(c => {
+          if (c.symbol !== coin.symbol) return c;
+          const det = detect({
+            vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
+            supplyPct: c.supplyPct, vol: c.volume, mcap: c.mcap,
+            dexHot: c.dexHot, dsLiq: c.dsLiq, isSol: true, birdData: bird,
+          });
+          return { ...c, birdData: bird,
+            score: det.score, threat: det.threat, category: det.category,
+            confidence: det.confidence, reasons: det.reasons };
+        }));
+      } catch { /* ignore */ }
+    }
+  }, []);
+
+  const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
+
+  const triggerScan = useCallback(async () => {
+    if (scanning) return;
+    setScanning(true);
+    setScanBadge('SCANNING');
+
+    const isCgDemoKey = apiKey && apiKey.startsWith('CG-');
+    const isCgProKey = apiKey && !apiKey.startsWith('CG-');
+
+    try {
+      let scanData: unknown[] | null = null;
+      let source: 'live' | 'cached' | 'fallback' = 'live';
+
+      try {
+        const proxyHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (apiKey) proxyHeaders['x-cg-api-key'] = apiKey;
+        const proxyRes = await fetch('/api/scan', { headers: proxyHeaders, signal: AbortSignal.timeout(20000) });
+        if (proxyRes.ok) {
+          const result = await proxyRes.json();
+          if (result.success && result.data?.length) {
+            scanData = result.data;
+            source = result.source || 'live';
+          }
+        }
+      } catch { /* backend unavailable */ }
+
+      if (!scanData) {
+        if (isRateLimited(RL_KEYS.COINGECKO)) {
+          const rem = getCooldownRemaining(RL_KEYS.COINGECKO);
+          setScanBadge(`WAIT ${rem}s`);
+          setScanning(false);
+          return;
+        }
+
+        const cgBase = isCgProKey
+          ? 'https://pro-api.coingecko.com/api/v3'
+          : 'https://api.coingecko.com/api/v3';
+        const cgUrl = `${cgBase}/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h&include_platform=false`;
+        const cgHeaders: Record<string, string> = {};
+        if (isCgProKey) cgHeaders['x-cg-pro-api-key'] = apiKey;
+        if (isCgDemoKey) cgHeaders['x-cg-demo-api-key'] = apiKey;
+
+        const result = await cachedFetch<unknown[]>(cgUrl, {
+          headers: cgHeaders,
+          signal: AbortSignal.timeout(18000),
+          cacheTtl: 10_000,
+          swrTtl: 30_000,
+          rateLimitKey: RL_KEYS.COINGECKO,
+          rateLimitName: 'CoinGecko',
+        });
+
+        if (result.data?.length) {
+          scanData = result.data;
+          source = result.fromCache ? 'cached' : 'live';
+        } else if (result.error) {
+          throw new Error(result.error);
+        }
+      }
+
+      if (!scanData?.length) {
+        throw new Error('No data from any source');
+      }
+
+      setDataSource(source);
+      setApiCallCount(c => c + (source === 'live' ? 1 : 0));
+      const mapped = processData(scanData);
+      setScanBadge(source === 'live' ? 'LIVE' : source === 'cached' ? 'CACHED' : 'DEGRADED');
+      setLastScanTs(Date.now());
+
+      saveScan(mapped).catch(() => {});
+      enrichCoins(mapped).catch(() => {});
+    } catch (e: unknown) {
+      setScanBadge('ERROR');
+      setDataSource('fallback');
+      addAlert('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
+    } finally {
+      setScanning(false);
+    }
+  }, [scanning, apiKey, prevVolumes]);
+
+  const processData = useCallback((data: unknown[]): CoinData[] => {
+    const newVols: Record<string, number> = {};
+
+    const mapped: CoinData[] = (data as Record<string, unknown>[]).flatMap((c, i) => {
+      const vol = (c.total_volume as number) || (c.volume as number) || 0;
+      const rawMcap = (c.market_cap as number) || (c.mcap as number) || 0;
+
+      if (rawMcap < MCAP_MIN_RELIABLE) {
+        newVols[(c.id as string)] = vol;
+        return [];
+      }
+
+      const mcap = rawMcap;
+      const vmcap = Math.round(Math.max(0, (vol / mcap) * 100));
+      const chg24 = (c.price_change_percentage_24h as number) || (c.change_24h as number) || (c.change as number) || 0;
+      const prevVol = prevVolumes[(c.id as string)] || vol;
+      const volSpike = prevVol > 0 && prevVol !== vol ? vol / prevVol : 1;
+      const supplyPct = c.total_supply
+        ? (((c.circulating_supply as number) / (c.total_supply as number)) * 100)
+        : null;
+      const sym = ((c.symbol as string) || '').toUpperCase();
+      const dexHot = false;
+      const dsLiq = null;
+      const isSol = isSolToken(sym);
+      const birdData = null;
+
+      newVols[(c.id as string)] = vol;
+
+      const det = detect({ vmcap, chg24, volSpike, supplyPct, vol, mcap, dexHot, dsLiq, isSol, birdData });
+      const { score, threat, category, confidence, reasons } = det;
+
+      return [{
+        rank: (c.rank as number) || (i + 1),
+        id: c.id as string,
+        symbol: sym,
+        name: c.name as string,
+        price: (c.current_price as number) || (c.price as number) || 0,
+        change: chg24,
+        volume: vol,
+        mcap,
+        vmcap,
+        volSpike,
+        supplyPct,
+        score,
+        threat,
+        category,
+        confidence,
+        reasons,
+        dexHot,
+        dsLiq,
+        isSol,
+        birdData,
+      }];
+    });
+
+    setPrevVolumes(newVols);
+    setCoins(mapped);
+
+    const critCount = mapped.filter(c => c.threat === 'CRITICAL').length;
+    const highCount = mapped.filter(c => c.threat === 'HIGH').length;
+    setScanHistory(prev => {
+      const snap: ScanSnapshot = {
+        ts: Date.now(),
+        coins: mapped.map(c => ({
+          symbol: c.symbol, score: c.score, threat: c.threat,
+          category: c.category, price: c.price, change: c.change, vmcap: c.vmcap,
+        })),
+        critCount,
+        highCount,
+      };
+      return [snap, ...prev].slice(0, CFG.HISTORY_MAX);
+    });
+
+    mapped
+      .filter(c => c.score >= 35)
+      .slice(0, 20)
+      .forEach(c => {
+        const signal = getCeoSignalLabel(c.score, c.threat, c.category || '', c.vmcap);
+        recordSignalOutcome({
+          symbol: c.symbol,
+          coin_id: c.id,
+          signal,
+          score: c.score,
+          category: c.category,
+          vmcap: c.vmcap,
+          entry_price: c.price,
+        });
+      });
+
+    mapped.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
+      addAlert('critical', c.symbol, `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
+    });
+    mapped.filter(c => c.threat === 'HIGH' && c.category).slice(0, 3).forEach(c => {
+      addAlert('high', c.symbol, `[${c.category}] SCORE=${c.score}/100 — ${c.reasons.join(' · ')}`);
+    });
+
+    return mapped;
+  }, [prevVolumes]);
+
+  const addAlert = useCallback((level: AlertItem['level'], tag: string, text: string, sizing?: string) => {
+    const tc = level === 'critical' ? 'C' : level === 'high' ? 'H' : level === 'medium' ? 'M' : 'I';
+    setAlerts(prev => [{ ts: Date.now(), level, tag, text, tc, sizing, pinned: false }, ...prev].slice(0, CFG.AFEED_MAX * 2));
+  }, []);
+
+  const trackToken = useCallback((id: string, symbol: string, price: number) => {
+    setTracked(prev => ({ ...prev, [symbol]: { id, price, basePrice: price, lastPrice: price } }));
+  }, []);
+
+  const untrackToken = useCallback((symbol: string) => {
+    setTracked(prev => {
+      const n = { ...prev };
+      delete n[symbol];
+      return n;
+    });
+  }, []);
+
+  const whaleEventThrottle = useRef<Map<string, number>>(new Map());
+
+  const handleWhaleTrade = useCallback((trade: WhaleTrade) => {
+    setWhaleFeed(prev => [trade, ...prev].slice(0, CFG.WFEED_MAX));
+
+    const lastWrite = whaleEventThrottle.current.get(trade.sym) ?? 0;
+    if (Date.now() - lastWrite > 30_000) {
+      whaleEventThrottle.current.set(trade.sym, Date.now());
+      saveWhaleEvent({
+        symbol: trade.sym,
+        side: trade.side,
+        price: trade.price,
+        qty: trade.qty,
+        usdt: trade.usdt,
+        exchange: trade.ex,
+      });
+    }
+  }, []);
+
+  const handleTrackerPrice = useCallback((sym: string, price: number) => {
+    setTracked(prev => {
+      if (!prev[sym]) return prev;
+      return { ...prev, [sym]: { ...prev[sym], price, lastPrice: prev[sym].price } };
+    });
+  }, []);
+
+  const { binanceReady, bybitReady, wsStatus, wsLagMs, reconnectAttempts: wsReconnects } = useWhaleWebSocket({
+    subscribedPairs,
+    bybitEnabled,
+    whaleThr,
+    whaleFeedEx,
+    onWhaleTrade: handleWhaleTrade,
+    onTrackerPrice: handleTrackerPrice,
+  });
+
+  const triggerScanRef = useRef(triggerScan);
+  useEffect(() => { triggerScanRef.current = triggerScan; }, [triggerScan]);
+
+  useEffect(() => {
+    if (!autoScan || autoPaused) return;
+    const ms = aggressiveMode ? CFG.SCAN_MS_AGG : CFG.SCAN_MS_NORMAL;
+    triggerScanRef.current();
+    const timer = setInterval(() => triggerScanRef.current(), ms);
+    const cdTimer = setInterval(() => {
+      const r = Math.max(0, Math.ceil((ms - (Date.now() % ms)) / 1000));
+      setNextScan(r > 0 ? r + 's' : 'NOW');
+    }, 1000);
+    return () => { clearInterval(timer); clearInterval(cdTimer); };
+  }, [autoScan, autoPaused, aggressiveMode]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName.toLowerCase();
+      if (['input', 'select', 'textarea'].includes(tag)) return;
+      const k = e.key.toLowerCase();
+      if (k === 's') { e.preventDefault(); triggerScan(); }
+      else if (k === 'a') { e.preventDefault(); setAutoScan(p => !p); setAutoPaused(false); }
+      else if (k === 'w') { e.preventDefault(); setWatchlistOnly(p => !p); }
+      else if (k === 'b') { e.preventDefault(); setActiveModal('backtest'); }
+      else if (k === 'p') { e.preventDefault(); setActiveModal('portfolio'); }
+      else if (k === 'h') { e.preventDefault(); setActiveModal('history'); }
+      else if (k === '?' || k === '/') { e.preventDefault(); setKbdOpen(p => !p); }
+      else if (k === 'e') { e.preventDefault(); setActiveModal('signal-eval'); }
+      else if (k === 'escape') { setActiveModal(null); setKbdOpen(false); }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [triggerScan]);
+
+  const finishOnboarding = useCallback(() => {
+    setShowOnboarding(false);
+    localStorage.setItem('wr_v9_onboarded', '1');
+  }, []);
+
+  const handleToggleAuto = useCallback(() => {
+    setAutoScan(p => {
+      if (!p) setAutoPaused(false);
+      return !p;
+    });
+  }, []);
+
+  const handleTogglePause = useCallback(() => {
+    setAutoPaused(p => !p);
+  }, []);
+
+  const handleToggleBybit = useCallback(() => {
+    setBybitEnabled(p => !p);
+  }, []);
+
+  const filteredCoins = coins.filter(c => {
+    if (c.vmcap < vmcapThr && Math.abs(c.change) < pchgThr && c.score < 20) return false;
+    if (watchlistOnly && !tracked[c.symbol]) return false;
+    if (advancedFilters.chain === 'solana' && !c.isSol) return false;
+    if (['ethereum', 'bsc', 'polygon'].includes(advancedFilters.chain) && c.isSol) return false;
+    if (advancedFilters.minThreshold > 0 && c.volume < advancedFilters.minThreshold) return false;
+    return true;
+  });
+
+  const filteredAlerts = alerts.filter(a => {
+    if (alertFilter === 'PIN') return a.pinned;
+    if (alertFilter !== 'ALL' && a.tc !== alertFilter) return false;
+    return true;
+  });
+
+  return (
+    <div className="wr-app min-h-screen flex flex-col bg-wr-bg relative z-10" style={{ isolation: 'isolate' }}>
+      {showOnboarding && <WROnboarding onFinish={finishOnboarding} />}
+
+      <WRHeader
+        theme={theme}
+        onThemeChange={setTheme}
+        soundOn={soundOn}
+        onToggleSound={() => setSoundOn(p => !p)}
+        onToggleSettings={() => setSettingsOpen(p => !p)}
+        onToggleKbd={() => setKbdOpen(p => !p)}
+      />
+
+      {settingsOpen && (
+        <WRSettingsPanel
+          theme={theme}
+          onThemeChange={setTheme}
+          apiKey={apiKey}
+          onApiKeyChange={setApiKey}
+          aiKey={aiKey}
+          onAiKeyChange={setAiKey}
+          birdKey={birdKey}
+          onBirdKeyChange={setBirdKey}
+          heliusKey={heliusKey}
+          onHeliusKeyChange={setHeliusKey}
+          aggressiveMode={aggressiveMode}
+          onToggleAggressive={() => setAggressiveMode(p => !p)}
+          supabaseUrl={supabaseUrl}
+          onSupabaseUrlChange={(v) => {
+            setSupabaseUrl(v);
+            if (v.startsWith('https://')) localStorage.setItem('wr_supabase_url', v);
+            else localStorage.removeItem('wr_supabase_url');
+          }}
+          supabaseAnonKey={supabaseAnonKey}
+          onSupabaseAnonKeyChange={(v) => {
+            setSupabaseAnonKey(v);
+            if (v.length > 20) localStorage.setItem('wr_supabase_anon_key', v);
+            else localStorage.removeItem('wr_supabase_anon_key');
+          }}
+        />
+      )}
+
+      <WRTicker coins={filteredCoins} tracked={tracked} onTrack={trackToken} />
+
+      {dataSource === 'fallback' && (
+        <div className="px-4 py-2 bg-wr-bg3 border-b border-wr-border text-wr-amber text-[10px] text-center">
+          Warning: RUNNING IN DEGRADED MODE - Showing simulated whale activity. Live data temporarily unavailable.
+        </div>
+      )}
+      {dataSource === 'cached' && scanBadge === 'CACHED' && (
+        <div className="px-4 py-2 bg-wr-bg3 border-b border-wr-border text-wr-cyan text-[10px] text-center">
+          Serving cached data - API rate limited or slow
+        </div>
+      )}
+
+      {wsReconnects >= 2 && (
+        <div className="px-4 py-2 bg-wr-bg3 border-b border-wr-border text-wr-orange text-[10px] text-center">
+          Warning: RECONNECTING... (attempt {wsReconnects}) - Data may be delayed
+        </div>
+      )}
+
+      {/* WebSocket Status Bar */}
+      <div className="px-4 py-1 bg-wr-bg2 border-b border-wr-border flex items-center gap-4 text-[9px]">
+        <span className="text-wr-muted">
+          WS:{' '}
+          {wsStatus === 'live' && <span className="text-wr-green">LIVE</span>}
+          {wsStatus === 'delayed' && <span className="text-wr-amber">DELAYED ({Math.round(wsLagMs / 1000)}s)</span>}
+          {wsStatus === 'fallback' && <span className="text-wr-orange">FALLBACK (HTTP POLL)</span>}
+          {wsStatus === 'reconnecting' && <span className="text-wr-amber">RECONNECTING...</span>}
+          {wsStatus === 'offline' && <span className="text-wr-red">OFFLINE</span>}
+        </span>
+        <span className="text-wr-muted">BIN: {binanceReady ? '✓' : '—'} | BYB: {bybitReady ? '✓' : '—'}</span>
+      </div>
+
+      {/* Stats Bar with correct props */}
+      <WRStatsBar
+        alertsToday={alertsToday}
+        apiCallCount={apiCallCount}
+        apiKey={apiKey}
+        lastScanTs={lastScanTs}
+        historyCount={scanHistory.length}
+        portfolioValue={portfolioValue}
+        rateLimits={rateLimitInfo}
+      />
+
+      <main className="wr-layout grid grid-cols-1 lg:grid-cols-[1fr_340px] flex-1 min-h-0 overflow-hidden">
+        {/* Left column: Scanner + HL Scanner */}
+        <div className="flex flex-col min-h-0 overflow-hidden relative z-10" style={{ isolation: 'isolate' }}>
+          <WRScanner
+            coins={filteredCoins}
+            scanBadge={scanBadge}
+            scanning={scanning}
+            autoScan={autoScan}
+            autoPaused={autoPaused}
+            watchlistOnly={watchlistOnly}
+            tracked={tracked}
+            portfolio={portfolio}
+            aiKey={aiKey}
+            vmcapThr={vmcapThr}
+            pchgThr={pchgThr}
+            onScan={triggerScan}
+            onToggleAuto={handleToggleAuto}
+            onTogglePause={handleTogglePause}
+            onToggleWatchlist={() => setWatchlistOnly(p => !p)}
+            onTrack={trackToken}
+            onUntrack={untrackToken}
+            onVmcapChange={setVmcapThr}
+            onPchgChange={setPchgThr}
+            onOpenModal={setActiveModal}
+            onAddAlert={addAlert}
+            advancedFilters={advancedFilters}
+            onAdvancedFiltersChange={setAdvancedFilters}
+            page={scanPage}
+            onPageChange={setScanPage}
+            hlScannerEnabled={hlScannerEnabled}
+            hlMegaTxUsd={hlMegaTxUsd}
+          />
+
+          {/* HYPERLIQUID MANIPULATION SCANNER */}
+          {hlScannerEnabled && (
+            <HLManipulationScanner
+              enabled={hlScannerEnabled}
+              megaTxUsd={hlMegaTxUsd}
+              onGlobalAlert={(alert) => addAlert(alert.level, alert.tag, alert.text)}
+              showOpportunities={true}
+              minApy={12}
+            />
+          )}
+        </div>
+
+        {/* Right panel */}
+        <WRRightPanel
+          whaleFeed={whaleFeed}
+          alerts={filteredAlerts}
+          alertFilter={alertFilter}
+          onAlertFilterChange={setAlertFilter}
+          wallets={wallets}
+          onAddWallet={(w) => setWallets(prev => [...prev, w])}
+          onRemoveWallet={(addr) => setWallets(prev => prev.filter(w => w.address !== addr))}
+          onTogglePin={(idx) => setAlerts(prev => prev.map((a, i) => i === idx ? { ...a, pinned: !a.pinned } : a))}
+          onClearAlerts={() => setAlerts([])}
+          bybitEnabled={bybitEnabled}
+          onToggleBybit={handleToggleBybit}
+          whaleFeedEx={whaleFeedEx}
+          onWhaleFeedExChange={setWhaleFeedEx}
+        />
+      </main>
+
+      <WRTracker
+        tracked={tracked}
+        coins={coins}
+        onUntrack={untrackToken}
+        onAddAlert={addAlert}
+        portfolio={portfolio}
+        portValue={portfolioValue}
+      />
+
+      <WRAlertBell alerts={alerts} />
+
+      <WRMobileFilterSheet />
+
+      {kbdOpen && <WRKeyboardHelp onClose={() => setKbdOpen(false)} />}
+
+      {activeModal === 'backtest' && (
+        <WRModal title="BACKTEST" onClose={() => setActiveModal(null)}>
+          <BacktestContent scanHistory={scanHistory} />
+        </WRModal>
+      )}
+
+      {activeModal === 'portfolio' && (
+        <WRModal title="PORTFOLIO" onClose={() => setActiveModal(null)}>
+          <PortfolioContent
+            portfolio={portfolio}
+            coins={coins}
+            onAdd={(sym, amt, entry) => setPortfolio(p => ({ ...p, [sym]: { amount: amt, entryPrice: entry } }))}
+            onRemove={(sym) => setPortfolio(p => { const n = { ...p }; delete n[sym]; return n; })}
+            onClear={() => setPortfolio({})}
+          />
+        </WRModal>
+      )}
+
+      {activeModal === 'sentiment' && (
+        <WRModal title="SENTIMENT" onClose={() => setActiveModal(null)}>
+          <SentimentContent coins={filteredCoins} aiKey={aiKey} />
+        </WRModal>
+      )}
+
+      {activeModal === 'signal-eval' && (
+        <WRModal title="SIGNAL EVAL" onClose={() => setActiveModal(null)}>
+          <WRSignalEval />
+        </WRModal>
+      )}
+
+      {/* TIP THE CEO */}
+      <div className="border-t border-wr-border px-4 py-3 bg-wr-bg text-center text-[8px] text-wr-muted">
+        <div className="text-wr-green-dim font-head letter-spacing-2 mb-2">Support the Developer</div>
+        <div className="mb-2">Found Whale Radar useful?</div>
+        <div className="text-[7px] mb-3 leading-relaxed">
+          If this tool helped your trading or development workflow, consider tipping the CEO. Every sat counts.
+        </div>
+        <div className="mb-3 p-2 bg-wr-bg3 border border-wr-border rounded">
+          <div className="text-wr-muted text-[7px] mb-2">BTC Address</div>
+          <input
+            type="text"
+            value="bc1q0d0ccaxuw065ezdulr68azp2fjhc0avaqf0pyz"
+            readOnly
+            onFocus={(e) => {
+              e.currentTarget.select();
+              navigator.clipboard.writeText('bc1q0d0ccaxuw065ezdulr68azp2fjhc0avaqf0pyz');
+              setCopiedBtc(true);
+              setTimeout(() => setCopiedBtc(false), 2000);
+            }}
+            className="font-mono text-[10px] text-wr-green bg-wr-bg3 border border-wr-border rounded px-3 py-2 hover:border-wr-cyan transition-colors cursor-pointer select-all break-all max-w-xs mx-auto block w-full"
+            title="Click to copy"
+          />
+          {copiedBtc && <div className="text-wr-green text-[8px] mt-1">Copied to clipboard!</div>}
+        </div>
+        <div className="text-wr-muted text-[7px]">WHALE RADAR v9 - Built by the CEO</div>
+      </div>
+    </div>
+  );
 }
 
 function BacktestContent({ scanHistory }: { scanHistory: ScanSnapshot[] }) {
- const [results, setResults] = useState<{ sym: string; threat: string; pnlPct: number; ts: number }[]>([]);
- const [ran, setRan] = useState(false);
+  const [results, setResults] = useState<{ sym: string; threat: string; pnlPct: number; ts: number }[]>([]);
+  const [ran, setRan] = useState(false);
 
- const runBacktest = () => {
- if (scanHistory.length < 2) return;
- const res: typeof results = [];
- for (let i = 0; i < scanHistory.length - 1; i++) {
- const snap = scanHistory[i];
- const next = scanHistory[i + 1];
- const nextMap: Record<string, number> = {};
- (next.coins || []).forEach(c => { if (c.symbol && c.price) nextMap[c.symbol] = c.price; });
- (snap.coins || []).filter(c => c.threat === 'CRITICAL' || c.threat === 'HIGH').slice(0, 5).forEach(c => {
- const exitP = nextMap[c.symbol!];
- if (c.price && exitP) {
- res.push({ sym: c.symbol!, threat: c.threat!, pnlPct: ((exitP - c.price) / c.price) * 100, ts: snap.ts });
- }
- });
- }
- setResults(res);
- setRan(true);
- };
+  const runBacktest = () => {
+    if (scanHistory.length < 2) return;
+    const res: typeof results = [];
+    for (let i = 0; i < scanHistory.length - 1; i++) {
+      const snap = scanHistory[i];
+      const next = scanHistory[i + 1];
+      const nextMap: Record<string, number> = {};
+      (next.coins || []).forEach(c => { if (c.symbol && c.price) nextMap[c.symbol] = c.price; });
+      (snap.coins || []).filter(c => c.threat === 'CRITICAL' || c.threat === 'HIGH').slice(0, 5).forEach(c => {
+        const exitP = nextMap[c.symbol!];
+        if (c.price && exitP) {
+          res.push({ sym: c.symbol!, threat: c.threat!, pnlPct: ((exitP - c.price) / c.price) * 100, ts: snap.ts });
+        }
+      });
+    }
+    setResults(res);
+    setRan(true);
+  };
 
- const avgPnl = results.length ? results.reduce((s, r) => s + r.pnlPct, 0) / results.length : 0;
- const wins = results.filter(r => r.pnlPct > 0).length;
+  const avgPnl = results.length ? results.reduce((s, r) => s + r.pnlPct, 0) / results.length : 0;
+  const wins = results.filter(r => r.pnlPct > 0).length;
 
- return (
- <div className="p-4 space-y-4">
- <div className="text-wr-muted text-[9px]">SNAPSHOTS: {scanHistory.length}</div>
- <button className="wr-btn w-full" onClick={runBacktest}>▶ RUN BACKTEST</button>
- {!ran ? (
- <div className="text-wr-muted text-[9px] text-center py-8">Select parameters and click RUN BACKTEST<br />Uses scan history snapshots to simulate</div>
- ) : results.length === 0 ? (
- <div className="text-wr-muted text-[9px] text-center py-8">No trade simulations — run more scans first</div>
- ) : (
- <div className="space-y-4">
- <div className="grid grid-cols-3 gap-2">
- <div className={`text-center ${avgPnl >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>
- <div className="text-[12px] font-bold">{avgPnl >= 0 ? '+' : ''}{avgPnl.toFixed(2)}%</div>
- <div className="text-[8px] text-wr-muted">AVG PNL</div>
- </div>
- <div className="text-center">
- <div className="text-[12px] font-bold text-wr-green">{results.length > 0 ? ((wins / results.length) * 100).toFixed(0) : 0}%</div>
- <div className="text-[8px] text-wr-muted">WIN RATE</div>
- </div>
- <div className="text-center">
- <div className="text-[12px] font-bold">{results.length}</div>
- <div className="text-[8px] text-wr-muted">TRADES</div>
- </div>
- </div>
- <div className="text-[8px] text-wr-orange text-center">SIMULATED — NOT FINANCIAL ADVICE</div>
- <div className="overflow-auto max-h-60">
- <div className="space-y-1">
- {results.slice(0, 30).map((r, i) => (
- <div key={i} className="flex justify-between items-center text-[8px] p-2 border border-wr-border rounded">
- <div className="text-wr-muted">{new Date(r.ts).toLocaleTimeString()}</div>
- <div className="text-wr-green font-bold">{r.sym}</div>
- <div className="text-wr-amber">{r.threat}</div>
- <div className={r.pnlPct >= 0 ? 'text-wr-green' : 'text-wr-red'}>{r.pnlPct >= 0 ? '+' : ''}{r.pnlPct.toFixed(2)}%</div>
- </div>
- ))}
- </div>
- </div>
- </div>
- )}
- </div>
- );
+  return (
+    <div className="p-4 space-y-4">
+      <div className="text-wr-muted text-[9px]">SNAPSHOTS: {scanHistory.length}</div>
+      <button className="wr-btn w-full" onClick={runBacktest}>RUN BACKTEST</button>
+      {!ran ? (
+        <div className="text-wr-muted text-[9px] text-center py-8">
+          Select parameters and click RUN BACKTEST<br />Uses scan history snapshots to simulate
+        </div>
+      ) : results.length === 0 ? (
+        <div className="text-wr-muted text-[9px] text-center py-8">No trade simulations - run more scans first</div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-2">
+            <div className={`text-center ${avgPnl >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>
+              <div className="text-[12px] font-bold">{avgPnl >= 0 ? '+' : ''}{avgPnl.toFixed(2)}%</div>
+              <div className="text-[8px] text-wr-muted">AVG PNL</div>
+            </div>
+            <div className="text-center">
+              <div className="text-[12px] font-bold text-wr-green">{results.length > 0 ? ((wins / results.length) * 100).toFixed(0) : 0}%</div>
+              <div className="text-[8px] text-wr-muted">WIN RATE</div>
+            </div>
+            <div className="text-center">
+              <div className="text-[12px] font-bold">{results.length}</div>
+              <div className="text-[8px] text-wr-muted">TRADES</div>
+            </div>
+          </div>
+          <div className="text-[8px] text-wr-orange text-center">SIMULATED - NOT FINANCIAL ADVICE</div>
+          <div className="overflow-auto max-h-60">
+            <div className="space-y-1">
+              {results.slice(0, 30).map((r, i) => (
+                <div key={i} className="flex justify-between items-center text-[8px] p-2 border border-wr-border rounded">
+                  <div className="text-wr-muted">{new Date(r.ts).toLocaleTimeString()}</div>
+                  <div className="text-wr-green font-bold">{r.sym}</div>
+                  <div className="text-wr-amber">{r.threat}</div>
+                  <div className={r.pnlPct >= 0 ? 'text-wr-green' : 'text-wr-red'}>{r.pnlPct >= 0 ? '+' : ''}{r.pnlPct.toFixed(2)}%</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PortfolioContent({ portfolio, coins, onAdd, onRemove, onClear }: {
- portfolio: Record<string, PortfolioEntry>;
- coins: CoinData[];
- onAdd: (sym: string, amt: number, entry: number) => void;
- onRemove: (sym: string) => void;
- onClear: () => void;
+  portfolio: Record<string, PortfolioEntry>;
+  coins: CoinData[];
+  onAdd: (sym: string, amt: number, entry: number) => void;
+  onRemove: (sym: string) => void;
+  onClear: () => void;
 }) {
- const [sym, setSym] = useState('');
- const [amt, setAmt] = useState('');
- const [entry, setEntry] = useState('');
+  const [sym, setSym] = useState('');
+  const [amt, setAmt] = useState('');
+  const [entry, setEntry] = useState('');
 
- const handleAdd = () => {
- const s = sym.trim().toUpperCase();
- const a = parseFloat(amt);
- const e = parseFloat(entry);
- if (!s || isNaN(a) || isNaN(e) || a <= 0 || e <= 0) return;
- onAdd(s, a, e);
- setSym(''); setAmt(''); setEntry('');
- };
+  const handleAdd = () => {
+    const s = sym.trim().toUpperCase();
+    const a = parseFloat(amt);
+    const e = parseFloat(entry);
+    if (!s || isNaN(a) || isNaN(e) || a <= 0 || e <= 0) return;
+    onAdd(s, a, e);
+    setSym(''); setAmt(''); setEntry('');
+  };
 
- const entries = Object.entries(portfolio);
- let totalVal = 0, totalEntry = 0;
- entries.forEach(([s, p]) => {
- const coin = coins.find(c => c.symbol === s);
- totalVal += p.amount * (coin?.price || p.entryPrice);
- totalEntry += p.amount * p.entryPrice;
- });
- const totalPnl = totalVal - totalEntry;
- const totalPnlPct = totalEntry > 0 ? (totalPnl / totalEntry) * 100 : 0;
+  const entries = Object.entries(portfolio);
+  let totalVal = 0, totalEntry = 0;
+  entries.forEach(([s, p]) => {
+    const coin = coins.find(c => c.symbol === s);
+    totalVal += p.amount * (coin?.price || p.entryPrice);
+    totalEntry += p.amount * p.entryPrice;
+  });
+  const totalPnl = totalVal - totalEntry;
+  const totalPnlPct = totalEntry > 0 ? (totalPnl / totalEntry) * 100 : 0;
 
- return (
- <div className="p-4 space-y-4">
- <div className="grid grid-cols-4 gap-2">
- <input type="text" placeholder="SYM" value={sym} onChange={(e) => setSym(e.target.value)} style={{ textTransform: 'uppercase' }} className="wr-input text-[9px]" />
- <input type="number" placeholder="QTY" value={amt} onChange={(e) => setAmt(e.target.value)} className="wr-input text-[9px]" />
- <input type="number" placeholder="ENTRY" value={entry} onChange={(e) => setEntry(e.target.value)} className="wr-input text-[9px]" />
- <button className="wr-btn text-[8px]" onClick={handleAdd}>+ ADD</button>
- </div>
- <button className="wr-btn w-full text-[8px]" onClick={onClear}>CLR ALL</button>
- {entries.length === 0 ? (
- <div className="text-wr-muted text-[9px] text-center py-8">No holdings — add manually above</div>
- ) : (
- <div className="space-y-3">
- <div className="overflow-auto max-h-60">
- <table className="w-full text-[8px]">
- <thead>
- <tr className="border-b border-wr-border">
- {['TOKEN','QTY','ENTRY','NOW','PNL%','VALUE',''].map(h => (<th key={h} className="p-2 text-left text-wr-muted">{h}</th>))}
- </tr>
- </thead>
- <tbody>
- {entries.map(([s, p]) => {
- const coin = coins.find(c => c.symbol === s);
- const curP = coin?.price || p.entryPrice;
- const pnl = ((curP - p.entryPrice) / p.entryPrice) * 100;
- return (
- <tr key={s} className="border-b border-wr-border">
- <td className="p-2 text-wr-green font-bold">{s}</td>
- <td className="p-2">{p.amount}</td>
- <td className="p-2">${fmtP(p.entryPrice)}</td>
- <td className="p-2">${fmtP(curP)}</td>
- <td className={`p-2 ${pnl >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>{pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}%</td>
- <td className="p-2">${fmtN(p.amount * curP)}</td>
- <td className="p-2"><button className="text-wr-red text-[8px]" onClick={() => onRemove(s)}>✕</button></td>
- </tr>
- );
- })}
- </tbody>
- </table>
- </div>
- <div className="grid grid-cols-3 gap-2 p-2 bg-wr-bg3 border border-wr-border rounded">
- <div className="text-center">
- <div className="text-[10px] font-bold">${fmtN(totalVal)}</div>
- <div className="text-[8px] text-wr-muted">TOTAL VALUE</div>
- </div>
- <div className={`text-center ${totalPnlPct >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>
- <div className="text-[10px] font-bold">{totalPnlPct >= 0 ? '+' : ''}{totalPnlPct.toFixed(2)}%</div>
- <div className="text-[8px] text-wr-muted">TOTAL PNL</div>
- </div>
- <div className="text-center">
- <div className="text-[10px] font-bold">{entries.length}</div>
- <div className="text-[8px] text-wr-muted">HOLDINGS</div>
- </div>
- </div>
- </div>
- )}
- </div>
- );
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid grid-cols-4 gap-2">
+        <input type="text" placeholder="SYM" value={sym} onChange={(e) => setSym(e.target.value)} style={{ textTransform: 'uppercase' }} className="wr-input text-[9px]" />
+        <input type="number" placeholder="QTY" value={amt} onChange={(e) => setAmt(e.target.value)} className="wr-input text-[9px]" />
+        <input type="number" placeholder="ENTRY" value={entry} onChange={(e) => setEntry(e.target.value)} className="wr-input text-[9px]" />
+        <button className="wr-btn text-[8px]" onClick={handleAdd}>+ ADD</button>
+      </div>
+      <button className="wr-btn w-full text-[8px]" onClick={onClear}>CLR ALL</button>
+      {entries.length === 0 ? (
+        <div className="text-wr-muted text-[9px] text-center py-8">No holdings - add manually above</div>
+      ) : (
+        <div className="space-y-3">
+          <div className="overflow-auto max-h-60">
+            <table className="w-full text-[8px]">
+              <thead>
+                <tr className="border-b border-wr-border">
+                  {['TOKEN','QTY','ENTRY','NOW','PNL%','VALUE',''].map(h => (
+                    <th key={h} className="p-2 text-left text-wr-muted">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map(([s, p]) => {
+                  const coin = coins.find(c => c.symbol === s);
+                  const curP = coin?.price || p.entryPrice;
+                  const pnl = ((curP - p.entryPrice) / p.entryPrice) * 100;
+                  return (
+                    <tr key={s} className="border-b border-wr-border">
+                      <td className="p-2 text-wr-green font-bold">{s}</td>
+                      <td className="p-2">{p.amount}</td>
+                      <td className="p-2">${fmtP(p.entryPrice)}</td>
+                      <td className="p-2">${fmtP(curP)}</td>
+                      <td className={`p-2 ${pnl >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>{pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}%</td>
+                      <td className="p-2">${fmtN(p.amount * curP)}</td>
+                      <td className="p-2"><button className="text-wr-red text-[8px]" onClick={() => onRemove(s)}>X</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="grid grid-cols-3 gap-2 p-2 bg-wr-bg3 border border-wr-border rounded">
+            <div className="text-center">
+              <div className="text-[10px] font-bold">${fmtN(totalVal)}</div>
+              <div className="text-[8px] text-wr-muted">TOTAL VALUE</div>
+            </div>
+            <div className={`text-center ${totalPnlPct >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>
+              <div className="text-[10px] font-bold">{totalPnlPct >= 0 ? '+' : ''}{totalPnlPct.toFixed(2)}%</div>
+              <div className="text-[8px] text-wr-muted">TOTAL PNL</div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] font-bold">{entries.length}</div>
+              <div className="text-[8px] text-wr-muted">HOLDINGS</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function SentimentContent({ coins, aiKey }: { coins: CoinData[]; aiKey: string }) {
- const critCount = coins.filter(c => c.threat === 'CRITICAL').length;
- const highCount = coins.filter(c => c.threat === 'HIGH').length;
- const washCount = coins.filter(c => c.category === 'WASH').length;
+  const critCount = coins.filter(c => c.threat === 'CRITICAL').length;
+  const highCount = coins.filter(c => c.threat === 'HIGH').length;
+  const washCount = coins.filter(c => c.category === 'WASH').length;
 
- return (
- <div className="p-4 space-y-4">
- <div className="grid grid-cols-3 gap-2">
- <div className="text-center p-2 bg-wr-bg3 border border-wr-border rounded">
- <div className="text-[12px] font-bold text-wr-red">{critCount}</div>
- <div className="text-[8px] text-wr-muted">CRITICAL</div>
- </div>
- <div className="text-center p-2 bg-wr-bg3 border border-wr-border rounded">
- <div className="text-[12px] font-bold text-wr-amber">{highCount}</div>
- <div className="text-[8px] text-wr-muted">HIGH</div>
- </div>
- <div className="text-center p-2 bg-wr-bg3 border border-wr-border rounded">
- <div className="text-[12px] font-bold text-wr-purple">{washCount}</div>
- <div className="text-[8px] text-wr-muted">WASH</div>
- </div>
- </div>
- {!aiKey ? (
- <div className="text-wr-muted text-[9px] text-center py-4">Enter AI key in ⚙ Settings to enable sentiment analysis</div>
- ) : (
- <div className="p-3 bg-wr-bg3 border border-wr-border rounded">
- <div className="text-wr-green text-[9px] font-bold mb-2">✦ AI ASSESSMENT</div>
- <div className="text-wr-white text-[8px] leading-relaxed">
- Market shows {critCount > 3 ? 'ELEVATED' : critCount > 0 ? 'MODERATE' : 'LOW'} manipulation risk.
- {washCount > 0 ? ` ${washCount} tokens flagged for wash trading patterns.` : ''}
- {critCount > 5 ? ' High cluster of critical alerts suggests coordinated activity.' : ''}
- Exercise caution with high-score tokens.
- </div>
- </div>
- )}
- </div>
- );
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid grid-cols-3 gap-2">
+        <div className="text-center p-2 bg-wr-bg3 border border-wr-border rounded">
+          <div className="text-[12px] font-bold text-wr-red">{critCount}</div>
+          <div className="text-[8px] text-wr-muted">CRITICAL</div>
+        </div>
+        <div className="text-center p-2 bg-wr-bg3 border border-wr-border rounded">
+          <div className="text-[12px] font-bold text-wr-amber">{highCount}</div>
+          <div className="text-[8px] text-wr-muted">HIGH</div>
+        </div>
+        <div className="text-center p-2 bg-wr-bg3 border border-wr-border rounded">
+          <div className="text-[12px] font-bold text-wr-purple">{washCount}</div>
+          <div className="text-[8px] text-wr-muted">WASH</div>
+        </div>
+      </div>
+      {!aiKey ? (
+        <div className="text-wr-muted text-[9px] text-center py-4">Enter AI key in Settings to enable sentiment analysis</div>
+      ) : (
+        <div className="p-3 bg-wr-bg3 border border-wr-border rounded">
+          <div className="text-wr-green text-[9px] font-bold mb-2">AI ASSESSMENT</div>
+          <div className="text-wr-white text-[8px] leading-relaxed">
+            Market shows {critCount > 3 ? 'ELEVATED' : critCount > 0 ? 'MODERATE' : 'LOW'} manipulation risk.
+            {washCount > 0 ? ` ${washCount} tokens flagged for wash trading patterns.` : ''}
+            {critCount > 5 ? ' High cluster of critical alerts suggests coordinated activity.' : ''}
+            Exercise caution with high-score tokens.
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
