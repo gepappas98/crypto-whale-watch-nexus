@@ -351,6 +351,14 @@ export function WRScanner({
         >
           ⚙ FILTERS
         </button>
+        <button
+          className={`wr-btn ${hlOnly ? 'active' : ''}`}
+          onClick={() => { setHlOnly((p) => !p); onPageChange(1); }}
+          title="Show only symbols with active Hyperliquid opportunities"
+          style={{ borderColor: hlOnly ? 'hsl(var(--wr-amber))' : undefined, color: hlOnly ? 'hsl(var(--wr-amber))' : undefined }}
+        >
+          ⚡ HL ONLY {hlOpps.all.length > 0 && <span className="ml-1 opacity-70">({hlOpps.all.length})</span>}
+        </button>
       </div>
 
       {/* Search & filters */}
