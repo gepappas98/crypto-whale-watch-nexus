@@ -699,7 +699,7 @@ export default function WhaleRadarApp() {
         portValue={portfolioValue}
       />
 
-      <WRAlertBell alerts={alerts} />
+      <WRAlertBell whaleFeed={whaleFeed} />
 
       <WRMobileFilterSheet />
 
