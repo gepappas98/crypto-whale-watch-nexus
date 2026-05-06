@@ -28,7 +28,8 @@ import type { AlertItem } from '@/lib/whaleRadarState';
 import { WRAdvancedFilters, type WhaleFilters } from './WRAdvancedFilters';
 import { HLManipulationScanner } from '@/components/hyperliquid/HLManipulationScanner';
 import { useHLOpportunities } from '@/hooks/useHLOpportunities';
-import type { HLSignal } from '@/components/hyperliquid/HLOpportunityPanel';
+import type { HLOppSignal } from '@/hooks/useHLOpportunities';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 
 // ── HL opportunity badge config (per opportunityType) ────────────────────────
 const HL_OPP_META: Record<string, { label: string; cls: string; title: string }> = {
@@ -41,6 +42,22 @@ const HL_OPP_META: Record<string, { label: string; cls: string; title: string }>
   order_imb: { label: 'IMB', cls: 'text-cyan-400 border-cyan-400/40 bg-cyan-400/10', title: 'Order book imbalance' },
   vol_skew: { label: 'SKEW', cls: 'text-orange-400 border-orange-400/40 bg-orange-400/10', title: 'Volatility skew' },
 };
+
+// ── Stat tile for HL drawer ─────────────────────────────────────────────────
+function Stat({ label, value, accent }: { label: string; value: string; accent?: 'amber' | 'green' | 'cyan' | 'red' | 'muted' }) {
+  const cls =
+    accent === 'amber' ? 'text-wr-amber'
+    : accent === 'green' ? 'text-wr-green-dim'
+    : accent === 'cyan' ? 'text-wr-cyan'
+    : accent === 'red' ? 'text-wr-red'
+    : 'text-wr-white';
+  return (
+    <div className="border border-wr-border rounded p-2 bg-wr-bg3/40">
+      <div className="text-wr-muted text-[9px] uppercase tracking-wide">{label}</div>
+      <div className={`font-mono font-bold text-[12px] ${cls}`}>{value}</div>
+    </div>
+  );
+}
 
 // ══ CEO SIGNAL ENGINE v1.2 ════════════════════════════════════════════════════
 function getCeoSignal(score: number, threat: string, category: string | null, vmcap: number): { label: string; mark: string; cls: string } {
@@ -185,6 +202,8 @@ export function WRScanner({
   const [sortDir, setSortDir] = useState(-1);
   const [aiRows, setAiRows] = useState<Record<string, AiRowData>>({});
   const [showAdvFilters, setShowAdvFilters] = useState(false);
+  const [hlOnly, setHlOnly] = useState(false);
+  const [hlDrawer, setHlDrawer] = useState<{ symbol: string; opp: HLOppSignal; meta: typeof HL_OPP_META[string] } | null>(null);
 
   // ── HL perps opportunity overlay ──────────────────────────────────────────
   const hlOpps = useHLOpportunities({ enabled: hlScannerEnabled, minApy: 12 });
@@ -253,6 +272,7 @@ export function WRScanner({
 
     return validCoins
       .filter((c) => {
+        if (hlOnly && !hlOpps.bySymbol.has(c.symbol.toUpperCase())) return false;
         if (!search) return true;
         const symbolMatch = c.symbol.includes(searchUpper);
         const nameMatch = c.name ? c.name.toLowerCase().includes(searchLower) : false;
@@ -265,7 +285,7 @@ export function WRScanner({
         if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * sortDir;
         return 0;
       });
-  }, [coins, search, sortKey, sortDir]);
+  }, [coins, search, sortKey, sortDir, hlOnly, hlOpps.bySymbol]);
 
   const PAGE_SIZE = 20;
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -346,6 +366,14 @@ export function WRScanner({
           title="Advanced filters"
         >
           ⚙ FILTERS
+        </button>
+        <button
+          className={`wr-btn ${hlOnly ? 'active' : ''}`}
+          onClick={() => { setHlOnly((p) => !p); onPageChange(1); }}
+          title="Show only symbols with active Hyperliquid opportunities"
+          style={{ borderColor: hlOnly ? 'hsl(var(--wr-amber))' : undefined, color: hlOnly ? 'hsl(var(--wr-amber))' : undefined }}
+        >
+          ⚡ HL ONLY {hlOpps.all.length > 0 && <span className="ml-1 opacity-70">({hlOpps.all.length})</span>}
         </button>
       </div>
 
@@ -457,7 +485,7 @@ export function WRScanner({
                 const aiRow = aiRows[c.symbol];
 
                 // Safe HL opportunity lookup
-                let hlOpp: HLSignal | undefined = undefined;
+                let hlOpp: HLOppSignal | undefined = undefined;
                 let hlMeta: (typeof HL_OPP_META)[string] | null = null;
                 try {
                   hlOpp = hlOpps.match(c.symbol);
@@ -488,12 +516,25 @@ export function WRScanner({
                         {c.isSol && <span className="text-wr-sol text-[8px]">◎</span>}
                         {c.dexHot && <span className="wr-badge bg-wr-blue/10 text-wr-blue border border-wr-blue/30">DEX</span>}
                         {hlOpp && hlMeta && (
-                          <span className={`wr-badge border ${hlMeta.cls}`} title={hlMeta.title}>
+                          <button
+                            type="button"
+                            className={`wr-badge border ${hlMeta.cls} cursor-pointer hover:brightness-125 transition`}
+                            title={`${hlMeta.title} — click for details`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHlDrawer({ symbol: c.symbol, opp: hlOpp!, meta: hlMeta! });
+                              onAddAlert(
+                                hlOpp!.level === 'critical' ? 'critical' : hlOpp!.level === 'high' ? 'high' : 'medium',
+                                `HL·${hlMeta!.label}`,
+                                `${c.symbol} · ${hlOpp!.side} · ${hlOpp!.expectedEdge} · APY ${hlOpp!.apyEstimate.toFixed(1)}%`
+                              );
+                            }}
+                          >
                             HL·{hlMeta.label}
                             {hlOpp.side !== 'NEUTRAL' && (
                               <span className="ml-1">{hlOpp.side === 'LONG' ? '↑' : '↓'}</span>
                             )}
-                          </span>
+                          </button>
                         )}
                       </div>
                       <div className="text-wr-muted text-[9px] truncate max-w-[120px]">{c.name || '—'}</div>
@@ -599,6 +640,70 @@ export function WRScanner({
           </div>
         </div>
       ))}
+
+      {/* HL Opportunity Detail Drawer */}
+      <Sheet open={!!hlDrawer} onOpenChange={(o) => !o && setHlDrawer(null)}>
+        <SheetContent side="right" className="bg-wr-bg2 border-wr-border text-wr-white w-full sm:max-w-md overflow-y-auto">
+          {hlDrawer && (
+            <>
+              <SheetHeader>
+                <SheetTitle className="flex items-center gap-2 text-wr-white">
+                  <span className={`wr-badge border ${hlDrawer.meta.cls}`}>HL·{hlDrawer.meta.label}</span>
+                  <span className="text-wr-green font-bold">{hlDrawer.symbol}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                    hlDrawer.opp.side === 'LONG' ? 'text-wr-green border-wr-green-dim bg-wr-green-ghost'
+                    : hlDrawer.opp.side === 'SHORT' ? 'text-wr-red border-wr-red/40 bg-wr-red/10'
+                    : 'text-wr-muted border-wr-border'
+                  }`}>{hlDrawer.opp.side}</span>
+                </SheetTitle>
+                <SheetDescription className="text-wr-muted text-[11px]">
+                  {hlDrawer.meta.title}
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="mt-4 space-y-4 text-[11px]">
+                <div className="grid grid-cols-2 gap-2">
+                  <Stat label="Expected Edge" value={hlDrawer.opp.expectedEdge} accent="amber" />
+                  <Stat label="APY Estimate" value={`${hlDrawer.opp.apyEstimate.toFixed(1)}%`} accent="green" />
+                  <Stat label="Conviction" value={`${hlDrawer.opp.conviction}/100`} accent="cyan" />
+                  <Stat label="Risk Score" value={`${hlDrawer.opp.riskScore}/100`} accent={hlDrawer.opp.riskScore > 60 ? 'red' : 'muted'} />
+                  <Stat label="Funding" value={`${(hlDrawer.opp.fundingRate * 100).toFixed(4)}%`} />
+                  <Stat label="Premium" value={`${(hlDrawer.opp.premium * 100).toFixed(3)}%`} />
+                  <Stat label="Open Interest" value={`$${(hlDrawer.opp.openInterest / 1e6).toFixed(2)}M`} />
+                  <Stat label="24h Volume" value={`$${(hlDrawer.opp.dailyVolume / 1e6).toFixed(2)}M`} />
+                  <Stat label="Mark Price" value={`$${hlDrawer.opp.markPrice.toFixed(4)}`} />
+                  <Stat label="Index Price" value={`$${hlDrawer.opp.indexPrice.toFixed(4)}`} />
+                </div>
+
+                <div>
+                  <div className="text-wr-muted text-[9px] uppercase tracking-wide mb-1">Reason</div>
+                  <div className="text-wr-white/90 leading-relaxed border border-wr-border rounded p-2 bg-wr-bg3/40">
+                    {hlDrawer.opp.reason}
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    className="wr-btn flex-1"
+                    onClick={() => {
+                      onAddAlert(
+                        hlDrawer.opp.level === 'critical' ? 'critical' : hlDrawer.opp.level === 'high' ? 'high' : 'medium',
+                        `HL·${hlDrawer.meta.label}`,
+                        `📌 ${hlDrawer.symbol} · ${hlDrawer.opp.side} · ${hlDrawer.opp.expectedEdge}`
+                      );
+                    }}
+                  >
+                    🔔 Pin Alert
+                  </button>
+                  <button className="wr-btn" onClick={() => setHlDrawer(null)}>
+                    Close
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </section>
   );
 }
