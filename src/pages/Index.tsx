@@ -219,6 +219,12 @@ export default function WhaleRadarApp() {
   const birdKeyRef = useRef('');
   useEffect(() => { birdKeyRef.current = birdKey; }, [birdKey]);
 
+  // ── Stable refs so triggerScan can call the latest processData/enrichCoins
+  // without adding them to its dependency array (which would cause infinite loops
+  // because processData depends on prevVolumes which triggerScan also updates).
+  const processDataRef = useRef<((data: unknown[]) => CoinData[]) | null>(null);
+  const enrichCoinsRef = useRef<((mapped: CoinData[]) => Promise<void>) | null>(null);
+
   const enrichCoins = useCallback(async (mapped: CoinData[]) => {
     const key = birdKeyRef.current;
     const dexTargets = mapped
@@ -265,6 +271,8 @@ export default function WhaleRadarApp() {
       } catch { /* ignore */ }
     }
   }, []);
+  // Keep the ref in sync with the latest enrichCoins
+  useEffect(() => { enrichCoinsRef.current = enrichCoins; }, [enrichCoins]);
 
   const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
 
@@ -332,12 +340,15 @@ export default function WhaleRadarApp() {
 
       setDataSource(source);
       setApiCallCount(c => c + (source === 'live' ? 1 : 0));
-      const mapped = processData(scanData);
+      // BUG-FIX: Call via refs so we always use the latest version of processData
+      // and enrichCoins, avoiding stale-closure bugs when prevVolumes updates between
+      // scan cycles (they were missing from triggerScan's dep array).
+      const mapped = processDataRef.current ? processDataRef.current(scanData) : processData(scanData);
       setScanBadge(source === 'live' ? 'LIVE' : source === 'cached' ? 'CACHED' : 'DEGRADED');
       setLastScanTs(Date.now());
 
       saveScan(mapped).catch(() => {});
-      enrichCoins(mapped).catch(() => {});
+      (enrichCoinsRef.current ?? enrichCoins)(mapped).catch(() => {});
     } catch (e: unknown) {
       setScanBadge('ERROR');
       setDataSource('fallback');
@@ -474,6 +485,8 @@ export default function WhaleRadarApp() {
 
     return mapped;
   }, [prevVolumes]);
+  // Keep the ref in sync with the latest processData
+  useEffect(() => { processDataRef.current = processData; }, [processData]);
 
   // ══ ALERTS ════════════════════════════════════════════════════════════════
   const addAlert = useCallback((level: AlertItem['level'], tag: string, text: string, sizing?: string) => {
