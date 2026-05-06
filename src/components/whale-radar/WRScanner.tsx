@@ -423,7 +423,9 @@ export function WRScanner({
       )}
 
       {/* Table container with isolation to prevent z-index issues */}
-      <div className="flex-1 overflow-auto scrollbar-thin relative" style={{ isolation: 'isolate', zIndex: 1 }}>
+      {/* touch-action: pan-y  → browser knows only vertical scrolling is wanted here,
+          so it won't cancel a short tap on a child button thinking it might be a scroll. */}
+      <div className="flex-1 overflow-auto scrollbar-thin relative" style={{ isolation: 'isolate', zIndex: 1, touchAction: 'pan-y' }}>
         <table className="wr-table">
           <thead>
             <tr>
@@ -496,7 +498,9 @@ export function WRScanner({
                   }
                 }
 
-                const hlRowGlow = hlOpp?.level === 'critical' ? 'shadow-[inset_3px_0_0_0_hsl(var(--wr-amber))]' : '';
+                // BUG-FIX: <tr> does not support box-shadow in most browsers — it is
+                // silently ignored. Use a border-left on the first <td> instead.
+                const hlIsCritical = hlOpp?.level === 'critical';
 
                 const changeVal = typeof c.change === 'number' && !isNaN(c.change) ? c.change : 0;
                 const scoreVal = typeof c.score === 'number' && !isNaN(c.score) ? c.score : 0;
@@ -506,46 +510,86 @@ export function WRScanner({
                 return (
                   <tr
                     key={rowKey}
-                    className={`${hlRowGlow}`}
+                    className=""
                     style={{ minHeight: '44px', visibility: 'visible' }}
                   >
-                    <td className="text-wr-muted text-[10px]">{c.rank || '—'}</td>
+                    <td
+                      className="text-wr-muted text-[10px]"
+                      style={hlIsCritical ? { borderLeft: '3px solid hsl(var(--wr-amber))' } : undefined}
+                    >{c.rank || '—'}</td>
                     <td>
                       <div className="flex items-center gap-2">
                         <span className="text-wr-green font-semibold">{c.symbol}</span>
                         {c.isSol && <span className="text-wr-sol text-[8px]">◎</span>}
                         {c.dexHot && <span className="wr-badge bg-wr-blue/10 text-wr-blue border border-wr-blue/30">DEX</span>}
-                        {hlOpp && hlMeta && (
+                        {hlOpp && hlMeta && (() => {
+                          // Captured once per row render so closures are stable
+                          const _opp  = hlOpp!;
+                          const _meta = hlMeta!;
+                          const _sym  = c.symbol;
+
+                          const openDrawer = (e: React.SyntheticEvent) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            const payload = { symbol: _sym, opp: _opp, meta: _meta };
+                            if (process.env.NODE_ENV === 'development') {
+                              console.log('[WRScanner] HL badge open → drawer', payload);
+                            }
+                            setHlDrawer(payload);
+                            try {
+                              onAddAlert(
+                                _opp.level === 'critical' ? 'critical' : _opp.level === 'high' ? 'high' : 'medium',
+                                `HL·${_meta.label}`,
+                                `${_sym} · ${_opp.side} · ${_opp.expectedEdge} · APY ${_opp.apyEstimate.toFixed(1)}%`
+                              );
+                            } catch (err) {
+                              console.warn('[WRScanner] onAddAlert failed', err);
+                            }
+                          };
+
+                          return (
                           <button
                             type="button"
-                            className={`wr-badge border ${hlMeta.cls} cursor-pointer hover:brightness-125 transition relative z-10`}
-                            title={`${hlMeta.title} — tap for details`}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => {
+                            className={`wr-badge border ${_meta.cls} cursor-pointer hover:brightness-125 transition relative z-10`}
+                            title={`${_meta.title} — tap for details`}
+                            style={{
+                              // Suppress 300 ms tap delay & double-tap zoom on mobile.
+                              // This alone makes the tap fire immediately on iOS/Android.
+                              touchAction: 'manipulation',
+                              // Enforce minimum 44×44 px touch target (Apple HIG / WCAG 2.5.5)
+                              minWidth: '44px',
+                              minHeight: '44px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                            // onPointerUp fires before onClick and skips the 300 ms delay on
+                            // mobile browsers that haven't yet eliminated it.  We use a flag to
+                            // avoid double-firing when the desktop onClick also fires.
+                            onPointerDown={(e) => {
+                              // Prevent the table row's scroll-start heuristic from stealing focus.
                               e.stopPropagation();
-                              e.preventDefault();
-                              const payload = { symbol: c.symbol, opp: hlOpp!, meta: hlMeta! };
-                              if (process.env.NODE_ENV === 'development') {
-                                console.log('[WRScanner] HL badge click → opening drawer', payload);
+                            }}
+                            onPointerUp={(e) => {
+                              // Primary handler — fires immediately on touch release.
+                              if (e.pointerType === 'touch') {
+                                openDrawer(e);
                               }
-                              setHlDrawer(payload);
-                              try {
-                                onAddAlert(
-                                  hlOpp!.level === 'critical' ? 'critical' : hlOpp!.level === 'high' ? 'high' : 'medium',
-                                  `HL·${hlMeta!.label}`,
-                                  `${c.symbol} · ${hlOpp!.side} · ${hlOpp!.expectedEdge} · APY ${hlOpp!.apyEstimate.toFixed(1)}%`
-                                );
-                              } catch (err) {
-                                console.warn('[WRScanner] onAddAlert failed', err);
+                            }}
+                            onClick={(e) => {
+                              // Fallback for mouse clicks (onPointerUp guard above skips touch).
+                              if ((e.nativeEvent as PointerEvent).pointerType !== 'touch') {
+                                openDrawer(e);
                               }
                             }}
                           >
-                            HL·{hlMeta.label}
-                            {hlOpp.side !== 'NEUTRAL' && (
-                              <span className="ml-1">{hlOpp.side === 'LONG' ? '↑' : '↓'}</span>
+                            HL·{_meta.label}
+                            {_opp.side !== 'NEUTRAL' && (
+                              <span className="ml-1">{_opp.side === 'LONG' ? '↑' : '↓'}</span>
                             )}
                           </button>
-                        )}
+                          );
+                        })()}
                       </div>
                       <div className="text-wr-muted text-[9px] truncate max-w-[120px]">{c.name || '—'}</div>
                     </td>
