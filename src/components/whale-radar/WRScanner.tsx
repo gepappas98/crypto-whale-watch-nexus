@@ -28,7 +28,7 @@ import type { AlertItem } from '@/lib/whaleRadarState';
 import { WRAdvancedFilters, type WhaleFilters } from './WRAdvancedFilters';
 import { HLManipulationScanner } from '@/components/hyperliquid/HLManipulationScanner';
 import { useHLOpportunities } from '@/hooks/useHLOpportunities';
-import type { HLSignal } from '@/components/hyperliquid/HLOpportunityPanel';
+import type { HLOppSignal } from '@/hooks/useHLOpportunities';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 
 // ── HL opportunity badge config (per opportunityType) ────────────────────────
