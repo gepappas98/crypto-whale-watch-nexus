@@ -256,6 +256,7 @@ export function WRScanner({
 
     return validCoins
       .filter((c) => {
+        if (hlOnly && !hlOpps.bySymbol.has(c.symbol.toUpperCase())) return false;
         if (!search) return true;
         const symbolMatch = c.symbol.includes(searchUpper);
         const nameMatch = c.name ? c.name.toLowerCase().includes(searchLower) : false;
@@ -268,7 +269,7 @@ export function WRScanner({
         if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * sortDir;
         return 0;
       });
-  }, [coins, search, sortKey, sortDir]);
+  }, [coins, search, sortKey, sortDir, hlOnly, hlOpps.bySymbol]);
 
   const PAGE_SIZE = 20;
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
