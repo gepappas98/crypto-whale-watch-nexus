@@ -500,12 +500,25 @@ export function WRScanner({
                         {c.isSol && <span className="text-wr-sol text-[8px]">◎</span>}
                         {c.dexHot && <span className="wr-badge bg-wr-blue/10 text-wr-blue border border-wr-blue/30">DEX</span>}
                         {hlOpp && hlMeta && (
-                          <span className={`wr-badge border ${hlMeta.cls}`} title={hlMeta.title}>
+                          <button
+                            type="button"
+                            className={`wr-badge border ${hlMeta.cls} cursor-pointer hover:brightness-125 transition`}
+                            title={`${hlMeta.title} — click for details`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHlDrawer({ symbol: c.symbol, opp: hlOpp!, meta: hlMeta! });
+                              onAddAlert(
+                                hlOpp!.level === 'critical' ? 'critical' : hlOpp!.level === 'high' ? 'high' : 'medium',
+                                `HL·${hlMeta!.label}`,
+                                `${c.symbol} · ${hlOpp!.side} · ${hlOpp!.expectedEdge} · APY ${hlOpp!.apyEstimate.toFixed(1)}%`
+                              );
+                            }}
+                          >
                             HL·{hlMeta.label}
                             {hlOpp.side !== 'NEUTRAL' && (
                               <span className="ml-1">{hlOpp.side === 'LONG' ? '↑' : '↓'}</span>
                             )}
-                          </span>
+                          </button>
                         )}
                       </div>
                       <div className="text-wr-muted text-[9px] truncate max-w-[120px]">{c.name || '—'}</div>
