@@ -186,6 +186,8 @@ export function WRScanner({
   const [sortDir, setSortDir] = useState(-1);
   const [aiRows, setAiRows] = useState<Record<string, AiRowData>>({});
   const [showAdvFilters, setShowAdvFilters] = useState(false);
+  const [hlOnly, setHlOnly] = useState(false);
+  const [hlDrawer, setHlDrawer] = useState<{ symbol: string; opp: HLOppSignal; meta: typeof HL_OPP_META[string] } | null>(null);
 
   // ── HL perps opportunity overlay ──────────────────────────────────────────
   const hlOpps = useHLOpportunities({ enabled: hlScannerEnabled, minApy: 12 });
