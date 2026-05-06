@@ -518,16 +518,26 @@ export function WRScanner({
                         {hlOpp && hlMeta && (
                           <button
                             type="button"
-                            className={`wr-badge border ${hlMeta.cls} cursor-pointer hover:brightness-125 transition`}
-                            title={`${hlMeta.title} — click for details`}
+                            className={`wr-badge border ${hlMeta.cls} cursor-pointer hover:brightness-125 transition relative z-10`}
+                            title={`${hlMeta.title} — tap for details`}
+                            onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
-                              setHlDrawer({ symbol: c.symbol, opp: hlOpp!, meta: hlMeta! });
-                              onAddAlert(
-                                hlOpp!.level === 'critical' ? 'critical' : hlOpp!.level === 'high' ? 'high' : 'medium',
-                                `HL·${hlMeta!.label}`,
-                                `${c.symbol} · ${hlOpp!.side} · ${hlOpp!.expectedEdge} · APY ${hlOpp!.apyEstimate.toFixed(1)}%`
-                              );
+                              e.preventDefault();
+                              const payload = { symbol: c.symbol, opp: hlOpp!, meta: hlMeta! };
+                              if (process.env.NODE_ENV === 'development') {
+                                console.log('[WRScanner] HL badge click → opening drawer', payload);
+                              }
+                              setHlDrawer(payload);
+                              try {
+                                onAddAlert(
+                                  hlOpp!.level === 'critical' ? 'critical' : hlOpp!.level === 'high' ? 'high' : 'medium',
+                                  `HL·${hlMeta!.label}`,
+                                  `${c.symbol} · ${hlOpp!.side} · ${hlOpp!.expectedEdge} · APY ${hlOpp!.apyEstimate.toFixed(1)}%`
+                                );
+                              } catch (err) {
+                                console.warn('[WRScanner] onAddAlert failed', err);
+                              }
                             }}
                           >
                             HL·{hlMeta.label}
