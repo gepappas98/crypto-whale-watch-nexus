@@ -43,6 +43,22 @@ const HL_OPP_META: Record<string, { label: string; cls: string; title: string }>
   vol_skew: { label: 'SKEW', cls: 'text-orange-400 border-orange-400/40 bg-orange-400/10', title: 'Volatility skew' },
 };
 
+// ── Stat tile for HL drawer ─────────────────────────────────────────────────
+function Stat({ label, value, accent }: { label: string; value: string; accent?: 'amber' | 'green' | 'cyan' | 'red' | 'muted' }) {
+  const cls =
+    accent === 'amber' ? 'text-wr-amber'
+    : accent === 'green' ? 'text-wr-green-dim'
+    : accent === 'cyan' ? 'text-wr-cyan'
+    : accent === 'red' ? 'text-wr-red'
+    : 'text-wr-white';
+  return (
+    <div className="border border-wr-border rounded p-2 bg-wr-bg3/40">
+      <div className="text-wr-muted text-[9px] uppercase tracking-wide">{label}</div>
+      <div className={`font-mono font-bold text-[12px] ${cls}`}>{value}</div>
+    </div>
+  );
+}
+
 // ══ CEO SIGNAL ENGINE v1.2 ════════════════════════════════════════════════════
 function getCeoSignal(score: number, threat: string, category: string | null, vmcap: number): { label: string; mark: string; cls: string } {
   try {
