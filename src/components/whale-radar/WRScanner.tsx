@@ -1,9 +1,23 @@
 /* ══ WHALE RADAR v9 — SCANNER TABLE ══════════════════════════════════════════
  *
- * FIXES v1.5 (RESTORED HL SCANNER):
- * - Restored HLManipulationScanner component rendering below the table
- * - Fixed z-index and isolation for proper layering
- * - All previous v1.4 fixes included
+ * FIXES v1.4 (TABLE RENDERING BUG FIX):
+ * - Added `isolation: isolate` to table container to prevent z-index overlay masking
+ * - Added explicit `min-height` and `visibility: visible` on tbody tr
+ * - Fixed React key generation to prevent duplicate key warnings
+ * - Added comprehensive null-checks on all coin fields before rendering
+ * - Wrapped getCeoSignal and hlOpps.match in try-catch blocks
+ * - Added coin validation with isValidCoin() function
+ * - Added development-mode debug logging for data shape issues
+ * - Fixed pagination logic edge cases
+ *
+ * FIXES v1.3:
+ * - Added defensive null-checks for all coin fields before rendering
+ * - Wrapped getCeoSignal in try-catch to prevent render crashes
+ * - Added fallback keys when c.id is missing (uses c.symbol + index)
+ *
+ * FIXES v1.2:
+ * - getCeoSignal() BUG-004: Decoupled WASH/bad-data AVOID from legitimate
+ * CRITICAL signals.
  *
  * ════════════════════════════════════════════════════════════════════════════ */
 
@@ -36,21 +50,32 @@ function getCeoSignal(score: number, threat: string, category: string | null, vm
     const sc = typeof score === 'number' && !isNaN(score) ? score : 0;
     const vm = typeof vmcap === 'number' && !isNaN(vmcap) ? vmcap : 0;
 
+    // 1. Wash trade or unreliable vmcap
     if (vm > 1000 || cat.includes('WASH')) {
       return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
     }
+
+    // 2. Legitimate CRITICAL pump / squeeze
     if (t === 'CRITICAL' && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
       return { label: 'AGGRESSIVE LONG', mark: '★★★★★', cls: 'text-wr-amber border-wr-amber/60 bg-wr-amber/10' };
     }
+
+    // 3. Extreme score with no positive pattern
     if (sc >= 88) {
       return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
     }
+
+    // 4. CRITICAL alone
     if (t === 'CRITICAL') {
       return { label: 'AVOID / SHORT', mark: '✕✕✕', cls: 'text-wr-red border-wr-red/40 bg-wr-red/5' };
     }
+
+    // 5. HIGH threat pump/squeeze
     if (sc >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) {
       return { label: 'AGGRESSIVE LONG', mark: '★★★★★', cls: 'text-wr-amber border-wr-amber/60 bg-wr-amber/10' };
     }
+
+    // 6. Moderate signals
     if (sc >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vm > 300)) {
       return { label: 'LONG (tight stop)', mark: '★★★★', cls: 'text-wr-amber border-wr-amber/40 bg-wr-amber/5' };
     }
@@ -67,6 +92,7 @@ function getCeoSignal(score: number, threat: string, category: string | null, vm
   }
 }
 
+// ── Validate coin data ──────────────────────────────────────────────────────
 function isValidCoin(c: unknown): c is CoinData {
   if (!c || typeof c !== 'object') return false;
   const coin = c as Record<string, unknown>;
@@ -80,10 +106,12 @@ function isValidCoin(c: unknown): c is CoinData {
   );
 }
 
+// ── Generate stable unique key for coin row ─────────────────────────────────
 function getCoinKey(c: CoinData, index: number): string {
   if (c.id && typeof c.id === 'string' && c.id.length > 0) {
     return c.id;
   }
+  // Fallback: symbol + index to ensure uniqueness
   return `${c.symbol}-idx-${index}`;
 }
 
@@ -157,8 +185,8 @@ export function WRScanner({
   const [sortDir, setSortDir] = useState(-1);
   const [aiRows, setAiRows] = useState<Record<string, AiRowData>>({});
   const [showAdvFilters, setShowAdvFilters] = useState(false);
-  const [showHLScanner, setShowHLScanner] = useState(true);
 
+  // ── HL perps opportunity overlay ──────────────────────────────────────────
   const hlOpps = useHLOpportunities({ enabled: hlScannerEnabled, minApy: 12 });
 
   const handleSort = (key: string) => {
@@ -200,10 +228,25 @@ export function WRScanner({
     [aiKey, onAddAlert]
   );
 
+  // ── Filter & sort with validation ────────────────────────────────────────
   const filtered = useMemo(() => {
-    if (!Array.isArray(coins)) return [];
+    // Validate input array
+    if (!Array.isArray(coins)) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[WRScanner] coins is not an array:', typeof coins);
+      }
+      return [];
+    }
+
+    // Filter out invalid coins
     const validCoins = coins.filter(isValidCoin);
-    if (validCoins.length === 0) return [];
+
+    if (validCoins.length === 0) {
+      if (process.env.NODE_ENV === 'development' && coins.length > 0) {
+        console.warn('[WRScanner] No valid coins after validation. Sample coin:', coins[0]);
+      }
+      return [];
+    }
 
     const searchUpper = search.toUpperCase();
     const searchLower = search.toLowerCase();
@@ -234,6 +277,17 @@ export function WRScanner({
     return filtered.slice(start, end);
   }, [filtered, currentPage]);
 
+  // ── Debug logging (dev only) ─────────────────────────────────────────────
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[WRScanner] Render stats:', {
+      rawCoins: coins?.length ?? 0,
+      filteredCoins: filtered.length,
+      paginatedCoins: paginatedCoins.length,
+      currentPage,
+      totalPages,
+    });
+  }
+
   const badgeCls =
     scanBadge === 'LIVE'
       ? 'text-wr-green border-wr-green-dim bg-wr-green-ghost'
@@ -244,322 +298,307 @@ export function WRScanner({
           : 'text-wr-muted border-wr-border';
 
   return (
-    <div className="flex flex-col gap-0 relative z-10" style={{ isolation: 'isolate' }}>
-      {/* Main Scanner Section */}
-      <section className="border border-wr-border bg-wr-bg2 flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <header className="wr-panel-header">
-          <h2 className="wr-panel-title">⬡ MANIPULATION SCANNER v9 — TOP 250</h2>
-          <div className="flex items-center gap-2">
-            <span className={`wr-badge ${badgeCls}`}>{scanBadge}</span>
-            <button
-              className={`wr-btn text-[8px] ${showHLScanner ? 'active' : ''}`}
-              onClick={() => setShowHLScanner((p) => !p)}
-              title="Toggle HyperLiquid Scanner"
-            >
-              HL {showHLScanner ? 'ON' : 'OFF'}
-            </button>
-          </div>
-        </header>
+    <section className="border border-wr-border bg-wr-bg2 flex-1 flex flex-col overflow-hidden relative z-10" style={{ isolation: 'isolate' }}>
+      {/* Header */}
+      <header className="wr-panel-header">
+        <h2 className="wr-panel-title">⬡ MANIPULATION SCANNER v9 — TOP 250</h2>
+        <span className={`wr-badge ${badgeCls}`}>
+          {scanBadge}
+        </span>
+      </header>
 
-        {/* Controls */}
-        <div className="quick-actions">
-          <button className={`wr-btn ${scanning ? 'animate-ai-pulse' : ''}`} onClick={onScan} disabled={scanning}>
-            {scanning ? <span className="animate-spin-fast inline-block">⟳</span> : '▶'} SCAN
+      {/* Controls */}
+      <div className="quick-actions">
+        <button className={`wr-btn ${scanning ? 'animate-ai-pulse' : ''}`} onClick={onScan} disabled={scanning}>
+          {scanning ? <span className="animate-spin-fast inline-block">⟳</span> : '▶'} SCAN
+        </button>
+        <button className={`wr-btn ${autoScan ? 'active' : ''}`} onClick={onToggleAuto}>
+          AUTO: {autoScan ? 'ON' : 'OFF'}
+        </button>
+        {autoScan && (
+          <button className={`wr-btn ${autoPaused ? 'amber' : ''}`} onClick={onTogglePause}>
+            {autoPaused ? '▶ RESUME' : '⏸ PAUSE'}
           </button>
-          <button className={`wr-btn ${autoScan ? 'active' : ''}`} onClick={onToggleAuto}>
-            AUTO: {autoScan ? 'ON' : 'OFF'}
-          </button>
-          {autoScan && (
-            <button className={`wr-btn ${autoPaused ? 'amber' : ''}`} onClick={onTogglePause}>
-              {autoPaused ? '▶ RESUME' : '⏸ PAUSE'}
-            </button>
-          )}
-          <button className={`wr-btn gold ${watchlistOnly ? 'active' : ''}`} onClick={onToggleWatchlist}>
-            ☆ WL
-          </button>
-          <button className="wr-btn blue" onClick={() => onOpenModal('backtest')} title="Backtest [B]">
-            📊 BT <span className="pro-badge">PRO</span>
-          </button>
-          <button className="wr-btn blue" onClick={() => onOpenModal('portfolio')} title="Portfolio [P]">
-            💼 PTF <span className="pro-badge">PRO</span>
-          </button>
-          <button className="wr-btn ai" onClick={() => onOpenModal('sentiment')} title="AI Sentiment">
-            ✦ SENT <span className="pro-badge">PRO</span>
-          </button>
-          <button
-            className="wr-btn"
-            onClick={() => onOpenModal('signal-eval')}
-            title="Signal Eval — win rates [E]"
-            style={{ borderColor: 'hsl(var(--wr-cyan) / 0.4)', color: 'hsl(var(--wr-cyan))' }}
-          >
-            📈 EVAL
-          </button>
-          <button
-            className={`wr-btn ${showAdvFilters ? 'active' : ''}`}
-            onClick={() => setShowAdvFilters((p) => !p)}
-            title="Advanced filters"
-          >
-            ⚙ FILTERS
-          </button>
-        </div>
-
-        {/* Search & filters */}
-        <div className="quick-actions border-t border-wr-border">
-          <input
-            type="text"
-            className="wr-input"
-            placeholder="🔍 Search symbol or name…"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              onPageChange(1);
-            }}
-          />
-
-          <label className="flex items-center gap-2 text-[9px] text-wr-muted">
-            VOL/MCAP≥
-            <input
-              type="range"
-              min={0}
-              max={500}
-              step={10}
-              value={vmcapThr}
-              onChange={(e) => onVmcapChange(+e.target.value)}
-            />
-            <span className="text-wr-green-dim w-8">{vmcapThr}%</span>
-          </label>
-          <label className="flex items-center gap-2 text-[9px] text-wr-muted">
-            24H≥
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={pchgThr}
-              onChange={(e) => onPchgChange(+e.target.value)}
-            />
-            <span className="text-wr-green-dim w-8">{pchgThr}%</span>
-          </label>
-        </div>
-
-        {showAdvFilters && (
-          <div className="p-3 border-t border-wr-border bg-wr-bg3">
-            <WRAdvancedFilters filters={advancedFilters} onChange={onAdvancedFiltersChange} />
-          </div>
         )}
+        <button className={`wr-btn gold ${watchlistOnly ? 'active' : ''}`} onClick={onToggleWatchlist}>
+          ☆ WL
+        </button>
+        <button className="wr-btn blue" onClick={() => onOpenModal('backtest')} title="Backtest [B]">
+          📊 BT <span className="pro-badge">PRO</span>
+        </button>
+        <button className="wr-btn blue" onClick={() => onOpenModal('portfolio')} title="Portfolio [P]">
+          💼 PTF <span className="pro-badge">PRO</span>
+        </button>
+        <button className="wr-btn ai" onClick={() => onOpenModal('sentiment')} title="AI Sentiment">
+          ✦ SENT <span className="pro-badge">PRO</span>
+        </button>
+        <button
+          className="wr-btn"
+          onClick={() => onOpenModal('signal-eval')}
+          title="Signal Eval — win rates [E]"
+          style={{ borderColor: 'hsl(var(--wr-cyan) / 0.4)', color: 'hsl(var(--wr-cyan))' }}
+        >
+          📈 EVAL
+        </button>
+        <button
+          className={`wr-btn ${showAdvFilters ? 'active' : ''}`}
+          onClick={() => setShowAdvFilters((p) => !p)}
+          title="Advanced filters"
+        >
+          ⚙ FILTERS
+        </button>
+      </div>
 
-        {/* Table container */}
-        <div className="flex-1 overflow-auto scrollbar-thin relative" style={{ isolation: 'isolate', zIndex: 1 }}>
-          <table className="wr-table">
-            <thead>
+      {/* Search & filters */}
+      <div className="quick-actions border-t border-wr-border">
+        <input
+          type="text"
+          className="wr-input"
+          placeholder="🔍 Search symbol or name…"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            onPageChange(1);
+          }}
+        />
+
+        <label className="flex items-center gap-2 text-[9px] text-wr-muted">
+          VOL/MCAP≥
+          <input
+            type="range"
+            min={0}
+            max={500}
+            step={10}
+            value={vmcapThr}
+            onChange={(e) => onVmcapChange(+e.target.value)}
+          />
+          <span className="text-wr-green-dim w-8">{vmcapThr}%</span>
+        </label>
+        <label className="flex items-center gap-2 text-[9px] text-wr-muted">
+          24H≥
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={pchgThr}
+            onChange={(e) => onPchgChange(+e.target.value)}
+          />
+          <span className="text-wr-green-dim w-8">{pchgThr}%</span>
+        </label>
+      </div>
+
+      {showAdvFilters && (
+        <div className="p-3 border-t border-wr-border bg-wr-bg3">
+          <WRAdvancedFilters filters={advancedFilters} onChange={onAdvancedFiltersChange} />
+        </div>
+      )}
+
+      {/* Table container with isolation to prevent z-index issues */}
+      <div className="flex-1 overflow-auto scrollbar-thin relative" style={{ isolation: 'isolate', zIndex: 1 }}>
+        <table className="wr-table">
+          <thead>
+            <tr>
+              {[
+                { key: 'rank', label: '#' },
+                { key: 'symbol', label: 'TOKEN' },
+                { key: 'price', label: 'PRICE' },
+                { key: 'change', label: '24H%' },
+                { key: 'volume', label: '24H VOL' },
+                { key: 'mcap', label: 'MKT CAP' },
+                { key: 'vmcap', label: 'VOL/MCAP ⚠' },
+                { key: 'score', label: 'SCORE' },
+                { key: 'threat', label: 'THREAT' },
+                { key: 'category', label: 'CATEGORY' },
+                { key: '', label: 'ACTIONS' },
+                { key: '', label: 'CEO SIGNAL' },
+              ].map((col, i) => (
+                <th
+                  key={col.key || `col-${i}`}
+                  onClick={() => col.key && handleSort(col.key)}
+                  className={sortKey === col.key ? 'text-wr-amber' : ''}
+                >
+                  {col.label}
+                  {sortKey === col.key && (sortDir > 0 ? ' ▴' : ' ▾')}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
               <tr>
-                {[
-                  { key: 'rank', label: '#' },
-                  { key: 'symbol', label: 'TOKEN' },
-                  { key: 'price', label: 'PRICE' },
-                  { key: 'change', label: '24H%' },
-                  { key: 'volume', label: '24H VOL' },
-                  { key: 'mcap', label: 'MKT CAP' },
-                  { key: 'vmcap', label: 'VOL/MCAP ⚠' },
-                  { key: 'score', label: 'SCORE' },
-                  { key: 'threat', label: 'THREAT' },
-                  { key: 'category', label: 'CATEGORY' },
-                  { key: '', label: 'ACTIONS' },
-                  { key: '', label: 'CEO SIGNAL' },
-                ].map((col, i) => (
-                  <th
-                    key={col.key || `col-${i}`}
-                    onClick={() => col.key && handleSort(col.key)}
-                    className={sortKey === col.key ? 'text-wr-amber' : ''}
-                  >
-                    {col.label}
-                    {sortKey === col.key && (sortDir > 0 ? ' ▴' : ' ▾')}
-                  </th>
-                ))}
+                <td colSpan={12} className="text-center py-16 text-wr-muted">
+                  {coins.length === 0 ? 'Click SCAN to begin surveillance' : 'No tokens match current filters'}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={12} className="text-center py-16 text-wr-muted">
-                    {coins.length === 0 ? 'Click SCAN to begin surveillance' : 'No tokens match current filters'}
-                  </td>
-                </tr>
-              ) : (
-                paginatedCoins.map((c, rowIdx) => {
-                  if (!isValidCoin(c)) return null;
-
-                  const rowKey = getCoinKey(c, rowIdx + (currentPage - 1) * PAGE_SIZE);
-                  const isTracked = !!tracked[c.symbol];
-                  const vmcapVal = typeof c.vmcap === 'number' && !isNaN(c.vmcap) ? c.vmcap : 0;
-                  const vmcapCls =
-                    vmcapVal >= 800
-                      ? 'text-wr-red'
-                      : vmcapVal >= 400
-                        ? 'text-wr-amber'
-                        : vmcapVal >= 200
-                          ? 'text-wr-cyan'
-                          : 'text-wr-green-dim';
-                  const catCls = c.category ? `wr-cat-${c.category.toLowerCase()}` : '';
-                  const aiRow = aiRows[c.symbol];
-
-                  let hlOpp: HLSignal | undefined = undefined;
-                  let hlMeta: (typeof HL_OPP_META)[string] | null = null;
-                  try {
-                    hlOpp = hlOpps.match(c.symbol);
-                    hlMeta = hlOpp ? HL_OPP_META[hlOpp.opportunityType] : null;
-                  } catch (e) {
-                    // Ignore HL lookup errors
+            ) : (
+              paginatedCoins.map((c, rowIdx) => {
+                // ── Safety check (should not happen after validation) ────────
+                if (!isValidCoin(c)) {
+                  if (process.env.NODE_ENV === 'development') {
+                    console.warn('[WRScanner] Invalid coin slipped through at index', rowIdx, c);
                   }
+                  return null;
+                }
 
-                  const hlRowGlow = hlOpp?.level === 'critical' ? 'shadow-[inset_3px_0_0_0_hsl(var(--wr-amber))]' : '';
-                  const changeVal = typeof c.change === 'number' && !isNaN(c.change) ? c.change : 0;
-                  const scoreVal = typeof c.score === 'number' && !isNaN(c.score) ? c.score : 0;
+                const rowKey = getCoinKey(c, rowIdx + (currentPage - 1) * PAGE_SIZE);
+                const siz = calcSizing(c);
+                const isTracked = !!tracked[c.symbol];
+                const vmcapVal = typeof c.vmcap === 'number' && !isNaN(c.vmcap) ? c.vmcap : 0;
+                const vmcapCls =
+                  vmcapVal >= 800
+                    ? 'text-wr-red'
+                    : vmcapVal >= 400
+                      ? 'text-wr-amber'
+                      : vmcapVal >= 200
+                        ? 'text-wr-cyan'
+                        : 'text-wr-green-dim';
+                const catCls = c.category ? `wr-cat-${c.category.toLowerCase()}` : '';
+                const aiRow = aiRows[c.symbol];
 
-                  return (
-                    <tr key={rowKey} className={hlRowGlow} style={{ minHeight: '44px', visibility: 'visible' }}>
-                      <td className="text-wr-muted text-[10px]">{c.rank || '—'}</td>
-                      <td>
-                        <div className="flex items-center gap-2">
-                          <span className="text-wr-green font-semibold">{c.symbol}</span>
-                          {c.isSol && <span className="text-wr-sol text-[8px]">◎</span>}
-                          {c.dexHot && (
-                            <span className="wr-badge bg-wr-blue/10 text-wr-blue border border-wr-blue/30">DEX</span>
-                          )}
-                          {hlOpp && hlMeta && (
-                            <span className={`wr-badge border ${hlMeta.cls}`} title={hlMeta.title}>
-                              HL·{hlMeta.label}
-                              {hlOpp.side !== 'NEUTRAL' && (
-                                <span className="ml-1">{hlOpp.side === 'LONG' ? '↑' : '↓'}</span>
-                              )}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-wr-muted text-[9px] truncate max-w-[120px]">{c.name || '—'}</div>
-                      </td>
-                      <td className="text-wr-white">${fmtP(c.price)}</td>
-                      <td className={changeVal > 0 ? 'text-wr-green-dim' : changeVal < 0 ? 'text-wr-red' : 'text-wr-muted'}>
-                        {changeVal > 0 ? '+' : ''}
-                        {changeVal.toFixed(1)}%
-                      </td>
-                      <td className="text-wr-cyan">${fmtN(c.volume)}</td>
-                      <td className="text-wr-white">${fmtN(c.mcap)}</td>
-                      <td className={`font-semibold ${vmcapCls}`}>{vmcapVal.toFixed(0)}%</td>
-                      <td
-                        className={
-                          scoreVal >= 70 ? 'text-wr-amber font-bold' : scoreVal >= 50 ? 'text-wr-orange' : 'text-wr-white'
+                // Safe HL opportunity lookup
+                let hlOpp: HLSignal | undefined = undefined;
+                let hlMeta: (typeof HL_OPP_META)[string] | null = null;
+                try {
+                  hlOpp = hlOpps.match(c.symbol);
+                  hlMeta = hlOpp ? HL_OPP_META[hlOpp.opportunityType] : null;
+                } catch (e) {
+                  if (process.env.NODE_ENV === 'development') {
+                    console.warn('[WRScanner] HL opp lookup failed for', c.symbol, e);
+                  }
+                }
+
+                const hlRowGlow = hlOpp?.level === 'critical' ? 'shadow-[inset_3px_0_0_0_hsl(var(--wr-amber))]' : '';
+
+                const changeVal = typeof c.change === 'number' && !isNaN(c.change) ? c.change : 0;
+                const scoreVal = typeof c.score === 'number' && !isNaN(c.score) ? c.score : 0;
+                const volSpikeVal = typeof c.volSpike === 'number' && !isNaN(c.volSpike) ? c.volSpike : 0;
+                const confidenceVal = typeof c.confidence === 'number' && !isNaN(c.confidence) ? c.confidence : 0;
+
+                return (
+                  <tr
+                    key={rowKey}
+                    className={`${hlRowGlow}`}
+                    style={{ minHeight: '44px', visibility: 'visible' }}
+                  >
+                    <td className="text-wr-muted text-[10px]">{c.rank || '—'}</td>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        <span className="text-wr-green font-semibold">{c.symbol}</span>
+                        {c.isSol && <span className="text-wr-sol text-[8px]">◎</span>}
+                        {c.dexHot && <span className="wr-badge bg-wr-blue/10 text-wr-blue border border-wr-blue/30">DEX</span>}
+                        {hlOpp && hlMeta && (
+                          <span className={`wr-badge border ${hlMeta.cls}`} title={hlMeta.title}>
+                            HL·{hlMeta.label}
+                            {hlOpp.side !== 'NEUTRAL' && (
+                              <span className="ml-1">{hlOpp.side === 'LONG' ? '↑' : '↓'}</span>
+                            )}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-wr-muted text-[9px] truncate max-w-[120px]">{c.name || '—'}</div>
+                    </td>
+                    <td className="text-wr-white">${fmtP(c.price)}</td>
+                    <td className={changeVal > 0 ? 'text-wr-green-dim' : changeVal < 0 ? 'text-wr-red' : 'text-wr-muted'}>
+                      {changeVal > 0 ? '+' : ''}{changeVal.toFixed(1)}%
+                    </td>
+                    <td className="text-wr-cyan">${fmtN(c.volume)}</td>
+                    <td className="text-wr-white">${fmtN(c.mcap)}</td>
+                    <td className={`font-semibold ${vmcapCls}`}>{vmcapVal.toFixed(0)}%</td>
+                    <td className={scoreVal >= 70 ? 'text-wr-amber font-bold' : scoreVal >= 50 ? 'text-wr-orange' : 'text-wr-white'}>
+                      {scoreVal.toFixed(0)}
+                    </td>
+                    <td>
+                      <span className={`wr-badge ${c.threat === 'CRITICAL' ? 'wr-badge-critical' : c.threat === 'HIGH' ? 'wr-badge-high' : c.threat === 'MEDIUM' ? 'wr-badge-medium' : 'wr-badge-low'}`}>
+                        {c.threat || '—'}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`wr-badge border ${catCls}`}>
+                        {c.category ? c.category.substring(0, 5).toUpperCase() : '—'}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        className={`text-[10px] px-2 py-1 border ${isTracked ? 'text-wr-green border-wr-green/40 bg-wr-green/5' : 'text-wr-muted border-wr-border'}`}
+                        onClick={() =>
+                          isTracked
+                            ? onUntrack(c.symbol)
+                            : onTrack(c.id || c.symbol, c.symbol, c.price)
                         }
                       >
-                        {scoreVal.toFixed(0)}
-                      </td>
-                      <td>
-                        <span
-                          className={`wr-badge ${c.threat === 'CRITICAL' ? 'wr-badge-critical' : c.threat === 'HIGH' ? 'wr-badge-high' : c.threat === 'MEDIUM' ? 'wr-badge-medium' : 'wr-badge-low'}`}
-                        >
-                          {c.threat || '—'}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`wr-badge border ${catCls}`}>
-                          {c.category ? c.category.substring(0, 5).toUpperCase() : '—'}
-                        </span>
-                      </td>
-                      <td>
-                        <button
-                          className={`text-[10px] px-2 py-1 border ${isTracked ? 'text-wr-green border-wr-green/40 bg-wr-green/5' : 'text-wr-muted border-wr-border'}`}
-                          onClick={() =>
-                            isTracked ? onUntrack(c.symbol) : onTrack(c.id || c.symbol, c.symbol, c.price)
-                          }
-                        >
-                          {isTracked ? '★' : '☆'}
-                        </button>
-                        <button
-                          className="text-[10px] px-2 py-1 border border-wr-border text-wr-blue ml-1"
-                          onClick={() => handleAiAnalyze(c)}
-                          title="AI Analysis"
-                        >
-                          ✦
-                        </button>
-                      </td>
-                      <td>
-                        <div
-                          className={`wr-badge border ${getCeoSignal(scoreVal, c.threat || '', c.category, vmcapVal).cls}`}
-                          title="CEO Signal™"
-                        >
-                          <span className="text-[7px]">
-                            {getCeoSignal(scoreVal, c.threat || '', c.category, vmcapVal).mark}
-                          </span>
-                          <span className="text-[8px] ml-1">
-                            {getCeoSignal(scoreVal, c.threat || '', c.category, vmcapVal).label}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        <div className="border-t border-wr-border px-4 py-2 bg-wr-bg text-center">
-          <div className="text-[9px] text-wr-muted">
-            {paginatedCoins.length > 0 && (
-              <>
-                {filtered.length} TOKENS · PAGE {currentPage}/{totalPages}
-                <div className="mt-2 flex justify-center gap-2">
-                  <button
-                    className="wr-btn text-[8px]"
-                    onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    ◀ PREV
-                  </button>
-                  <button
-                    className="wr-btn text-[8px]"
-                    onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
-                    disabled={currentPage === totalPages}
-                  >
-                    NEXT ▶
-                  </button>
-                </div>
-              </>
+                        {isTracked ? '★' : '☆'}
+                      </button>
+                      <button
+                        className="text-[10px] px-2 py-1 border border-wr-border text-wr-blue ml-1"
+                        onClick={() => handleAiAnalyze(c)}
+                        title="AI Analysis"
+                      >
+                        ✦
+                      </button>
+                    </td>
+                    <td>
+                      <div className={`wr-badge border ${getCeoSignal(scoreVal, c.threat || '', c.category, vmcapVal).cls}`} title="CEO Signal™">
+                        <span className="text-[7px]">{getCeoSignal(scoreVal, c.threat || '', c.category, vmcapVal).mark}</span>
+                        <span className="text-[8px] ml-1">{getCeoSignal(scoreVal, c.threat || '', c.category, vmcapVal).label}</span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      <div className="border-t border-wr-border px-4 py-2 bg-wr-bg text-center">
+        <div className="text-[9px] text-wr-muted">
+          {paginatedCoins.length > 0 && (
+            <>
+              {filtered.length} TOKENS · PAGE {currentPage}/{totalPages}
+              <div className="mt-2 flex justify-center gap-2">
+                <button
+                  className="wr-btn text-[8px]"
+                  onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+                  disabled={currentPage === 1}
+                >
+                  ◀ PREV
+                </button>
+                <button
+                  className="wr-btn text-[8px]"
+                  onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  NEXT ▶
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* AI Analysis Row */}
+      {Object.values(aiRows).map((row) => (
+        <div key={row.symbol} className="border-t border-wr-border p-3 bg-wr-bg3 text-[10px] text-wr-white">
+          <div className="flex justify-between items-start gap-2">
+            <div className="flex-1">
+              <div className="text-wr-green font-bold mb-2">{row.symbol}</div>
+              {row.loading ? (
+                <div className="text-wr-muted animate-pulse">Analyzing…</div>
+              ) : (
+                <div className="text-wr-white">{row.text}</div>
+              )}
+            </div>
+            <button
+              className="text-wr-muted hover:text-wr-red text-[12px]"
+              onClick={() => removeAiRow(row.symbol)}
+            >
+              ✕
+            </button>
           </div>
         </div>
-
-        {/* AI Analysis Rows */}
-        {Object.values(aiRows).map((row) => (
-          <div key={row.symbol} className="border-t border-wr-border p-3 bg-wr-bg3 text-[10px] text-wr-white">
-            <div className="flex justify-between items-start gap-2">
-              <div className="flex-1">
-                <div className="text-wr-green font-bold mb-2">{row.symbol}</div>
-                {row.loading ? (
-                  <div className="text-wr-muted animate-pulse">Analyzing…</div>
-                ) : (
-                  <div className="text-wr-white">{row.text}</div>
-                )}
-              </div>
-              <button className="text-wr-muted hover:text-wr-red text-[12px]" onClick={() => removeAiRow(row.symbol)}>
-                ✕
-              </button>
-            </div>
-          </div>
-        ))}
-      </section>
-
-      {/* ══ HYPERLIQUID MANIPULATION SCANNER ══════════════════════════════════ */}
-      {showHLScanner && hlScannerEnabled && (
-        <HLManipulationScanner
-          enabled={hlScannerEnabled}
-          megaTxUsd={hlMegaTxUsd}
-          onGlobalAlert={(alert) => onAddAlert(alert.level, alert.tag, alert.text)}
-          showOpportunities={true}
-          minApy={12}
-        />
-      )}
-    </div>
+      ))}
+    </section>
   );
 }

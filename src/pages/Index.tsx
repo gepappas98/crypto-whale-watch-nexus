@@ -31,19 +31,44 @@ import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
 import { startPerfMonitoring } from '@/lib/perfBudget';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
-import { HLManipulationScanner } from '@/components/hyperliquid/HLManipulationScanner';
 
+// ── Minimum mcap to treat as real data ($10K) ─────────────────────────────────
+// CoinGecko returns market_cap=0 or null for unlisted / no-circulating-supply
+// tokens. The old `|| 1` fallback caused mcap=1, inflating vmcap to billions
+// and false-triggering CRITICAL WASH on every such token.
 const MCAP_MIN_RELIABLE = 10_000;
 
+// ── CEO Signal label (mirrors WRScanner getCeoSignal) ─────────────────────────
+// FIX BUG-004: Decoupled WASH/data-error path from legitimate CRITICAL signals.
+//
+// BEFORE (broken):
+//   if (score >= 88 || vmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH'))
+//     return 'AVOID / SHORT';
+//   // AGGRESSIVE LONG was unreachable for any CRITICAL token regardless of pattern.
+//
+// AFTER (fixed): check wash/bad-data first, then allow CRITICAL+PUMP/SQUEEZE
+// through to AGGRESSIVE LONG before falling back to AVOID on other CRITICAL cases.
+//
 function getCeoSignalLabel(score: number, threat: string, category: string, vmcap: number): string {
-  const t = threat.toUpperCase();
+  const t   = threat.toUpperCase();
   const cat = (category || '').toUpperCase();
 
+  // 1. Wash trade or unreliable vmcap (> 1000% = either wash or bad API data)
   if (vmcap > 1000 || cat.includes('WASH')) return 'AVOID / SHORT';
+
+  // 2. Legitimate CRITICAL pump / squeeze — actionable long signal
   if (t === 'CRITICAL' && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) return 'AGGRESSIVE LONG';
+
+  // 3. Extreme score with no positive pattern
   if (score >= 88) return 'AVOID / SHORT';
+
+  // 4. CRITICAL alone (RUG_PULL, DUMP, no pattern) — avoid
   if (t === 'CRITICAL') return 'AVOID / SHORT';
+
+  // 5. High-confidence pump / squeeze from HIGH threat
   if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) return 'AGGRESSIVE LONG';
+
+  // 6. Moderate signals
   if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) return 'LONG (tight stop)';
   if (score >= 45) return 'LONG';
   if (score >= 35) return 'WATCH';
@@ -51,6 +76,7 @@ function getCeoSignalLabel(score: number, threat: string, category: string, vmca
 }
 
 export default function WhaleRadarApp() {
+  // ══ CORE STATE ═══════════════════════════════════════════════════════════
   const [coins, setCoins] = useState<CoinData[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [whaleFeed, setWhaleFeed] = useState<WhaleTrade[]>([]);
@@ -59,6 +85,7 @@ export default function WhaleRadarApp() {
   const [wallets, setWallets] = useState<WalletEntry[]>([]);
   const [scanHistory, setScanHistory] = useState<ScanSnapshot[]>([]);
 
+  // UI State
   const [theme, setTheme] = useState<'cyber' | 'matrix' | 'dark'>('cyber');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
@@ -72,16 +99,19 @@ export default function WhaleRadarApp() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [copiedBtc, setCopiedBtc] = useState(false);
 
+  // API keys
   const [apiKey, setApiKey] = useState('');
   const [aiKey, setAiKey] = useState('');
   const [birdKey, setBirdKey] = useState('');
   const [heliusKey, setHeliusKey] = useState('');
 
+  // Config
   const [vmcapThr, setVmcapThr] = useState(200);
   const [pchgThr, setPchgThr] = useState(15);
   const [whaleThr, setWhaleThr] = useState(150000);
   const [aggressiveMode, setAggressiveMode] = useState(false);
 
+  // WebSocket config
   const [bybitEnabled, setBybitEnabled] = useState(false);
   const [whaleFeedEx, setWhaleFeedEx] = useState('all');
   const [hlScannerEnabled, setHlScannerEnabled] = useState(true);
@@ -92,30 +122,19 @@ export default function WhaleRadarApp() {
   const [advancedFilters, setAdvancedFilters] = useState<WhaleFilters>(DEFAULT_FILTERS);
   const [scanPage, setScanPage] = useState(1);
 
+  // Stats
   const [apiCallCount, setApiCallCount] = useState(0);
   const [aiCallCount, setAiCallCount] = useState(0);
   const [nextScan, setNextScan] = useState('—');
   const [lastScanTs, setLastScanTs] = useState(0);
 
+  // Modals
   const [activeModal, setActiveModal] = useState<string | null>(null);
 
+  // Previous volumes for spike detection
   const [prevVolumes, setPrevVolumes] = useState<Record<string, number>>({});
 
-  // Calculate portfolio value
-  const portfolioValue = useMemo(() => {
-    return Object.entries(portfolio).reduce((sum, [sym, p]) => {
-      const coin = coins.find(c => c.symbol === sym);
-      return sum + p.amount * (coin?.price || p.entryPrice);
-    }, 0);
-  }, [portfolio, coins]);
-
-  // Calculate alerts today count
-  const alertsToday = useMemo(() => {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    return alerts.filter(a => a.ts >= todayStart.getTime()).length;
-  }, [alerts]);
-
+  // ══ PERSISTENCE ═══════════════════════════════════════════════════════════
   useEffect(() => {
     const saved = loadState();
     if (saved.theme) setTheme(saved.theme as 'cyber' | 'matrix' | 'dark');
@@ -147,11 +166,13 @@ export default function WhaleRadarApp() {
     if (!localStorage.getItem('wr_v9_onboarded')) setShowOnboarding(true);
   }, []);
 
+  // ══ PERFORMANCE MONITORING ═══════════════════════════════════════════════
   useEffect(() => {
     const cleanup = startPerfMonitoring();
     return cleanup;
   }, []);
 
+  // ══ BACKEND CHECK + SIGNAL PRICE FILLER ══════════════════════════════════
   useEffect(() => {
     initBackendCheck();
     fillSignalPrices().catch(() => {});
@@ -161,6 +182,7 @@ export default function WhaleRadarApp() {
     return () => clearInterval(fillTimer);
   }, []);
 
+  // Save on state changes
   useEffect(() => {
     const timer = setTimeout(() => {
       saveState({
@@ -177,12 +199,14 @@ export default function WhaleRadarApp() {
     watchlistOnly, bybitEnabled, whaleFeedEx, autoScan, autoPaused,
     hlScannerEnabled, hlMegaTxUsd]);
 
+  // ══ THEME ═════════════════════════════════════════════════════════════════
   useEffect(() => {
     document.body.classList.remove('theme-matrix', 'theme-dark');
     if (theme === 'matrix') document.body.classList.add('theme-matrix');
     else if (theme === 'dark') document.body.classList.add('theme-dark');
   }, [theme]);
 
+  // ══ RATE LIMIT STATE ═══════════════════════════════════════════════════════
   const [rateLimitInfo, setRateLimitInfo] = useState<{ key: string; source: string; remaining: number }[]>([]);
 
   useEffect(() => {
@@ -191,6 +215,7 @@ export default function WhaleRadarApp() {
     return () => { clearInterval(tick); unsub(); };
   }, []);
 
+  // ══ SCAN ══════════════════════════════════════════════════════════════════
   const birdKeyRef = useRef('');
   useEffect(() => { birdKeyRef.current = birdKey; }, [birdKey]);
 
@@ -249,7 +274,7 @@ export default function WhaleRadarApp() {
     setScanBadge('SCANNING');
 
     const isCgDemoKey = apiKey && apiKey.startsWith('CG-');
-    const isCgProKey = apiKey && !apiKey.startsWith('CG-');
+    const isCgProKey  = apiKey && !apiKey.startsWith('CG-');
 
     try {
       let scanData: unknown[] | null = null;
@@ -281,7 +306,7 @@ export default function WhaleRadarApp() {
           : 'https://api.coingecko.com/api/v3';
         const cgUrl = `${cgBase}/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h&include_platform=false`;
         const cgHeaders: Record<string, string> = {};
-        if (isCgProKey) cgHeaders['x-cg-pro-api-key'] = apiKey;
+        if (isCgProKey)  cgHeaders['x-cg-pro-api-key']  = apiKey;
         if (isCgDemoKey) cgHeaders['x-cg-demo-api-key'] = apiKey;
 
         const result = await cachedFetch<unknown[]>(cgUrl, {
@@ -322,31 +347,57 @@ export default function WhaleRadarApp() {
     }
   }, [scanning, apiKey, prevVolumes]);
 
+  // ══ DATA NORMALIZER ═══════════════════════════════════════════════════════
+  //
+  // FIX BUG-001 (ROOT CAUSE): The old code used `|| 1` as an mcap fallback:
+  //
+  //   const mcap     = (c.market_cap as number) || (c.mcap as number) || 1;
+  //   const safeMcap = Math.max(mcap, 1);
+  //   const vmcap    = Math.max(0, (vol / safeMcap) * 100);
+  //
+  // When CoinGecko returns market_cap=0 or null (unlisted tokens, no circulating
+  // supply data), mcap became 1 and vmcap = (54M / 1) × 100 = 5,400,000,000%.
+  // This false-triggered CRITICAL WASH on every such token via three independent
+  // scoring functions, all of which exit early when vmcap > 800.
+  //
+  // FIX: Reject any token whose raw mcap is below MCAP_MIN_RELIABLE ($10K).
+  // These are not tradeable tokens — they have no usable mcap from the API.
+  // We use flatMap so the type stays CoinData[] without nullable entries.
+  //
   const processData = useCallback((data: unknown[]): CoinData[] => {
     const newVols: Record<string, number> = {};
 
     const mapped: CoinData[] = (data as Record<string, unknown>[]).flatMap((c, i) => {
-      const vol = (c.total_volume as number) || (c.volume as number) || 0;
+      const vol    = (c.total_volume as number) || (c.volume as number) || 0;
+
+      // FIX: Read raw mcap — do NOT use || 1 fallback.
+      // 0 and null are intentional API responses meaning "no data", not "mcap = $1".
       const rawMcap = (c.market_cap as number) || (c.mcap as number) || 0;
 
+      // Skip tokens with unreliable / missing mcap — vmcap would be meaningless.
+      // These are excluded from the scanner entirely rather than showing garbage %.
       if (rawMcap < MCAP_MIN_RELIABLE) {
-        newVols[(c.id as string)] = vol;
+        newVols[(c.id as string)] = vol; // still track vol for next scan spike calc
         return [];
       }
 
       const mcap = rawMcap;
+
+      // Always recalculate vmcap from vol/mcap — never trust c.vmcap from API,
+      // which may use a stale or exchange-specific mcap figure.
       const vmcap = Math.round(Math.max(0, (vol / mcap) * 100));
-      const chg24 = (c.price_change_percentage_24h as number) || (c.change_24h as number) || (c.change as number) || 0;
-      const prevVol = prevVolumes[(c.id as string)] || vol;
-      const volSpike = prevVol > 0 && prevVol !== vol ? vol / prevVol : 1;
-      const supplyPct = c.total_supply
+
+      const chg24      = (c.price_change_percentage_24h as number) || (c.change_24h as number) || (c.change as number) || 0;
+      const prevVol    = prevVolumes[(c.id as string)] || vol;
+      const volSpike   = prevVol > 0 && prevVol !== vol ? vol / prevVol : 1;
+      const supplyPct  = c.total_supply
         ? (((c.circulating_supply as number) / (c.total_supply as number)) * 100)
         : null;
-      const sym = ((c.symbol as string) || '').toUpperCase();
-      const dexHot = false;
-      const dsLiq = null;
-      const isSol = isSolToken(sym);
-      const birdData = null;
+      const sym        = ((c.symbol as string) || '').toUpperCase();
+      const dexHot     = false;
+      const dsLiq      = null;
+      const isSol      = isSolToken(sym);
+      const birdData   = null;
 
       newVols[(c.id as string)] = vol;
 
@@ -354,13 +405,13 @@ export default function WhaleRadarApp() {
       const { score, threat, category, confidence, reasons } = det;
 
       return [{
-        rank: (c.rank as number) || (i + 1),
-        id: c.id as string,
-        symbol: sym,
-        name: c.name as string,
-        price: (c.current_price as number) || (c.price as number) || 0,
-        change: chg24,
-        volume: vol,
+        rank:     (c.rank as number) || (i + 1),
+        id:       c.id as string,
+        symbol:   sym,
+        name:     c.name as string,
+        price:    (c.current_price as number) || (c.price as number) || 0,
+        change:   chg24,
+        volume:   vol,
         mcap,
         vmcap,
         volSpike,
@@ -380,6 +431,7 @@ export default function WhaleRadarApp() {
     setPrevVolumes(newVols);
     setCoins(mapped);
 
+    // Snapshot history
     const critCount = mapped.filter(c => c.threat === 'CRITICAL').length;
     const highCount = mapped.filter(c => c.threat === 'HIGH').length;
     setScanHistory(prev => {
@@ -395,22 +447,24 @@ export default function WhaleRadarApp() {
       return [snap, ...prev].slice(0, CFG.HISTORY_MAX);
     });
 
+    // Record CEO signal outcomes (only for tokens with valid scores)
     mapped
       .filter(c => c.score >= 35)
       .slice(0, 20)
       .forEach(c => {
         const signal = getCeoSignalLabel(c.score, c.threat, c.category || '', c.vmcap);
         recordSignalOutcome({
-          symbol: c.symbol,
-          coin_id: c.id,
+          symbol:      c.symbol,
+          coin_id:     c.id,
           signal,
-          score: c.score,
-          category: c.category,
-          vmcap: c.vmcap,
+          score:       c.score,
+          category:    c.category,
+          vmcap:       c.vmcap,
           entry_price: c.price,
         });
       });
 
+    // Generate alerts for critical/high
     mapped.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
       addAlert('critical', c.symbol, `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
     });
@@ -421,11 +475,13 @@ export default function WhaleRadarApp() {
     return mapped;
   }, [prevVolumes]);
 
+  // ══ ALERTS ════════════════════════════════════════════════════════════════
   const addAlert = useCallback((level: AlertItem['level'], tag: string, text: string, sizing?: string) => {
     const tc = level === 'critical' ? 'C' : level === 'high' ? 'H' : level === 'medium' ? 'M' : 'I';
     setAlerts(prev => [{ ts: Date.now(), level, tag, text, tc, sizing, pinned: false }, ...prev].slice(0, CFG.AFEED_MAX * 2));
   }, []);
 
+  // ══ TRACKING ══════════════════════════════════════════════════════════════
   const trackToken = useCallback((id: string, symbol: string, price: number) => {
     setTracked(prev => ({ ...prev, [symbol]: { id, price, basePrice: price, lastPrice: price } }));
   }, []);
@@ -438,6 +494,7 @@ export default function WhaleRadarApp() {
     });
   }, []);
 
+  // ══ WHALE WEBSOCKET ══════════════════════════════════════════════════════
   const whaleEventThrottle = useRef<Map<string, number>>(new Map());
 
   const handleWhaleTrade = useCallback((trade: WhaleTrade) => {
@@ -447,11 +504,11 @@ export default function WhaleRadarApp() {
     if (Date.now() - lastWrite > 30_000) {
       whaleEventThrottle.current.set(trade.sym, Date.now());
       saveWhaleEvent({
-        symbol: trade.sym,
-        side: trade.side,
-        price: trade.price,
-        qty: trade.qty,
-        usdt: trade.usdt,
+        symbol:   trade.sym,
+        side:     trade.side,
+        price:    trade.price,
+        qty:      trade.qty,
+        usdt:     trade.usdt,
         exchange: trade.ex,
       });
     }
@@ -469,10 +526,11 @@ export default function WhaleRadarApp() {
     bybitEnabled,
     whaleThr,
     whaleFeedEx,
-    onWhaleTrade: handleWhaleTrade,
-    onTrackerPrice: handleTrackerPrice,
+    onWhaleTrade:    handleWhaleTrade,
+    onTrackerPrice:  handleTrackerPrice,
   });
 
+  // ══ AUTO SCAN ═════════════════════════════════════════════════════════════
   const triggerScanRef = useRef(triggerScan);
   useEffect(() => { triggerScanRef.current = triggerScan; }, [triggerScan]);
 
@@ -480,7 +538,7 @@ export default function WhaleRadarApp() {
     if (!autoScan || autoPaused) return;
     const ms = aggressiveMode ? CFG.SCAN_MS_AGG : CFG.SCAN_MS_NORMAL;
     triggerScanRef.current();
-    const timer = setInterval(() => triggerScanRef.current(), ms);
+    const timer   = setInterval(() => triggerScanRef.current(), ms);
     const cdTimer = setInterval(() => {
       const r = Math.max(0, Math.ceil((ms - (Date.now() % ms)) / 1000));
       setNextScan(r > 0 ? r + 's' : 'NOW');
@@ -488,30 +546,33 @@ export default function WhaleRadarApp() {
     return () => { clearInterval(timer); clearInterval(cdTimer); };
   }, [autoScan, autoPaused, aggressiveMode]);
 
+  // ══ KEYBOARD SHORTCUTS ════════════════════════════════════════════════════
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName.toLowerCase();
       if (['input', 'select', 'textarea'].includes(tag)) return;
       const k = e.key.toLowerCase();
-      if (k === 's') { e.preventDefault(); triggerScan(); }
-      else if (k === 'a') { e.preventDefault(); setAutoScan(p => !p); setAutoPaused(false); }
-      else if (k === 'w') { e.preventDefault(); setWatchlistOnly(p => !p); }
-      else if (k === 'b') { e.preventDefault(); setActiveModal('backtest'); }
-      else if (k === 'p') { e.preventDefault(); setActiveModal('portfolio'); }
-      else if (k === 'h') { e.preventDefault(); setActiveModal('history'); }
+      if (k === 's')              { e.preventDefault(); triggerScan(); }
+      else if (k === 'a')         { e.preventDefault(); setAutoScan(p => !p); setAutoPaused(false); }
+      else if (k === 'w')         { e.preventDefault(); setWatchlistOnly(p => !p); }
+      else if (k === 'b')         { e.preventDefault(); setActiveModal('backtest'); }
+      else if (k === 'p')         { e.preventDefault(); setActiveModal('portfolio'); }
+      else if (k === 'h')         { e.preventDefault(); setActiveModal('history'); }
       else if (k === '?' || k === '/') { e.preventDefault(); setKbdOpen(p => !p); }
-      else if (k === 'e') { e.preventDefault(); setActiveModal('signal-eval'); }
-      else if (k === 'escape') { setActiveModal(null); setKbdOpen(false); }
+      else if (k === 'e')         { e.preventDefault(); setActiveModal('signal-eval'); }
+      else if (k === 'escape')    { setActiveModal(null); setKbdOpen(false); }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [triggerScan]);
 
+  // ══ ONBOARDING ════════════════════════════════════════════════════════════
   const finishOnboarding = useCallback(() => {
     setShowOnboarding(false);
     localStorage.setItem('wr_v9_onboarded', '1');
   }, []);
 
+  // ══ TOGGLE HANDLERS ══════════════════════════════════════════════════════
   const handleToggleAuto = useCallback(() => {
     setAutoScan(p => {
       if (!p) setAutoPaused(false);
@@ -527,6 +588,7 @@ export default function WhaleRadarApp() {
     setBybitEnabled(p => !p);
   }, []);
 
+  // ══ FILTERED COINS ════════════════════════════════════════════════════════
   const filteredCoins = coins.filter(c => {
     if (c.vmcap < vmcapThr && Math.abs(c.change) < pchgThr && c.score < 20) return false;
     if (watchlistOnly && !tracked[c.symbol]) return false;
@@ -536,6 +598,7 @@ export default function WhaleRadarApp() {
     return true;
   });
 
+  // ══ FILTERED ALERTS ═══════════════════════════════════════════════════════
   const filteredAlerts = alerts.filter(a => {
     if (alertFilter === 'PIN') return a.pinned;
     if (alertFilter !== 'ALL' && a.tc !== alertFilter) return false;
@@ -543,12 +606,54 @@ export default function WhaleRadarApp() {
   });
 
   return (
-    <div className="wr-app min-h-screen flex flex-col bg-wr-bg relative z-10" style={{ isolation: 'isolate' }}>
+    <div className="min-h-screen flex flex-col">
       {showOnboarding && <WROnboarding onFinish={finishOnboarding} />}
 
+      <HLConfigBanner onOpenSettings={() => setSettingsOpen(true)} />
+
+      {dataSource === 'fallback' && (
+        <div className="bg-wr-red/20 border-b-2 border-wr-red/60 px-4 py-2 text-center text-[10px] text-wr-red tracking-widest">
+          ⚠ RUNNING IN DEGRADED MODE — Showing simulated whale activity. Live data temporarily unavailable.
+        </div>
+      )}
+      {dataSource === 'cached' && scanBadge === 'CACHED' && (
+        <div className="bg-wr-amber/15 border-b border-wr-amber/40 px-4 py-1 text-center text-[8px] text-wr-amber tracking-widest">
+          📦 Serving cached data — API rate limited or slow
+        </div>
+      )}
+
+      {wsReconnects >= 2 && (
+        <div className="bg-wr-amber/20 border-b border-wr-amber/40 px-4 py-1.5 text-center text-[10px] text-wr-amber tracking-widest animate-pulse">
+          ⚠ RECONNECTING… (attempt {wsReconnects}) — Data may be delayed
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 px-4 py-0.5 bg-wr-bg3 border-b border-wr-border/50 text-[8px] tracking-widest">
+        <span className="text-wr-muted">WS:</span>
+        {wsStatus === 'live'         && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-green animate-blink" /> <span className="text-wr-green">LIVE</span></span>}
+        {wsStatus === 'delayed'      && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-amber" /> <span className="text-wr-amber">DELAYED ({Math.round(wsLagMs / 1000)}s)</span></span>}
+        {wsStatus === 'fallback'     && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-red animate-pulse" /> <span className="text-wr-red">FALLBACK (HTTP POLL)</span></span>}
+        {wsStatus === 'reconnecting' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-amber animate-pulse" /> <span className="text-wr-amber">RECONNECTING…</span></span>}
+        {wsStatus === 'offline'      && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-muted" /> <span className="text-wr-muted">OFFLINE</span></span>}
+        <span className="text-wr-muted ml-1">BIN: {binanceReady ? '✓' : '—'} | BYB: {bybitReady ? '✓' : '—'}</span>
+        <div className="flex-1" />
+        <WRAlertBell whaleFeed={whaleFeed} />
+        <WRMobileFilterSheet
+          filters={advancedFilters}
+          onChange={setAdvancedFilters}
+          vmcapThr={vmcapThr}
+          pchgThr={pchgThr}
+          onVmcapChange={setVmcapThr}
+          onPchgChange={setPchgThr}
+        />
+      </div>
+
       <WRHeader
-        theme={theme}
-        onThemeChange={setTheme}
+        scanCount={coins.length}
+        alertCount={alerts.length}
+        nextScan={autoScan ? (autoPaused ? 'PAUSED' : nextScan) : '—'}
+        aiCallCount={aiCallCount}
+        scanning={scanning}
         soundOn={soundOn}
         onToggleSound={() => setSoundOn(p => !p)}
         onToggleSettings={() => setSettingsOpen(p => !p)}
@@ -557,18 +662,17 @@ export default function WhaleRadarApp() {
 
       {settingsOpen && (
         <WRSettingsPanel
-          theme={theme}
-          onThemeChange={setTheme}
-          apiKey={apiKey}
-          onApiKeyChange={setApiKey}
-          aiKey={aiKey}
-          onAiKeyChange={setAiKey}
-          birdKey={birdKey}
-          onBirdKeyChange={setBirdKey}
-          heliusKey={heliusKey}
-          onHeliusKeyChange={setHeliusKey}
-          aggressiveMode={aggressiveMode}
-          onToggleAggressive={() => setAggressiveMode(p => !p)}
+          apiKey={apiKey} onApiKeyChange={setApiKey}
+          aiKey={aiKey} onAiKeyChange={setAiKey}
+          birdKey={birdKey} onBirdKeyChange={setBirdKey}
+          heliusKey={heliusKey} onHeliusKeyChange={setHeliusKey}
+          theme={theme} onThemeChange={setTheme}
+          aggressiveMode={aggressiveMode} onAggressiveModeChange={setAggressiveMode}
+          whaleThr={whaleThr} onWhaleThrChange={setWhaleThr}
+          hlScannerEnabled={hlScannerEnabled}
+          onHlScannerEnabledChange={setHlScannerEnabled}
+          hlMegaTxUsd={hlMegaTxUsd}
+          onHlMegaTxUsdChange={setHlMegaTxUsd}
           supabaseUrl={supabaseUrl}
           onSupabaseUrlChange={(v) => {
             setSupabaseUrl(v);
@@ -584,95 +688,39 @@ export default function WhaleRadarApp() {
         />
       )}
 
-      <WRTicker coins={filteredCoins} tracked={tracked} onTrack={trackToken} />
+      <WRTicker coins={coins.slice(0, 30)} />
 
-      {dataSource === 'fallback' && (
-        <div className="px-4 py-2 bg-wr-bg3 border-b border-wr-border text-wr-amber text-[10px] text-center">
-          Warning: RUNNING IN DEGRADED MODE - Showing simulated whale activity. Live data temporarily unavailable.
-        </div>
-      )}
-      {dataSource === 'cached' && scanBadge === 'CACHED' && (
-        <div className="px-4 py-2 bg-wr-bg3 border-b border-wr-border text-wr-cyan text-[10px] text-center">
-          Serving cached data - API rate limited or slow
-        </div>
-      )}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] flex-1 min-h-0">
+        <WRScanner
+          coins={filteredCoins}
+          scanBadge={scanBadge}
+          scanning={scanning}
+          autoScan={autoScan}
+          autoPaused={autoPaused}
+          watchlistOnly={watchlistOnly}
+          tracked={tracked}
+          portfolio={portfolio}
+          aiKey={aiKey}
+          vmcapThr={vmcapThr}
+          pchgThr={pchgThr}
+          onScan={triggerScan}
+          onToggleAuto={handleToggleAuto}
+          onTogglePause={handleTogglePause}
+          onToggleWatchlist={() => setWatchlistOnly(p => !p)}
+          onTrack={trackToken}
+          onUntrack={untrackToken}
+          onVmcapChange={setVmcapThr}
+          onPchgChange={setPchgThr}
+          onOpenModal={setActiveModal}
+          onAddAlert={addAlert}
+          advancedFilters={advancedFilters}
+          onAdvancedFiltersChange={setAdvancedFilters}
+          page={scanPage}
+          onPageChange={setScanPage}
+          hlScannerEnabled={hlScannerEnabled}
+          hlMegaTxUsd={hlMegaTxUsd}
+        />
 
-      {wsReconnects >= 2 && (
-        <div className="px-4 py-2 bg-wr-bg3 border-b border-wr-border text-wr-orange text-[10px] text-center">
-          Warning: RECONNECTING... (attempt {wsReconnects}) - Data may be delayed
-        </div>
-      )}
-
-      {/* WebSocket Status Bar */}
-      <div className="px-4 py-1 bg-wr-bg2 border-b border-wr-border flex items-center gap-4 text-[9px]">
-        <span className="text-wr-muted">
-          WS:{' '}
-          {wsStatus === 'live' && <span className="text-wr-green">LIVE</span>}
-          {wsStatus === 'delayed' && <span className="text-wr-amber">DELAYED ({Math.round(wsLagMs / 1000)}s)</span>}
-          {wsStatus === 'fallback' && <span className="text-wr-orange">FALLBACK (HTTP POLL)</span>}
-          {wsStatus === 'reconnecting' && <span className="text-wr-amber">RECONNECTING...</span>}
-          {wsStatus === 'offline' && <span className="text-wr-red">OFFLINE</span>}
-        </span>
-        <span className="text-wr-muted">BIN: {binanceReady ? '✓' : '—'} | BYB: {bybitReady ? '✓' : '—'}</span>
-      </div>
-
-      {/* Stats Bar with correct props */}
-      <WRStatsBar
-        alertsToday={alertsToday}
-        apiCallCount={apiCallCount}
-        apiKey={apiKey}
-        lastScanTs={lastScanTs}
-        historyCount={scanHistory.length}
-        portfolioValue={portfolioValue}
-        rateLimits={rateLimitInfo}
-      />
-
-      <main className="wr-layout grid grid-cols-1 lg:grid-cols-[1fr_340px] flex-1 min-h-0 overflow-hidden">
-        {/* Left column: Scanner + HL Scanner */}
-        <div className="flex flex-col min-h-0 overflow-hidden relative z-10" style={{ isolation: 'isolate' }}>
-          <WRScanner
-            coins={filteredCoins}
-            scanBadge={scanBadge}
-            scanning={scanning}
-            autoScan={autoScan}
-            autoPaused={autoPaused}
-            watchlistOnly={watchlistOnly}
-            tracked={tracked}
-            portfolio={portfolio}
-            aiKey={aiKey}
-            vmcapThr={vmcapThr}
-            pchgThr={pchgThr}
-            onScan={triggerScan}
-            onToggleAuto={handleToggleAuto}
-            onTogglePause={handleTogglePause}
-            onToggleWatchlist={() => setWatchlistOnly(p => !p)}
-            onTrack={trackToken}
-            onUntrack={untrackToken}
-            onVmcapChange={setVmcapThr}
-            onPchgChange={setPchgThr}
-            onOpenModal={setActiveModal}
-            onAddAlert={addAlert}
-            advancedFilters={advancedFilters}
-            onAdvancedFiltersChange={setAdvancedFilters}
-            page={scanPage}
-            onPageChange={setScanPage}
-            hlScannerEnabled={hlScannerEnabled}
-            hlMegaTxUsd={hlMegaTxUsd}
-          />
-
-          {/* HYPERLIQUID MANIPULATION SCANNER */}
-          {hlScannerEnabled && (
-            <HLManipulationScanner
-              enabled={hlScannerEnabled}
-              megaTxUsd={hlMegaTxUsd}
-              onGlobalAlert={(alert) => addAlert(alert.level, alert.tag, alert.text)}
-              showOpportunities={true}
-              minApy={12}
-            />
-          )}
-        </div>
-
-        {/* Right panel */}
         <WRRightPanel
           whaleFeed={whaleFeed}
           alerts={filteredAlerts}
@@ -688,31 +736,35 @@ export default function WhaleRadarApp() {
           whaleFeedEx={whaleFeedEx}
           onWhaleFeedExChange={setWhaleFeedEx}
         />
-      </main>
+      </div>
 
-      <WRTracker
-        tracked={tracked}
-        coins={coins}
-        onUntrack={untrackToken}
-        onAddAlert={addAlert}
-        portfolio={portfolio}
-        portValue={portfolioValue}
+      <WRStatsBar
+        alertsToday={alerts.length}
+        apiCallCount={apiCallCount}
+        apiKey={apiKey}
+        lastScanTs={lastScanTs}
+        historyCount={scanHistory.length}
+        portfolioValue={Object.entries(portfolio).reduce((s, [sym, p]) => {
+          const coin = coins.find(c => c.symbol === sym);
+          return s + p.amount * (coin?.price || p.entryPrice);
+        }, 0)}
+        rateLimits={rateLimitInfo}
       />
 
-      <WRAlertBell whaleFeed={whaleFeed} />
+      <WRTracker tracked={tracked} onUntrack={untrackToken} />
 
-      <WRMobileFilterSheet />
+      <WRCrystalBallPro />
 
       {kbdOpen && <WRKeyboardHelp onClose={() => setKbdOpen(false)} />}
 
       {activeModal === 'backtest' && (
-        <WRModal title="BACKTEST" onClose={() => setActiveModal(null)}>
+        <WRModal title="📊 BACKTESTING MODULE" onClose={() => setActiveModal(null)}>
           <BacktestContent scanHistory={scanHistory} />
         </WRModal>
       )}
 
       {activeModal === 'portfolio' && (
-        <WRModal title="PORTFOLIO" onClose={() => setActiveModal(null)}>
+        <WRModal title="💼 PORTFOLIO MANAGER" onClose={() => setActiveModal(null)}>
           <PortfolioContent
             portfolio={portfolio}
             coins={coins}
@@ -724,47 +776,59 @@ export default function WhaleRadarApp() {
       )}
 
       {activeModal === 'sentiment' && (
-        <WRModal title="SENTIMENT" onClose={() => setActiveModal(null)}>
-          <SentimentContent coins={filteredCoins} aiKey={aiKey} />
+        <WRModal title="✦ AI MARKET SENTIMENT" onClose={() => setActiveModal(null)}>
+          <SentimentContent coins={coins} aiKey={aiKey} />
         </WRModal>
       )}
 
       {activeModal === 'signal-eval' && (
-        <WRModal title="SIGNAL EVAL" onClose={() => setActiveModal(null)}>
+        <WRModal title="📈 SIGNAL EVAL — PROFIT PROOF" onClose={() => setActiveModal(null)}>
           <WRSignalEval />
         </WRModal>
       )}
 
-      {/* TIP THE CEO */}
-      <div className="border-t border-wr-border px-4 py-3 bg-wr-bg text-center text-[8px] text-wr-muted">
-        <div className="text-wr-green-dim font-head letter-spacing-2 mb-2">Support the Developer</div>
-        <div className="mb-2">Found Whale Radar useful?</div>
-        <div className="text-[7px] mb-3 leading-relaxed">
-          If this tool helped your trading or development workflow, consider tipping the CEO. Every sat counts.
+      {/* ══ TIP THE CEO ══ */}
+      <div className="border-t border-wr-border bg-wr-bg2/80 py-8 px-4">
+        <div className="max-w-md mx-auto text-center space-y-4">
+          <div className="text-[9px] tracking-[0.3em] text-wr-muted uppercase">Support the Developer</div>
+          <h3 className="font-head text-lg text-wr-cyan">
+            ☕ Found Whale Radar useful?
+          </h3>
+          <p className="text-[11px] text-wr-muted leading-relaxed">
+            If this tool helped your trading or development workflow, consider tipping the CEO. Every sat counts. 🙏
+          </p>
+          <div className="inline-block bg-white rounded-xl p-3 shadow-lg shadow-wr-cyan/10">
+            <img
+              src={btcQr}
+              alt="BTC Donation QR Code"
+              className="w-48 h-48 object-contain"
+            />
+          </div>
+          <div className="space-y-1">
+            <div className="text-[8px] tracking-widest text-wr-muted uppercase">BTC Address</div>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText('bc1q0d0ccaxuw065ezdulr68azp2fjhc0avaqf0pyz');
+                setCopiedBtc(true);
+                setTimeout(() => setCopiedBtc(false), 2000);
+              }}
+              className="font-mono text-[10px] text-wr-green bg-wr-bg3 border border-wr-border rounded px-3 py-2 hover:border-wr-cyan transition-colors cursor-pointer select-all break-all max-w-xs mx-auto block"
+              title="Click to copy"
+            >
+              bc1q0d0ccaxuw065ezdulr68azp2fjhc0avaqf0pyz
+            </button>
+            <div className={`text-[9px] h-4 transition-opacity ${copiedBtc ? 'text-wr-green opacity-100' : 'opacity-0'}`}>
+              ✓ Copied to clipboard!
+            </div>
+          </div>
+          <div className="text-[8px] text-wr-muted/50 pt-2">WHALE RADAR v9 — Built with 🔥 by the CEO</div>
         </div>
-        <div className="mb-3 p-2 bg-wr-bg3 border border-wr-border rounded">
-          <div className="text-wr-muted text-[7px] mb-2">BTC Address</div>
-          <input
-            type="text"
-            value="bc1q0d0ccaxuw065ezdulr68azp2fjhc0avaqf0pyz"
-            readOnly
-            onFocus={(e) => {
-              e.currentTarget.select();
-              navigator.clipboard.writeText('bc1q0d0ccaxuw065ezdulr68azp2fjhc0avaqf0pyz');
-              setCopiedBtc(true);
-              setTimeout(() => setCopiedBtc(false), 2000);
-            }}
-            className="font-mono text-[10px] text-wr-green bg-wr-bg3 border border-wr-border rounded px-3 py-2 hover:border-wr-cyan transition-colors cursor-pointer select-all break-all max-w-xs mx-auto block w-full"
-            title="Click to copy"
-          />
-          {copiedBtc && <div className="text-wr-green text-[8px] mt-1">Copied to clipboard!</div>}
-        </div>
-        <div className="text-wr-muted text-[7px]">WHALE RADAR v9 - Built by the CEO</div>
       </div>
     </div>
   );
 }
 
+/* ══ BACKTEST CONTENT ═════════════════════════════════════════════════════════ */
 function BacktestContent({ scanHistory }: { scanHistory: ScanSnapshot[] }) {
   const [results, setResults] = useState<{ sym: string; threat: string; pnlPct: number; ts: number }[]>([]);
   const [ran, setRan] = useState(false);
@@ -789,53 +853,61 @@ function BacktestContent({ scanHistory }: { scanHistory: ScanSnapshot[] }) {
   };
 
   const avgPnl = results.length ? results.reduce((s, r) => s + r.pnlPct, 0) / results.length : 0;
-  const wins = results.filter(r => r.pnlPct > 0).length;
+  const wins   = results.filter(r => r.pnlPct > 0).length;
 
   return (
-    <div className="p-4 space-y-4">
-      <div className="text-wr-muted text-[9px]">SNAPSHOTS: {scanHistory.length}</div>
-      <button className="wr-btn w-full" onClick={runBacktest}>RUN BACKTEST</button>
+    <div className="space-y-4">
+      <div className="flex gap-2 items-center flex-wrap">
+        <span className="text-xs text-wr-muted tracking-widest">SNAPSHOTS: {scanHistory.length}</span>
+        <button className="wr-btn" onClick={runBacktest}>▶ RUN BACKTEST</button>
+      </div>
       {!ran ? (
-        <div className="text-wr-muted text-[9px] text-center py-8">
-          Select parameters and click RUN BACKTEST<br />Uses scan history snapshots to simulate
-        </div>
+        <p className="text-center text-wr-muted text-xs py-8">
+          Select parameters and click RUN BACKTEST<br />
+          <span className="text-[8px]">Uses scan history snapshots to simulate</span>
+        </p>
       ) : results.length === 0 ? (
-        <div className="text-wr-muted text-[9px] text-center py-8">No trade simulations - run more scans first</div>
+        <p className="text-center text-wr-muted text-xs py-8">No trade simulations — run more scans first</p>
       ) : (
-        <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-2">
-            <div className={`text-center ${avgPnl >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>
-              <div className="text-[12px] font-bold">{avgPnl >= 0 ? '+' : ''}{avgPnl.toFixed(2)}%</div>
-              <div className="text-[8px] text-wr-muted">AVG PNL</div>
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-wr-bg3 border border-wr-border p-3 text-center">
+              <div className={`font-head text-lg ${avgPnl >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>
+                {avgPnl >= 0 ? '+' : ''}{avgPnl.toFixed(2)}%
+              </div>
+              <div className="text-[7px] text-wr-muted tracking-widest">AVG PNL</div>
             </div>
-            <div className="text-center">
-              <div className="text-[12px] font-bold text-wr-green">{results.length > 0 ? ((wins / results.length) * 100).toFixed(0) : 0}%</div>
-              <div className="text-[8px] text-wr-muted">WIN RATE</div>
+            <div className="bg-wr-bg3 border border-wr-border p-3 text-center">
+              <div className="font-head text-lg text-wr-amber">
+                {results.length > 0 ? ((wins / results.length) * 100).toFixed(0) : 0}%
+              </div>
+              <div className="text-[7px] text-wr-muted tracking-widest">WIN RATE</div>
             </div>
-            <div className="text-center">
-              <div className="text-[12px] font-bold">{results.length}</div>
-              <div className="text-[8px] text-wr-muted">TRADES</div>
-            </div>
-          </div>
-          <div className="text-[8px] text-wr-orange text-center">SIMULATED - NOT FINANCIAL ADVICE</div>
-          <div className="overflow-auto max-h-60">
-            <div className="space-y-1">
-              {results.slice(0, 30).map((r, i) => (
-                <div key={i} className="flex justify-between items-center text-[8px] p-2 border border-wr-border rounded">
-                  <div className="text-wr-muted">{new Date(r.ts).toLocaleTimeString()}</div>
-                  <div className="text-wr-green font-bold">{r.sym}</div>
-                  <div className="text-wr-amber">{r.threat}</div>
-                  <div className={r.pnlPct >= 0 ? 'text-wr-green' : 'text-wr-red'}>{r.pnlPct >= 0 ? '+' : ''}{r.pnlPct.toFixed(2)}%</div>
-                </div>
-              ))}
+            <div className="bg-wr-bg3 border border-wr-border p-3 text-center">
+              <div className="font-head text-lg text-wr-white">{results.length}</div>
+              <div className="text-[7px] text-wr-muted tracking-widest">TRADES</div>
             </div>
           </div>
-        </div>
+          <div className="text-[7px] text-wr-muted tracking-widest">SIMULATED — NOT FINANCIAL ADVICE</div>
+          <div className="max-h-60 overflow-y-auto scrollbar-thin space-y-0.5">
+            {results.slice(0, 30).map((r, i) => (
+              <div key={i} className="grid grid-cols-4 gap-2 text-[9px] py-1 border-b border-wr-border/50">
+                <span className="text-wr-muted">{new Date(r.ts).toLocaleTimeString()}</span>
+                <span className="text-wr-white font-head text-[8px]">{r.sym}</span>
+                <span className={`wr-badge wr-badge-${r.threat.toLowerCase()}`}>{r.threat}</span>
+                <span className={r.pnlPct >= 0 ? 'text-wr-green' : 'text-wr-red'}>
+                  {r.pnlPct >= 0 ? '+' : ''}{r.pnlPct.toFixed(2)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
 }
 
+/* ══ PORTFOLIO CONTENT ════════════════════════════════════════════════════════ */
 function PortfolioContent({ portfolio, coins, onAdd, onRemove, onClear }: {
   portfolio: Record<string, PortfolioEntry>;
   coins: CoinData[];
@@ -843,8 +915,8 @@ function PortfolioContent({ portfolio, coins, onAdd, onRemove, onClear }: {
   onRemove: (sym: string) => void;
   onClear: () => void;
 }) {
-  const [sym, setSym] = useState('');
-  const [amt, setAmt] = useState('');
+  const [sym, setSym]     = useState('');
+  const [amt, setAmt]     = useState('');
   const [entry, setEntry] = useState('');
 
   const handleAdd = () => {
@@ -860,106 +932,111 @@ function PortfolioContent({ portfolio, coins, onAdd, onRemove, onClear }: {
   let totalVal = 0, totalEntry = 0;
   entries.forEach(([s, p]) => {
     const coin = coins.find(c => c.symbol === s);
-    totalVal += p.amount * (coin?.price || p.entryPrice);
+    totalVal   += p.amount * (coin?.price || p.entryPrice);
     totalEntry += p.amount * p.entryPrice;
   });
-  const totalPnl = totalVal - totalEntry;
+  const totalPnl    = totalVal - totalEntry;
   const totalPnlPct = totalEntry > 0 ? (totalPnl / totalEntry) * 100 : 0;
 
   return (
-    <div className="p-4 space-y-4">
-      <div className="grid grid-cols-4 gap-2">
-        <input type="text" placeholder="SYM" value={sym} onChange={(e) => setSym(e.target.value)} style={{ textTransform: 'uppercase' }} className="wr-input text-[9px]" />
-        <input type="number" placeholder="QTY" value={amt} onChange={(e) => setAmt(e.target.value)} className="wr-input text-[9px]" />
-        <input type="number" placeholder="ENTRY" value={entry} onChange={(e) => setEntry(e.target.value)} className="wr-input text-[9px]" />
-        <button className="wr-btn text-[8px]" onClick={handleAdd}>+ ADD</button>
+    <div className="space-y-4">
+      <div className="flex gap-2 flex-wrap items-center">
+        <input className="wr-input w-20" placeholder="SYMBOL" value={sym} onChange={e => setSym(e.target.value)} style={{ textTransform: 'uppercase' }} />
+        <input className="wr-input w-20" placeholder="AMOUNT" value={amt} onChange={e => setAmt(e.target.value)} />
+        <input className="wr-input w-20" placeholder="ENTRY $" value={entry} onChange={e => setEntry(e.target.value)} />
+        <button className="wr-btn" onClick={handleAdd}>+ ADD</button>
+        <button className="wr-btn red" onClick={onClear}>CLR ALL</button>
       </div>
-      <button className="wr-btn w-full text-[8px]" onClick={onClear}>CLR ALL</button>
       {entries.length === 0 ? (
-        <div className="text-wr-muted text-[9px] text-center py-8">No holdings - add manually above</div>
+        <p className="text-center text-wr-muted text-xs py-8">No holdings — add manually above</p>
       ) : (
-        <div className="space-y-3">
-          <div className="overflow-auto max-h-60">
-            <table className="w-full text-[8px]">
-              <thead>
-                <tr className="border-b border-wr-border">
-                  {['TOKEN','QTY','ENTRY','NOW','PNL%','VALUE',''].map(h => (
-                    <th key={h} className="p-2 text-left text-wr-muted">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map(([s, p]) => {
-                  const coin = coins.find(c => c.symbol === s);
-                  const curP = coin?.price || p.entryPrice;
-                  const pnl = ((curP - p.entryPrice) / p.entryPrice) * 100;
-                  return (
-                    <tr key={s} className="border-b border-wr-border">
-                      <td className="p-2 text-wr-green font-bold">{s}</td>
-                      <td className="p-2">{p.amount}</td>
-                      <td className="p-2">${fmtP(p.entryPrice)}</td>
-                      <td className="p-2">${fmtP(curP)}</td>
-                      <td className={`p-2 ${pnl >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>{pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}%</td>
-                      <td className="p-2">${fmtN(p.amount * curP)}</td>
-                      <td className="p-2"><button className="text-wr-red text-[8px]" onClick={() => onRemove(s)}>X</button></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <>
+          <table className="w-full text-[9px] border-collapse">
+            <thead>
+              <tr>
+                {['TOKEN','QTY','ENTRY','NOW','PNL%','VALUE',''].map(h => (
+                  <th key={h} className="text-left text-wr-muted text-[7px] tracking-widest py-1 border-b border-wr-border">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map(([s, p]) => {
+                const coin = coins.find(c => c.symbol === s);
+                const curP = coin?.price || p.entryPrice;
+                const pnl  = ((curP - p.entryPrice) / p.entryPrice) * 100;
+                return (
+                  <tr key={s} className="border-b border-wr-border/50">
+                    <td className="text-wr-white font-head text-[9px] py-1">{s}</td>
+                    <td className="py-1">{p.amount}</td>
+                    <td className="py-1">${fmtP(p.entryPrice)}</td>
+                    <td className="text-wr-cyan py-1">${fmtP(curP)}</td>
+                    <td className={`py-1 ${pnl >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>
+                      {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}%
+                    </td>
+                    <td className="py-1">${fmtN(p.amount * curP)}</td>
+                    <td className="py-1">
+                      <button className="wr-btn red text-[7px] px-1 py-0" onClick={() => onRemove(s)}>✕</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-wr-bg3 border border-wr-border p-2 text-center">
+              <div className="font-head text-sm text-wr-white">${fmtN(totalVal)}</div>
+              <div className="text-[7px] text-wr-muted tracking-widest">TOTAL VALUE</div>
+            </div>
+            <div className="bg-wr-bg3 border border-wr-border p-2 text-center">
+              <div className={`font-head text-sm ${totalPnl >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>
+                {totalPnl >= 0 ? '+' : ''}{totalPnlPct.toFixed(2)}%
+              </div>
+              <div className="text-[7px] text-wr-muted tracking-widest">TOTAL PNL</div>
+            </div>
+            <div className="bg-wr-bg3 border border-wr-border p-2 text-center">
+              <div className="font-head text-sm text-wr-white">{entries.length}</div>
+              <div className="text-[7px] text-wr-muted tracking-widest">HOLDINGS</div>
+            </div>
           </div>
-          <div className="grid grid-cols-3 gap-2 p-2 bg-wr-bg3 border border-wr-border rounded">
-            <div className="text-center">
-              <div className="text-[10px] font-bold">${fmtN(totalVal)}</div>
-              <div className="text-[8px] text-wr-muted">TOTAL VALUE</div>
-            </div>
-            <div className={`text-center ${totalPnlPct >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>
-              <div className="text-[10px] font-bold">{totalPnlPct >= 0 ? '+' : ''}{totalPnlPct.toFixed(2)}%</div>
-              <div className="text-[8px] text-wr-muted">TOTAL PNL</div>
-            </div>
-            <div className="text-center">
-              <div className="text-[10px] font-bold">{entries.length}</div>
-              <div className="text-[8px] text-wr-muted">HOLDINGS</div>
-            </div>
-          </div>
-        </div>
+        </>
       )}
     </div>
   );
 }
 
+/* ══ SENTIMENT CONTENT ════════════════════════════════════════════════════════ */
 function SentimentContent({ coins, aiKey }: { coins: CoinData[]; aiKey: string }) {
   const critCount = coins.filter(c => c.threat === 'CRITICAL').length;
   const highCount = coins.filter(c => c.threat === 'HIGH').length;
   const washCount = coins.filter(c => c.category === 'WASH').length;
 
   return (
-    <div className="p-4 space-y-4">
-      <div className="grid grid-cols-3 gap-2">
-        <div className="text-center p-2 bg-wr-bg3 border border-wr-border rounded">
-          <div className="text-[12px] font-bold text-wr-red">{critCount}</div>
-          <div className="text-[8px] text-wr-muted">CRITICAL</div>
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-wr-bg3 border border-wr-border p-3 text-center">
+          <div className="text-[7px] text-wr-muted tracking-widest mb-1">CRITICAL</div>
+          <div className="font-head text-xl text-wr-red">{critCount}</div>
         </div>
-        <div className="text-center p-2 bg-wr-bg3 border border-wr-border rounded">
-          <div className="text-[12px] font-bold text-wr-amber">{highCount}</div>
-          <div className="text-[8px] text-wr-muted">HIGH</div>
+        <div className="bg-wr-bg3 border border-wr-border p-3 text-center">
+          <div className="text-[7px] text-wr-muted tracking-widest mb-1">HIGH</div>
+          <div className="font-head text-xl text-wr-amber">{highCount}</div>
         </div>
-        <div className="text-center p-2 bg-wr-bg3 border border-wr-border rounded">
-          <div className="text-[12px] font-bold text-wr-purple">{washCount}</div>
-          <div className="text-[8px] text-wr-muted">WASH</div>
+        <div className="bg-wr-bg3 border border-wr-border p-3 text-center">
+          <div className="text-[7px] text-wr-muted tracking-widest mb-1">WASH</div>
+          <div className="font-head text-xl text-wr-purple">{washCount}</div>
         </div>
       </div>
       {!aiKey ? (
-        <div className="text-wr-muted text-[9px] text-center py-4">Enter AI key in Settings to enable sentiment analysis</div>
+        <p className="text-center text-wr-muted text-xs py-4">Enter AI key in ⚙ Settings to enable sentiment analysis</p>
       ) : (
-        <div className="p-3 bg-wr-bg3 border border-wr-border rounded">
-          <div className="text-wr-green text-[9px] font-bold mb-2">AI ASSESSMENT</div>
-          <div className="text-wr-white text-[8px] leading-relaxed">
+        <div className="border-t border-wr-purple/30 pt-3">
+          <div className="text-[8px] text-wr-purple tracking-widest mb-2">✦ AI ASSESSMENT</div>
+          <p className="text-[10px] text-wr-white leading-relaxed">
             Market shows {critCount > 3 ? 'ELEVATED' : critCount > 0 ? 'MODERATE' : 'LOW'} manipulation risk.
             {washCount > 0 ? ` ${washCount} tokens flagged for wash trading patterns.` : ''}
             {critCount > 5 ? ' High cluster of critical alerts suggests coordinated activity.' : ''}
             Exercise caution with high-score tokens.
-          </div>
+          </p>
         </div>
       )}
     </div>

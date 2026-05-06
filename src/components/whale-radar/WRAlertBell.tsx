@@ -64,7 +64,7 @@ export function WRAlertBell({ whaleFeed, onTriggered }: WRAlertBellProps) {
 
   // Check whale feed against custom alerts
   useEffect(() => {
-    if (!whaleFeed || whaleFeed.length <= lastCheckedIdx.current) return;
+    if (whaleFeed.length <= lastCheckedIdx.current) return;
     const newTrades = whaleFeed.slice(0, whaleFeed.length - lastCheckedIdx.current);
     lastCheckedIdx.current = whaleFeed.length;
 
