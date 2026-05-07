@@ -22,7 +22,11 @@ const DEFAULT_CONFIG: Required<ResilienceConfig> = {
 };
 
 export function useNetworkResilience(config: ResilienceConfig = {}) {
-  const cfg = { ...DEFAULT_CONFIG, ...config };
+  const cfg = useMemo(
+    () => ({ ...DEFAULT_CONFIG, ...config }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [config.maxConcurrency, config.batchSize, config.retryAttempts, config.degradedThreshold],
+  );
   const [status, setStatus] = useState<NetworkStatus>('online');
   const [failureRate, setFailureRate] = useState(0);
   const requestLog = useRef<{ success: boolean; ts: number }[]>([]);
