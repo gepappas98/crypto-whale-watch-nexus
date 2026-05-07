@@ -212,9 +212,15 @@ async function doFetchWithTimeout<T>(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+    let abortHandler: (() => void) | undefined;
     if (externalSignal) {
-      externalSignal.addEventListener('abort', () => controller.abort());
+      abortHandler = () => controller.abort();
+      externalSignal.addEventListener('abort', abortHandler);
     }
+
+    const cleanup = () => {
+      if (abortHandler && externalSignal) externalSignal.removeEventListener('abort', abortHandler);
+    };
 
     try {
       const res = await fetch(url, { headers, signal: controller.signal });
@@ -226,6 +232,7 @@ async function doFetchWithTimeout<T>(
           handleRateLimit(rateLimitName, rateLimitKey, retryAfter);
         }
         toast.warning('Rate limit hit — using cached data', { duration: 5000, id: `rl-toast-${rateLimitKey || 'api'}` });
+        cleanup();
         return { data: null, fromCache: false, error: 'Rate limited (429)' };
       }
 
@@ -235,19 +242,23 @@ async function doFetchWithTimeout<T>(
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as T;
+      cleanup();
       return { data, fromCache: false };
     } catch (err) {
       clearTimeout(timeoutId);
       if ((err as Error).name === 'AbortError') {
         if (attempt >= maxRetries - 1) {
+          cleanup();
           return { data: null, fromCache: false, error: `Request timeout after ${timeoutMs}ms` };
         }
       }
       if (attempt < maxRetries - 1) {
         const delay = jitter(BASE_DELAY * Math.pow(2, attempt));
+        cleanup();
         await new Promise(r => setTimeout(r, delay));
         continue;
       }
+      cleanup();
       return { data: null, fromCache: false, error: (err as Error).message };
     }
   }
