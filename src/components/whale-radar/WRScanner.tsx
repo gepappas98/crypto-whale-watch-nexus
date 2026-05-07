@@ -523,17 +523,19 @@ export function WRScanner({
                         {c.isSol && <span className="text-wr-sol text-[8px]">◎</span>}
                         {c.dexHot && <span className="wr-badge bg-wr-blue/10 text-wr-blue border border-wr-blue/30">DEX</span>}
                         {hlOpp && hlMeta && (() => {
-                          // Captured once per row render so closures are stable
                           const _opp  = hlOpp!;
                           const _meta = hlMeta!;
                           const _sym  = c.symbol;
+                          const firedRef = { current: 0 };
 
-                          const openDrawer = (e: React.SyntheticEvent) => {
-                            e.stopPropagation();
-                            e.preventDefault();
+                          const openDrawer = (src: string) => {
+                            // De-dupe touch + synthesized click within 400 ms
+                            const now = Date.now();
+                            if (now - firedRef.current < 400) return;
+                            firedRef.current = now;
                             const payload = { symbol: _sym, opp: _opp, meta: _meta };
                             if (process.env.NODE_ENV === 'development') {
-                              console.log('[WRScanner] HL badge open → drawer', payload);
+                              console.log('[WRScanner] HL badge open', src, payload);
                             }
                             setHlDrawer(payload);
                             try {
@@ -550,37 +552,30 @@ export function WRScanner({
                           return (
                           <button
                             type="button"
-                            className={`wr-badge border ${_meta.cls} cursor-pointer hover:brightness-125 transition relative z-10`}
+                            className={`wr-badge border ${_meta.cls} cursor-pointer hover:brightness-125 active:brightness-150 transition relative z-20 select-none`}
                             title={`${_meta.title} — tap for details`}
                             style={{
-                              // Suppress 300 ms tap delay & double-tap zoom on mobile.
-                              // This alone makes the tap fire immediately on iOS/Android.
+                              // Kill 300ms tap delay & double-tap zoom on mobile
                               touchAction: 'manipulation',
-                              // Enforce minimum 44×44 px touch target (Apple HIG / WCAG 2.5.5)
+                              WebkitTapHighlightColor: 'transparent',
+                              // Ensure 44×44 hit target per WCAG 2.5.5
                               minWidth: '44px',
-                              minHeight: '44px',
+                              minHeight: '32px',
+                              padding: '4px 8px',
                               display: 'inline-flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                             }}
-                            // onPointerUp fires before onClick and skips the 300 ms delay on
-                            // mobile browsers that haven't yet eliminated it.  We use a flag to
-                            // avoid double-firing when the desktop onClick also fires.
-                            onPointerDown={(e) => {
-                              // Prevent the table row's scroll-start heuristic from stealing focus.
+                            onTouchEnd={(e) => {
+                              // Fire immediately on touch release — don't wait for synthesized click
                               e.stopPropagation();
-                            }}
-                            onPointerUp={(e) => {
-                              // Primary handler — fires immediately on touch release.
-                              if (e.pointerType === 'touch') {
-                                openDrawer(e);
-                              }
+                              e.preventDefault();
+                              openDrawer('touchend');
                             }}
                             onClick={(e) => {
-                              // Fallback for mouse clicks (onPointerUp guard above skips touch).
-                              if ((e.nativeEvent as PointerEvent).pointerType !== 'touch') {
-                                openDrawer(e);
-                              }
+                              e.stopPropagation();
+                              e.preventDefault();
+                              openDrawer('click');
                             }}
                           >
                             HL·{_meta.label}
