@@ -165,10 +165,13 @@ export function useWhaleWebSocket({
     return () => { if (lagCheckInterval.current) clearInterval(lagCheckInterval.current); };
   }, [seedFromHttp]);
 
+  const scheduleRebuildWsRef = useRef<((delay?: number) => void) | null>(null);
+  const scheduleRebuildWs2Ref = useRef<((delay?: number) => void) | null>(null);
+
   const startWsWatchdog = useCallback((ws: WebSocket) => {
     if (wsWatchdogTimer.current) clearTimeout(wsWatchdogTimer.current);
     wsWatchdogTimer.current = setTimeout(() => {
-      if (wsRef.current === ws && optionsRef.current.subscribedPairs.size) scheduleRebuildWs(0);
+      if (wsRef.current === ws && optionsRef.current.subscribedPairs.size) scheduleRebuildWsRef.current?.(0);
     }, WS_STALE_MS);
   }, []);
 
@@ -176,7 +179,7 @@ export function useWhaleWebSocket({
     if (ws2WatchdogTimer.current) clearTimeout(ws2WatchdogTimer.current);
     ws2WatchdogTimer.current = setTimeout(() => {
       if (ws2Ref.current === ws && optionsRef.current.bybitEnabled && optionsRef.current.subscribedPairs.size)
-        scheduleRebuildWs2(0);
+        scheduleRebuildWs2Ref.current?.(0);
     }, WS_STALE_MS);
   }, []);
 
@@ -192,8 +195,8 @@ export function useWhaleWebSocket({
       ws2Retries.current = 0;
       setReconnectAttempts(0);
       console.info('[WS] Circuit breaker RESET — attempting WS reconnect');
-      if (optionsRef.current.subscribedPairs.size) scheduleRebuildWs(0);
-      if (optionsRef.current.bybitEnabled) scheduleRebuildWs2(0);
+      if (optionsRef.current.subscribedPairs.size) scheduleRebuildWsRef.current?.(0);
+      if (optionsRef.current.bybitEnabled) scheduleRebuildWs2Ref.current?.(0);
     }, WS_CIRCUIT_RESET_MS);
   }, []);
 
@@ -355,6 +358,9 @@ export function useWhaleWebSocket({
     if (ws2RebuildTimer.current) clearTimeout(ws2RebuildTimer.current);
     ws2RebuildTimer.current = setTimeout(rebuildWs2, delay ?? WS_REBUILD_DEBOUNCE);
   }, [rebuildWs2]);
+
+  scheduleRebuildWsRef.current = scheduleRebuildWs;
+  scheduleRebuildWs2Ref.current = scheduleRebuildWs2;
 
   useEffect(() => {
     if (subscribedPairs.size) scheduleRebuildWs(300);

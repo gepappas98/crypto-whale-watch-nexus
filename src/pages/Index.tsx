@@ -224,6 +224,7 @@ export default function WhaleRadarApp() {
   // because processData depends on prevVolumes which triggerScan also updates).
   const processDataRef = useRef<((data: unknown[]) => CoinData[]) | null>(null);
   const enrichCoinsRef = useRef<((mapped: CoinData[]) => Promise<void>) | null>(null);
+  const addAlertRef = useRef<((level: 'critical' | 'high' | 'medium' | 'info', tag: string, text: string, sizing?: string) => void) | null>(null);
 
   const enrichCoins = useCallback(async (mapped: CoinData[]) => {
     const key = birdKeyRef.current;
@@ -352,7 +353,7 @@ export default function WhaleRadarApp() {
     } catch (e: unknown) {
       setScanBadge('ERROR');
       setDataSource('fallback');
-      addAlert('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
+      addAlertRef.current?.('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
     } finally {
       setScanning(false);
     }
@@ -493,6 +494,7 @@ export default function WhaleRadarApp() {
     const tc = level === 'critical' ? 'C' : level === 'high' ? 'H' : level === 'medium' ? 'M' : 'I';
     setAlerts(prev => [{ ts: Date.now(), level, tag, text, tc, sizing, pinned: false }, ...prev].slice(0, CFG.AFEED_MAX * 2));
   }, []);
+  useEffect(() => { addAlertRef.current = addAlert; }, [addAlert]);
 
   // ══ TRACKING ══════════════════════════════════════════════════════════════
   const trackToken = useCallback((id: string, symbol: string, price: number) => {
@@ -552,8 +554,10 @@ export default function WhaleRadarApp() {
     const ms = aggressiveMode ? CFG.SCAN_MS_AGG : CFG.SCAN_MS_NORMAL;
     triggerScanRef.current();
     const timer   = setInterval(() => triggerScanRef.current(), ms);
+    const effectStart = Date.now();
     const cdTimer = setInterval(() => {
-      const r = Math.max(0, Math.ceil((ms - (Date.now() % ms)) / 1000));
+      const elapsed = (Date.now() - effectStart) % ms;
+      const r = Math.max(0, Math.ceil((ms - elapsed) / 1000));
       setNextScan(r > 0 ? r + 's' : 'NOW');
     }, 1000);
     return () => { clearInterval(timer); clearInterval(cdTimer); };
