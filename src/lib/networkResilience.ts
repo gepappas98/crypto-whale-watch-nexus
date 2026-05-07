@@ -2,7 +2,7 @@
  *  CEO-FIX: Top-level error recovery + retry coordination for 350+ coins
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 
 export type NetworkStatus = 'online' | 'degraded' | 'offline' | 'recovering';
