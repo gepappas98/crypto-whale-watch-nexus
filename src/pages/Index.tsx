@@ -224,6 +224,7 @@ export default function WhaleRadarApp() {
   // because processData depends on prevVolumes which triggerScan also updates).
   const processDataRef = useRef<((data: unknown[]) => CoinData[]) | null>(null);
   const enrichCoinsRef = useRef<((mapped: CoinData[]) => Promise<void>) | null>(null);
+  const addAlertRef = useRef<((level: 'critical' | 'high' | 'medium' | 'info', tag: string, text: string, sizing?: string) => void) | null>(null);
 
   const enrichCoins = useCallback(async (mapped: CoinData[]) => {
     const key = birdKeyRef.current;
