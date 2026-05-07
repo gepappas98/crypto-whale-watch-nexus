@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import Orderflow from "./pages/Orderflow.tsx";
 import NexusLayout from "./components/nexus/NexusLayout";
 import NexusWhaleWatch from "./pages/nexus/NexusWhaleWatch";
 import NexusArbitrage from "./pages/nexus/NexusArbitrage";
