@@ -416,7 +416,7 @@ export function WRScanner({
       {/* Table container with isolation to prevent z-index issues */}
       {/* touch-action: pan-y  → browser knows only vertical scrolling is wanted here,
           so it won't cancel a short tap on a child button thinking it might be a scroll. */}
-      <div className="flex-1 overflow-auto scrollbar-thin relative" style={{ isolation: 'isolate', zIndex: 1, touchAction: 'pan-y' }}>
+      <div className="flex-1 overflow-auto scrollbar-thin relative" style={{ isolation: 'isolate', zIndex: 1, touchAction: 'pan-x pan-y', WebkitOverflowScrolling: 'touch' }}>
         <table className="wr-table">
           <thead>
             <tr>
