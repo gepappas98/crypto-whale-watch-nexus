@@ -32,9 +32,10 @@ import {
 import { analyzeTokenRisk } from '@/lib/insiderRiskApi';
 import { generateMockInsiderData } from '@/lib/insiderRiskMock';
 import WRInsiderProgress from './WRInsiderProgress';
+import type { CoinData } from '@/lib/whaleRadarState';
 
 interface WRInsiderRiskScannerProps {
-  coins: any[];
+  coins: CoinData[];
   isScanning: boolean;
   etherscanKey: string;
   birdeyeKey: string;
