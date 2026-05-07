@@ -526,55 +526,48 @@ export function WRScanner({
                           const _opp  = hlOpp!;
                           const _meta = hlMeta!;
                           const _sym  = c.symbol;
-                          const firedRef = { current: 0 };
 
                           const openDrawer = (src: string) => {
-                            // De-dupe touch + synthesized click within 400 ms
-                            const now = Date.now();
-                            if (now - firedRef.current < 400) return;
-                            firedRef.current = now;
-                            const payload = { symbol: _sym, opp: _opp, meta: _meta };
-                            if (process.env.NODE_ENV === 'development') {
-                              console.log('[WRScanner] HL badge open', src, payload);
-                            }
-                            setHlDrawer(payload);
                             try {
-                              onAddAlert(
-                                _opp.level === 'critical' ? 'critical' : _opp.level === 'high' ? 'high' : 'medium',
-                                `HL·${_meta.label}`,
-                                `${_sym} · ${_opp.side} · ${_opp.expectedEdge} · APY ${_opp.apyEstimate.toFixed(1)}%`
-                              );
+                              const payload = { symbol: _sym, opp: _opp, meta: _meta };
+                              if (import.meta.env?.DEV) {
+                                // eslint-disable-next-line no-console
+                                console.log('[WRScanner] HL badge open', src, _sym);
+                              }
+                              setHlDrawer(payload);
+                              try {
+                                onAddAlert(
+                                  _opp.level === 'critical' ? 'critical' : _opp.level === 'high' ? 'high' : 'medium',
+                                  `HL·${_meta.label}`,
+                                  `${_sym} · ${_opp.side} · ${_opp.expectedEdge} · APY ${_opp.apyEstimate.toFixed(1)}%`
+                                );
+                              } catch (err) {
+                                // eslint-disable-next-line no-console
+                                console.warn('[WRScanner] onAddAlert failed', err);
+                              }
                             } catch (err) {
-                              console.warn('[WRScanner] onAddAlert failed', err);
+                              // eslint-disable-next-line no-console
+                              console.error('[WRScanner] openDrawer crashed', err);
                             }
                           };
 
                           return (
                           <button
                             type="button"
+                            aria-label={`Open ${_meta.title} details for ${_sym}`}
                             className={`wr-badge border ${_meta.cls} cursor-pointer hover:brightness-125 active:brightness-150 transition relative z-20 select-none`}
                             title={`${_meta.title} — tap for details`}
                             style={{
-                              // Kill 300ms tap delay & double-tap zoom on mobile
                               touchAction: 'manipulation',
                               WebkitTapHighlightColor: 'transparent',
-                              // Ensure 44×44 hit target per WCAG 2.5.5
-                              minWidth: '44px',
                               minHeight: '32px',
                               padding: '4px 8px',
                               display: 'inline-flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                             }}
-                            onTouchEnd={(e) => {
-                              // Fire immediately on touch release — don't wait for synthesized click
-                              e.stopPropagation();
-                              e.preventDefault();
-                              openDrawer('touchend');
-                            }}
                             onClick={(e) => {
                               e.stopPropagation();
-                              e.preventDefault();
                               openDrawer('click');
                             }}
                           >
