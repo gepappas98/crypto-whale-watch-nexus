@@ -554,8 +554,10 @@ export default function WhaleRadarApp() {
     const ms = aggressiveMode ? CFG.SCAN_MS_AGG : CFG.SCAN_MS_NORMAL;
     triggerScanRef.current();
     const timer   = setInterval(() => triggerScanRef.current(), ms);
+    const effectStart = Date.now();
     const cdTimer = setInterval(() => {
-      const r = Math.max(0, Math.ceil((ms - (Date.now() % ms)) / 1000));
+      const elapsed = (Date.now() - effectStart) % ms;
+      const r = Math.max(0, Math.ceil((ms - elapsed) / 1000));
       setNextScan(r > 0 ? r + 's' : 'NOW');
     }, 1000);
     return () => { clearInterval(timer); clearInterval(cdTimer); };
