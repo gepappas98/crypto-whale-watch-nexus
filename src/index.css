@@ -726,28 +726,25 @@
 /* ══ MOBILE-FIRST REDESIGN ════════════════════════════════════════════════ */
 
 /* Reduce animations on mobile & for users who prefer reduced motion */
-@media (max-width: 768px), (prefers-reduced-motion: reduce) {
-  body::before {
-    display: none;
-  } /* kill scanline overlay */
-  body::after {
-    display: none;
-  } /* kill vignette overlay */
+@media (max-width: 768px) {
+  body::before { display: none; } /* kill scanline overlay */
+  body::after { display: none; }  /* kill vignette overlay */
+  /* Keep ticker scrolling on mobile — user expects right→left motion */
+  .animate-ticker {
+    animation: tick 60s linear infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
   .animate-sweep,
   .animate-rpulse,
   .animate-glow,
   .animate-ticker,
   .animate-stale,
-  .animate-ai-pulse {
-    animation: none !important;
-  }
+  .animate-ai-pulse,
   .animate-flash-red,
-  .animate-flash-amber {
-    animation: none !important;
-  }
-  .animate-slide-in {
-    animation: none !important;
-  }
+  .animate-flash-amber,
+  .animate-slide-in,
   .animate-blink {
     animation: none !important;
   }
