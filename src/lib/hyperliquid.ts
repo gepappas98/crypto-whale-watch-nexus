@@ -209,12 +209,10 @@ export async function hlFetch<T = any>(
       const raw = await postTrading({ type: 'l2Book', coin: p.coin.toUpperCase() }, signal);
       data = {
         coin: raw.coin,
-        bids: (raw.levels ?? [])
-          .filter((l: any) => Number(l.sz) > 0)
-          .map((l: any) => ({ price: parseFloat(l.px), size: parseFloat(l.sz) })),
-        asks: (raw.levels ?? [])
-          .filter((l: any) => Number(l.sz) < 0)
-          .map((l: any) => ({ price: parseFloat(l.px), size: Math.abs(parseFloat(l.sz)) })),
+        bids: ((raw.levels?.[0] ?? []) as Array<{ px: string; sz: string }>)
+          .map((l) => ({ price: parseFloat(l.px), size: parseFloat(l.sz) })),
+        asks: ((raw.levels?.[1] ?? []) as Array<{ px: string; sz: string }>)
+          .map((l) => ({ price: parseFloat(l.px), size: parseFloat(l.sz) })),
       };
       break;
     }
