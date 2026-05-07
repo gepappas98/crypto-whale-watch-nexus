@@ -35,6 +35,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
+          <Route path="/orderflow" element={<Orderflow />} />
           <Route path="/nexus" element={<NexusLayout />}>
             <Route index element={<Navigate to="/nexus/whale" replace />} />
             <Route path="whale" element={<NexusWhaleWatch />} />
