@@ -353,7 +353,7 @@ export default function WhaleRadarApp() {
     } catch (e: unknown) {
       setScanBadge('ERROR');
       setDataSource('fallback');
-      addAlert('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
+      addAlertRef.current?.('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
     } finally {
       setScanning(false);
     }
