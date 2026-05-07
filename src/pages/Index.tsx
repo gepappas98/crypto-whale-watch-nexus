@@ -357,7 +357,7 @@ export default function WhaleRadarApp() {
     } finally {
       setScanning(false);
     }
-  }, [scanning, apiKey, prevVolumes, addAlert]);
+  }, [scanning, apiKey, prevVolumes]);
 
   // ══ DATA NORMALIZER ═══════════════════════════════════════════════════════
   //
