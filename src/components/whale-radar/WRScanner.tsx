@@ -675,8 +675,29 @@ export function WRScanner({
       ))}
 
       {/* HL Opportunity Detail Drawer */}
-      <Sheet open={!!hlDrawer} onOpenChange={(o) => !o && setHlDrawer(null)}>
-        <SheetContent side="right" className="bg-wr-bg2 border-wr-border text-wr-white w-full sm:max-w-md overflow-y-auto">
+      <Sheet
+        open={!!hlDrawer}
+        onOpenChange={(o) => {
+          if (!o) {
+            setHlDrawer(null);
+            // Radix Dialog/Sheet sometimes leaves `pointer-events: none` on <body>
+            // after close, which freezes the entire page (no scroll, no taps).
+            setTimeout(() => {
+              document.body.style.pointerEvents = '';
+              document.body.style.overflow = '';
+            }, 0);
+          }
+        }}
+      >
+        <SheetContent
+          side="right"
+          className="bg-wr-bg2 border-wr-border text-wr-white w-full sm:max-w-md overflow-y-auto"
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            document.body.style.pointerEvents = '';
+            document.body.style.overflow = '';
+          }}
+        >
           {hlDrawer && (
             <>
               <SheetHeader>
