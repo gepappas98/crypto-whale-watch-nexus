@@ -359,6 +359,9 @@ export function useWhaleWebSocket({
     ws2RebuildTimer.current = setTimeout(rebuildWs2, delay ?? WS_REBUILD_DEBOUNCE);
   }, [rebuildWs2]);
 
+  scheduleRebuildWsRef.current = scheduleRebuildWs;
+  scheduleRebuildWs2Ref.current = scheduleRebuildWs2;
+
   useEffect(() => {
     if (subscribedPairs.size) scheduleRebuildWs(300);
     return () => {
