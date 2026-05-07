@@ -297,16 +297,7 @@ export function WRScanner({
     return filtered.slice(start, end);
   }, [filtered, currentPage]);
 
-  // ── Debug logging (dev only) ─────────────────────────────────────────────
-  if (process.env.NODE_ENV === 'development') {
-    console.log('[WRScanner] Render stats:', {
-      rawCoins: coins?.length ?? 0,
-      filteredCoins: filtered.length,
-      paginatedCoins: paginatedCoins.length,
-      currentPage,
-      totalPages,
-    });
-  }
+
 
   const badgeCls =
     scanBadge === 'LIVE'
