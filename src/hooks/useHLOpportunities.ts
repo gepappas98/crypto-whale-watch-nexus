@@ -79,7 +79,7 @@ export function useHLOpportunities({
       const oi = typeof m.openInterest === 'number' ? m.openInterest : 0;
       const vol = typeof m.dayVolume === 'number' ? m.dayVolume : 0;
       const markPrice = typeof m.markPrice === 'number' ? m.markPrice : 0;
-      const indexPrice = typeof m.indexPrice === 'number' ? m.indexPrice : (typeof m.oraclePrice === 'number' ? m.oraclePrice : 0);
+      const indexPrice = typeof m.oraclePrice === 'number' ? m.oraclePrice : 0;
       const symbol = typeof m.symbol === 'string' ? m.symbol : '';
 
       if (!symbol) return;
