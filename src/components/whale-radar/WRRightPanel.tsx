@@ -70,12 +70,24 @@ export function WRRightPanel({
     };
   }, [scrollTop, filteredWhaleFeed, totalItems]);
 
-  // Auto-scroll to top on new trades
+  // Auto-scroll to top on new trades when user is near the top; otherwise show
+  // a "NEW TRADES" badge so we never silently bury a fresh mega-trade.
+  const [hasNewTrades, setHasNewTrades] = useState(false);
   useEffect(() => {
-    if (scrollRef.current && scrollRef.current.scrollTop === 0) {
-      // already at top, no action needed
+    const el = scrollRef.current;
+    if (!el) return;
+    if (el.scrollTop < 60) {
+      el.scrollTop = 0;
+      setHasNewTrades(false);
+    } else {
+      setHasNewTrades(true);
     }
   }, [filteredWhaleFeed.length]);
+
+  const scrollFeedToTop = useCallback(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    setHasNewTrades(false);
+  }, []);
 
   return (
     <div className="flex flex-col border-l border-wr-border bg-wr-bg2 wr-right-panel min-h-0">
@@ -153,9 +165,17 @@ export function WRRightPanel({
           {/* Virtual-scrolled whale feed */}
           <div
             ref={scrollRef}
-            className="max-h-48 overflow-y-auto scrollbar-thin"
+            className="max-h-48 overflow-y-auto scrollbar-thin relative"
             onScroll={handleScroll}
           >
+            {hasNewTrades && (
+              <button
+                onClick={scrollFeedToTop}
+                className="sticky top-1 left-1/2 -translate-x-1/2 z-10 text-[8px] tracking-widest font-mono px-2 py-0.5 bg-wr-green text-wr-bg border border-wr-green animate-pulse cursor-pointer"
+              >
+                ↑ NEW TRADES
+              </button>
+            )}
             {totalItems === 0 ? (
               <div className="text-center text-wr-muted text-[9px] py-6 tracking-widest">
                 {whaleFeed.length === 0 ? 'Add a pair to monitor whale trades' : 'No trades for selected exchange'}
@@ -263,7 +283,7 @@ export function WRRightPanel({
           ) : (
             alerts.slice(0, 80).map((a, i) => (
               <div
-                key={i}
+                key={`${a.ts}-${a.tag}-${a.tc}-${i}`}
                 className={`px-3 py-1.5 border-l-[3px] border-b border-wr-border/40 text-[9px] leading-relaxed animate-slide-in relative
                   ${a.level === 'critical' ? 'border-l-wr-red bg-wr-red/[.03]'
                     : a.level === 'high' ? 'border-l-wr-amber bg-wr-amber/[.02]'

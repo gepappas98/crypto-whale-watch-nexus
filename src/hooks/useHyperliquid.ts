@@ -139,7 +139,7 @@ export function useHLAddress(address: string | null): HLAddressResult {
   const query = useQuery({
     queryKey: hlKeys.address(addr),
     queryFn: ({ signal }) => hlFetch<HLAddressStats | null>('address', addr, signal),
-    enabled: addr.length >= 10,
+    enabled: addr.length === 42 && addr.startsWith('0x'),
     staleTime: ADDR_INTERVAL,
     gcTime: 60_000,
     refetchInterval: ADDR_INTERVAL,
@@ -173,7 +173,7 @@ export function useHLBalance(address: string | null): HLBalanceResult {
   const query = useQuery({
     queryKey: hlKeys.balance(addr),
     queryFn: ({ signal }) => hlFetch<HLBalanceRPC>('balance', addr, signal),
-    enabled: addr.length >= 10,
+    enabled: addr.length === 42 && addr.startsWith('0x'),
     staleTime: ADDR_INTERVAL,
     gcTime: 60_000,
     refetchInterval: ADDR_INTERVAL,
@@ -205,6 +205,7 @@ export function useHLLeaderboard(): HLLeaderboardResult {
     queryKey: hlKeys.leaderboard(),
     queryFn: ({ signal }) => hlFetch<HLLeaderEntry[]>('leaderboard', undefined, signal),
     refetchInterval: LEADER_INTERVAL,
+    refetchIntervalInBackground: false,
     staleTime: LEADER_INTERVAL,
     gcTime: 60_000,
     retry: 1,
@@ -263,12 +264,17 @@ export function useAgeMsLive(serverTs: number | undefined): number {
 
   useEffect(() => {
     if (!serverTs) return;
+    let cancelled = false;
     const tick = () => {
+      if (cancelled) return;
       setAge(Date.now() - serverTs);
       timerRef.current = window.setTimeout(tick, 100);
     };
     tick();
-    return () => clearTimeout(timerRef.current);
+    return () => {
+      cancelled = true;
+      clearTimeout(timerRef.current);
+    };
   }, [serverTs]);
 
   return age;
