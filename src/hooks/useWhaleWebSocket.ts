@@ -400,6 +400,8 @@ export function useWhaleWebSocket({
       if (wsRebuildTimer.current) clearTimeout(wsRebuildTimer.current);
       if (wsCircuitTimer.current) clearTimeout(wsCircuitTimer.current);
       stopFallbackPollingRef.current();
+      try { httpAbortRef.current?.abort(); } catch {}
+      httpAbortRef.current = new AbortController();
     };
   }, [subscribedPairs]);
 
