@@ -506,7 +506,9 @@ export default function WhaleRadarApp() {
 
   // ══ TRACKING ══════════════════════════════════════════════════════════════
   const trackToken = useCallback((id: string, symbol: string, price: number) => {
-    setTracked(prev => ({ ...prev, [symbol]: { id, price, basePrice: price, lastPrice: price } }));
+    const token: TrackedToken = { id, price, basePrice: price, lastPrice: price };
+    setTracked(prev => ({ ...prev, [symbol]: token }));
+    saveTrackedToken(symbol, token).catch(() => {});
   }, []);
 
   const untrackToken = useCallback((symbol: string) => {
@@ -515,6 +517,7 @@ export default function WhaleRadarApp() {
       delete n[symbol];
       return n;
     });
+    deleteTrackedToken(symbol).catch(() => {});
   }, []);
 
   // ══ WHALE WEBSOCKET ══════════════════════════════════════════════════════
