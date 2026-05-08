@@ -286,6 +286,114 @@ export async function cachedFetchBatch<T = unknown>(
   });
 }
 
+/* ── fetchWithControl ─────────────────────────────────────────────────────────
+ * Unified fetch wrapper:
+ *   - manual AbortController (no AbortSignal.timeout — wider browser support + cancellable)
+ *   - external signal chaining (cancel on unmount)
+ *   - in-flight dedup per (url+method+body)
+ *   - rate-limit short-circuit (returns null + degraded)
+ *   - exponential backoff (max 3 retries) on network/5xx
+ *   - structured error metadata
+ * Returns the raw Response — caller decides parsing. */
+export interface FetchControlOptions {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: BodyInit;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  retries?: number;
+  rateLimitKey?: string;
+  rateLimitName?: string;
+  dedupKey?: string;
+}
+
+const inFlightControl = new Map<string, Promise<Response>>();
+
+export async function fetchWithControl(
+  url: string,
+  opts: FetchControlOptions = {}
+): Promise<Response> {
+  const {
+    method = 'GET', headers = {}, body, signal: external,
+    timeoutMs = FETCH_TIMEOUT_MS, retries = 3,
+    rateLimitKey, rateLimitName,
+    dedupKey = `${method}:${url}:${typeof body === 'string' ? body : ''}`,
+  } = opts;
+
+  if (rateLimitKey && isRateLimited(rateLimitKey)) {
+    throw new Error(`rate-limited:${rateLimitKey}`);
+  }
+  if (method === 'GET' && inFlightControl.has(dedupKey)) {
+    return inFlightControl.get(dedupKey)!.then(r => r.clone());
+  }
+
+  const exec = async (): Promise<Response> => {
+    let lastErr: Error = new Error('unknown');
+    for (let attempt = 0; attempt < retries; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const onExternalAbort = () => controller.abort();
+      external?.addEventListener('abort', onExternalAbort);
+      try {
+        const res = await fetch(url, { method, headers, body, signal: controller.signal });
+        clearTimeout(timer);
+        external?.removeEventListener('abort', onExternalAbort);
+        if (res.status === 429) {
+          if (rateLimitKey && rateLimitName) {
+            handleRateLimit(rateLimitName, rateLimitKey, res.headers.get('Retry-After'));
+          }
+          throw new Error(`HTTP 429 rate-limited`);
+        }
+        if (res.status >= 500 && attempt < retries - 1) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        return res;
+      } catch (e) {
+        clearTimeout(timer);
+        external?.removeEventListener('abort', onExternalAbort);
+        lastErr = e as Error;
+        if (external?.aborted) throw lastErr;
+        if (attempt < retries - 1) {
+          await new Promise(r => setTimeout(r, jitter(BASE_DELAY * Math.pow(2, attempt))));
+          continue;
+        }
+        console.error('[fetchWithControl] failed', { url, method, attempt, error: lastErr.message });
+        throw lastErr;
+      }
+    }
+    throw lastErr;
+  };
+
+  const p = exec();
+  if (method === 'GET') {
+    inFlightControl.set(dedupKey, p);
+    p.finally(() => inFlightControl.delete(dedupKey));
+  }
+  return p;
+}
+
+/* ── raceProviders ────────────────────────────────────────────────────────────
+ * Run providers in parallel, resolve with first success, abort the rest.
+ * Each provider receives an AbortSignal it MUST honor. */
+export async function raceProviders<T>(
+  providers: Array<(signal: AbortSignal) => Promise<T>>,
+  opts: { timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<T> {
+  const { timeoutMs = 5000, signal: external } = opts;
+  const controllers = providers.map(() => new AbortController());
+  const onExternalAbort = () => controllers.forEach(c => c.abort());
+  external?.addEventListener('abort', onExternalAbort);
+  const timer = setTimeout(() => controllers.forEach(c => c.abort()), timeoutMs);
+  try {
+    const winner = await Promise.any(providers.map((fn, i) => fn(controllers[i].signal)));
+    controllers.forEach(c => { try { c.abort(); } catch {} });
+    return winner;
+  } finally {
+    clearTimeout(timer);
+    external?.removeEventListener('abort', onExternalAbort);
+  }
+}
+
 export async function cachedLeaderboardFetch<T = unknown>(
   url: string,
   opts: Omit<CachedFetchOptions, 'cacheTtl' | 'swrTtl'> = {}
