@@ -828,9 +828,19 @@ export default function WhaleRadarApp() {
           <PortfolioContent
             portfolio={portfolio}
             coins={coins}
-            onAdd={(sym, amt, entry) => setPortfolio(p => ({ ...p, [sym]: { amount: amt, entryPrice: entry } }))}
-            onRemove={(sym) => setPortfolio(p => { const n = { ...p }; delete n[sym]; return n; })}
-            onClear={() => setPortfolio({})}
+            onAdd={(sym, amt, entry) => {
+              const e = { amount: amt, entryPrice: entry };
+              setPortfolio(p => ({ ...p, [sym]: e }));
+              savePortfolioEntry(sym, e).catch(() => {});
+            }}
+            onRemove={(sym) => {
+              setPortfolio(p => { const n = { ...p }; delete n[sym]; return n; });
+              deletePortfolioEntry(sym).catch(() => {});
+            }}
+            onClear={() => {
+              Object.keys(portfolio).forEach(s => deletePortfolioEntry(s).catch(() => {}));
+              setPortfolio({});
+            }}
           />
         </WRModal>
       )}
