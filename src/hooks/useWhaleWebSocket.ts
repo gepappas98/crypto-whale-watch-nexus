@@ -81,16 +81,29 @@ export function useWhaleWebSocket({
     try {
       const pairs = [...optionsRef.current.subscribedPairs].slice(0, 10);
       if (!pairs.length) return;
+      const signal = httpAbortRef.current!.signal;
       const endpoints = pairs.map(sym => `https://api.binance.com/api/v3/ticker/24hr?symbol=${sym}USDT`);
+      // Parallel with manual per-request timeout (no AbortSignal.timeout — wider support, cancellable on unmount)
       const responses = await Promise.allSettled(
-        endpoints.map(url => fetch(url, { signal: AbortSignal.timeout(8000) }))
+        endpoints.map(url => {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 8000);
+          const onAbort = () => ctrl.abort();
+          signal.addEventListener('abort', onAbort);
+          return fetch(url, { signal: ctrl.signal }).finally(() => {
+            clearTimeout(timer);
+            signal.removeEventListener('abort', onAbort);
+          });
+        })
       );
       responses.forEach((res) => {
         if (res.status === 'fulfilled' && res.value.ok) {
           lastMsgTime.current = Date.now();
         }
       });
-    } catch { }
+    } catch (err) {
+      console.error('[WS] seedFromHttp failed', { error: (err as Error).message });
+    }
   }, []);
 
   const startFallbackPolling = useCallback(() => {
