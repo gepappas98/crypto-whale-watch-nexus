@@ -110,13 +110,18 @@ export function useWhaleWebSocket({
     if (pollTimer.current) return;
     console.warn('[WS] Lag detected — activating fallback HTTP polling');
     pollTimer.current = setInterval(async () => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const onAbort = () => ctrl.abort();
+      const parentSig = httpAbortRef.current!.signal;
+      parentSig.addEventListener('abort', onAbort);
       try {
         const pairs = [...optionsRef.current.subscribedPairs].slice(0, 5);
         if (!pairs.length) return;
         const symbol = pairs[0];
         const res = await fetch(
           `https://api.binance.com/api/v3/trades?symbol=${symbol}USDT&limit=5`,
-          { signal: AbortSignal.timeout(8000) }
+          { signal: ctrl.signal }
         );
         if (!res.ok) return;
         const trades = await res.json();
@@ -130,7 +135,14 @@ export function useWhaleWebSocket({
           const trade: WhaleTrade = { ts: Date.now(), sym, side, price, qty, usdt, cls, ex: 'poll' as 'binance' };
           optionsRef.current.onWhaleTrade(trade);
         });
-      } catch { }
+      } catch (err) {
+        if (!parentSig.aborted) {
+          console.error('[WS] poll fallback failed', { symbol: [...optionsRef.current.subscribedPairs][0], error: (err as Error).message });
+        }
+      } finally {
+        clearTimeout(timer);
+        parentSig.removeEventListener('abort', onAbort);
+      }
     }, POLL_INTERVAL_MS);
   }, []);
 
