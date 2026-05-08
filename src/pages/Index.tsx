@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useMarketData } from '@/hooks/useMarketData';
 import btcQr from '@/assets/btc-qr.jpg';
 import { WRHeader } from '@/components/whale-radar/WRHeader';
 import { WRTicker } from '@/components/whale-radar/WRTicker';
