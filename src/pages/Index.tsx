@@ -22,7 +22,7 @@ import {
 import { handleRateLimit, isRateLimited, getCooldownRemaining, getActiveCooldowns, onRateLimitChange, RL_KEYS } from '@/lib/rateLimit';
 import { detect } from '@/lib/detection';
 import { cachedFetch } from '@/lib/cachedFetch';
-import { saveWhaleEvent, recordSignalOutcome, saveScan, initBackendCheck } from '@/lib/db';
+import { saveWhaleEvent, recordSignalOutcome, saveScan, initBackendCheck, saveAlert, loadAlerts, savePortfolioEntry, deletePortfolioEntry, loadPortfolio, saveTrackedToken, deleteTrackedToken, loadTracked } from '@/lib/db';
 import { fillSignalPrices } from '@/lib/signalStore';
 import { fetchBirdeyeToken } from '@/lib/birdeye';
 import { fetchDexData } from '@/lib/dexscreener';
@@ -174,7 +174,13 @@ export default function WhaleRadarApp() {
 
   // ══ BACKEND CHECK + SIGNAL PRICE FILLER ══════════════════════════════════
   useEffect(() => {
-    initBackendCheck();
+    initBackendCheck().then((ok) => {
+      if (!ok) return;
+      // DB-first hydration with localStorage already loaded as fallback
+      loadAlerts().then(rows => { if (rows.length) setAlerts(prev => [...rows, ...prev].slice(0, CFG.AFEED_MAX * 2)); }).catch(() => {});
+      loadPortfolio().then(p => { if (Object.keys(p).length) setPortfolio(p); }).catch(() => {});
+      loadTracked().then(t => { if (Object.keys(t).length) setTracked(t); }).catch(() => {});
+    });
     fillSignalPrices().catch(() => {});
     const fillTimer = setInterval(() => {
       fillSignalPrices().catch(() => {});
@@ -492,13 +498,17 @@ export default function WhaleRadarApp() {
   // ══ ALERTS ════════════════════════════════════════════════════════════════
   const addAlert = useCallback((level: AlertItem['level'], tag: string, text: string, sizing?: string) => {
     const tc = level === 'critical' ? 'C' : level === 'high' ? 'H' : level === 'medium' ? 'M' : 'I';
-    setAlerts(prev => [{ ts: Date.now(), level, tag, text, tc, sizing, pinned: false }, ...prev].slice(0, CFG.AFEED_MAX * 2));
+    const newItem: AlertItem = { ts: Date.now(), level, tag, text, tc, sizing, pinned: false };
+    setAlerts(prev => [newItem, ...prev].slice(0, CFG.AFEED_MAX * 2));
+    saveAlert(newItem).catch(() => {});
   }, []);
   useEffect(() => { addAlertRef.current = addAlert; }, [addAlert]);
 
   // ══ TRACKING ══════════════════════════════════════════════════════════════
   const trackToken = useCallback((id: string, symbol: string, price: number) => {
-    setTracked(prev => ({ ...prev, [symbol]: { id, price, basePrice: price, lastPrice: price } }));
+    const token: TrackedToken = { id, price, basePrice: price, lastPrice: price };
+    setTracked(prev => ({ ...prev, [symbol]: token }));
+    saveTrackedToken(symbol, token).catch(() => {});
   }, []);
 
   const untrackToken = useCallback((symbol: string) => {
@@ -507,6 +517,7 @@ export default function WhaleRadarApp() {
       delete n[symbol];
       return n;
     });
+    deleteTrackedToken(symbol).catch(() => {});
   }, []);
 
   // ══ WHALE WEBSOCKET ══════════════════════════════════════════════════════
@@ -817,9 +828,19 @@ export default function WhaleRadarApp() {
           <PortfolioContent
             portfolio={portfolio}
             coins={coins}
-            onAdd={(sym, amt, entry) => setPortfolio(p => ({ ...p, [sym]: { amount: amt, entryPrice: entry } }))}
-            onRemove={(sym) => setPortfolio(p => { const n = { ...p }; delete n[sym]; return n; })}
-            onClear={() => setPortfolio({})}
+            onAdd={(sym, amt, entry) => {
+              const e = { amount: amt, entryPrice: entry };
+              setPortfolio(p => ({ ...p, [sym]: e }));
+              savePortfolioEntry(sym, e).catch(() => {});
+            }}
+            onRemove={(sym) => {
+              setPortfolio(p => { const n = { ...p }; delete n[sym]; return n; });
+              deletePortfolioEntry(sym).catch(() => {});
+            }}
+            onClear={() => {
+              Object.keys(portfolio).forEach(s => deletePortfolioEntry(s).catch(() => {}));
+              setPortfolio({});
+            }}
           />
         </WRModal>
       )}

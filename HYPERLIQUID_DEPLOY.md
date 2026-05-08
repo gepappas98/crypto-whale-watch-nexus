@@ -50,6 +50,10 @@ VITE_SUPABASE_URL=https://xxxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJ...
 ```
 
+> **For Lovable deployments:** `.env.local` has **no effect**. Set these in
+> **Project Settings → Environment Variables** instead. Both `VITE_SUPABASE_URL`
+> and `VITE_SUPABASE_ANON_KEY` must be configured there before publishing.
+
 The edge function reads `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
 automatically from the Supabase runtime — no extra secrets needed.
 
