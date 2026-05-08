@@ -174,7 +174,13 @@ export default function WhaleRadarApp() {
 
   // ══ BACKEND CHECK + SIGNAL PRICE FILLER ══════════════════════════════════
   useEffect(() => {
-    initBackendCheck();
+    initBackendCheck().then((ok) => {
+      if (!ok) return;
+      // DB-first hydration with localStorage already loaded as fallback
+      loadAlerts().then(rows => { if (rows.length) setAlerts(prev => [...rows, ...prev].slice(0, CFG.AFEED_MAX * 2)); }).catch(() => {});
+      loadPortfolio().then(p => { if (Object.keys(p).length) setPortfolio(p); }).catch(() => {});
+      loadTracked().then(t => { if (Object.keys(t).length) setTracked(t); }).catch(() => {});
+    });
     fillSignalPrices().catch(() => {});
     const fillTimer = setInterval(() => {
       fillSignalPrices().catch(() => {});
