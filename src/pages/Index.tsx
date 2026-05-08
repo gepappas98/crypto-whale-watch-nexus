@@ -498,7 +498,9 @@ export default function WhaleRadarApp() {
   // ══ ALERTS ════════════════════════════════════════════════════════════════
   const addAlert = useCallback((level: AlertItem['level'], tag: string, text: string, sizing?: string) => {
     const tc = level === 'critical' ? 'C' : level === 'high' ? 'H' : level === 'medium' ? 'M' : 'I';
-    setAlerts(prev => [{ ts: Date.now(), level, tag, text, tc, sizing, pinned: false }, ...prev].slice(0, CFG.AFEED_MAX * 2));
+    const newItem: AlertItem = { ts: Date.now(), level, tag, text, tc, sizing, pinned: false };
+    setAlerts(prev => [newItem, ...prev].slice(0, CFG.AFEED_MAX * 2));
+    saveAlert(newItem).catch(() => {});
   }, []);
   useEffect(() => { addAlertRef.current = addAlert; }, [addAlert]);
 
