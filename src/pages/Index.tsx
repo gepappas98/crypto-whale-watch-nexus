@@ -14,6 +14,7 @@ import { WRKeyboardHelp } from '@/components/whale-radar/WRKeyboardHelp';
 import { WRAlertBell } from '@/components/whale-radar/WRAlertBell';
 import { WRMobileFilterSheet } from '@/components/whale-radar/WRMobileFilterSheet';
 import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
+import { useWhaleStream, type StreamSignal } from '@/hooks/useWhaleStream';
 import { DEFAULT_FILTERS, type WhaleFilters } from '@/components/whale-radar/WRAdvancedFilters';
 import {
   CoinData, AlertItem, WhaleTrade, TrackedToken, PortfolioEntry,
@@ -245,14 +246,47 @@ export default function WhaleRadarApp() {
     });
   }, []);
 
-  const { binanceReady, bybitReady, wsStatus, wsLagMs, reconnectAttempts: wsReconnects } = useWhaleWebSocket({
+  // ── Phase 3: server-side Binance multiplexer (whale-stream edge fn) ──
+  // Stream owns Binance whales + 1m/5m signals. Legacy hook keeps Bybit + tracker prices.
+  const streamLive = useRef(false);
+  const [latestSignals, setLatestSignals] = useState<Record<string, StreamSignal>>({});
+
+  const handleStreamSignal = useCallback((s: StreamSignal) => {
+    setLatestSignals(prev => ({ ...prev, [`${s.sym}:${s.window}`]: s }));
+  }, []);
+
+  const { status: streamStatus, reconnectAttempts: streamReconnects } = useWhaleStream({
+    subscribedPairs,
+    whaleThr,
+    onWhaleTrade: handleWhaleTrade,
+    onSignal: handleStreamSignal,
+    enabled: whaleFeedEx === 'all' || whaleFeedEx === 'binance',
+  });
+  streamLive.current = streamStatus === 'live';
+
+  // Wrap whale handler for legacy hook to suppress Binance dupes when stream is live
+  const handleLegacyWhale = useCallback((t: WhaleTrade) => {
+    if (t.ex === 'binance' && streamLive.current) return;
+    handleWhaleTrade(t);
+  }, [handleWhaleTrade]);
+
+  const { binanceReady, bybitReady, wsStatus: legacyWsStatus, wsLagMs, reconnectAttempts: legacyReconnects } = useWhaleWebSocket({
     subscribedPairs,
     bybitEnabled,
     whaleThr,
     whaleFeedEx,
-    onWhaleTrade:    handleWhaleTrade,
+    onWhaleTrade:    handleLegacyWhale,
     onTrackerPrice:  handleTrackerPrice,
   });
+
+  // Composite status: stream takes precedence when active
+  const wsStatus: WsStatus = streamStatus === 'live'
+    ? 'live'
+    : streamStatus === 'reconnecting'
+      ? (legacyWsStatus === 'live' ? 'delayed' : 'reconnecting')
+      : legacyWsStatus;
+  const wsReconnects = streamReconnects + legacyReconnects;
+  void latestSignals; // exposed for future signal UI panel
 
   // ══ AUTO SCAN ═════════════════════════════════════════════════════════════
   const triggerScanRef = useRef(triggerScan);
