@@ -19,9 +19,8 @@ import {
   WalletEntry, ScanSnapshot, CFG, fmtN, fmtP, isSolToken,
   calcSizing, saveState, loadState,
 } from '@/lib/whaleRadarState';
-import { handleRateLimit, isRateLimited, getCooldownRemaining, getActiveCooldowns, onRateLimitChange, RL_KEYS } from '@/lib/rateLimit';
+import { handleRateLimit, getActiveCooldowns, onRateLimitChange, RL_KEYS } from '@/lib/rateLimit';
 import { detect } from '@/lib/detection';
-import { cachedFetch } from '@/lib/cachedFetch';
 import { saveWhaleEvent, recordSignalOutcome, saveScan, initBackendCheck, saveAlert, loadAlerts, savePortfolioEntry, deletePortfolioEntry, loadPortfolio, saveTrackedToken, deleteTrackedToken, loadTracked } from '@/lib/db';
 import { fillSignalPrices } from '@/lib/signalStore';
 import { fetchBirdeyeToken } from '@/lib/birdeye';
