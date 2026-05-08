@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useMarketData } from '@/hooks/useMarketData';
 import btcQr from '@/assets/btc-qr.jpg';
 import { WRHeader } from '@/components/whale-radar/WRHeader';
 import { WRTicker } from '@/components/whale-radar/WRTicker';
@@ -20,31 +21,28 @@ import {
   calcSizing, saveState, loadState,
 } from '@/lib/whaleRadarState';
 import { handleRateLimit, getActiveCooldowns, onRateLimitChange } from '@/lib/rateLimit';
-import { detect } from '@/lib/detection';
-import { saveWhaleEvent, recordSignalOutcome, saveScan, initBackendCheck, saveAlert, loadAlerts, savePortfolioEntry, deletePortfolioEntry, loadPortfolio, saveTrackedToken, deleteTrackedToken, loadTracked } from '@/lib/db';
+import { saveWhaleEvent, initBackendCheck, saveAlert, loadAlerts, savePortfolioEntry, deletePortfolioEntry, loadPortfolio, saveTrackedToken, deleteTrackedToken, loadTracked } from '@/lib/db';
 import { fillSignalPrices } from '@/lib/signalStore';
-import { fetchBirdeyeToken } from '@/lib/birdeye';
-import { fetchDexData } from '@/lib/dexscreener';
 import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
 import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
 import { startPerfMonitoring } from '@/lib/perfBudget';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
-import { runScan, isScanError } from '@/services/api';
-import { getCeoSignalLabel, MCAP_MIN_RELIABLE } from '@/services/signals';
 
-// MCAP_MIN_RELIABLE and getCeoSignalLabel moved to @/services/signals
+// Scan engine, signal computation and CG fetching live in:
+//   - @/hooks/useMarketData  (state + orchestration)
+//   - @/services/api         (cancellable fetchers)
+//   - @/services/signals     (pure scoring functions)
 // (pure functions, easier to test, keeps Index.tsx as a thin container).
 
 export default function WhaleRadarApp() {
   // ══ CORE STATE ═══════════════════════════════════════════════════════════
-  const [coins, setCoins] = useState<CoinData[]>([]);
+  // Owned by useMarketData below: coins, scanHistory.
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [whaleFeed, setWhaleFeed] = useState<WhaleTrade[]>([]);
   const [tracked, setTracked] = useState<Record<string, TrackedToken>>({});
   const [portfolio, setPortfolio] = useState<Record<string, PortfolioEntry>>({});
   const [wallets, setWallets] = useState<WalletEntry[]>([]);
-  const [scanHistory, setScanHistory] = useState<ScanSnapshot[]>([]);
 
   // UI State
   const [theme, setTheme] = useState<'cyber' | 'matrix' | 'dark'>('cyber');
@@ -52,8 +50,7 @@ export default function WhaleRadarApp() {
   const [soundOn, setSoundOn] = useState(true);
   const [autoScan, setAutoScan] = useState(false);
   const [autoPaused, setAutoPaused] = useState(false);
-  const [scanning, setScanning] = useState(false);
-  const [scanBadge, setScanBadge] = useState('IDLE');
+  // Owned by useMarketData below: scanning, scanBadge.
   const [kbdOpen, setKbdOpen] = useState(false);
   const [alertFilter, setAlertFilter] = useState('ALL');
   const [watchlistOnly, setWatchlistOnly] = useState(false);
@@ -84,16 +81,14 @@ export default function WhaleRadarApp() {
   const [scanPage, setScanPage] = useState(1);
 
   // Stats
-  const [apiCallCount, setApiCallCount] = useState(0);
+  // Owned by useMarketData below: apiCallCount, lastScanTs.
   const [aiCallCount, setAiCallCount] = useState(0);
   const [nextScan, setNextScan] = useState('—');
-  const [lastScanTs, setLastScanTs] = useState(0);
 
   // Modals
   const [activeModal, setActiveModal] = useState<string | null>(null);
 
-  // Previous volumes for spike detection
-  const [prevVolumes, setPrevVolumes] = useState<Record<string, number>>({});
+  // Owned by useMarketData below: prevVolumes (for vol-spike calc).
 
   // ══ PERSISTENCE ═══════════════════════════════════════════════════════════
   useEffect(() => {
@@ -149,22 +144,7 @@ export default function WhaleRadarApp() {
     return () => clearInterval(fillTimer);
   }, []);
 
-  // Save on state changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      saveState({
-        theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
-        vmcapThr, pchgThr, whaleThr, soundOn, scanHistory: scanHistory.slice(-CFG.HISTORY_MAX),
-        prevVolumes, aggressiveMode, watchlistOnly, bybitEnabled, whaleFeedEx,
-        autoScan, autoPaused,
-        hlScannerEnabled, hlMegaTxUsd,
-      });
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
-    vmcapThr, pchgThr, whaleThr, soundOn, scanHistory, prevVolumes, aggressiveMode,
-    watchlistOnly, bybitEnabled, whaleFeedEx, autoScan, autoPaused,
-    hlScannerEnabled, hlMegaTxUsd]);
+  // saveState effect moved below useMarketData (it depends on prevVolumes/scanHistory).
 
   // ══ THEME ═════════════════════════════════════════════════════════════════
   useEffect(() => {
@@ -182,255 +162,45 @@ export default function WhaleRadarApp() {
     return () => { clearInterval(tick); unsub(); };
   }, []);
 
-  // ══ SCAN ══════════════════════════════════════════════════════════════════
-  const birdKeyRef = useRef('');
-  useEffect(() => { birdKeyRef.current = birdKey; }, [birdKey]);
-
-  // ── Stable refs so triggerScan can call the latest processData/enrichCoins
-  // without adding them to its dependency array (which would cause infinite loops
-  // because processData depends on prevVolumes which triggerScan also updates).
-  const processDataRef = useRef<((data: unknown[]) => CoinData[]) | null>(null);
-  const enrichCoinsRef = useRef<((mapped: CoinData[]) => Promise<void>) | null>(null);
-  const addAlertRef = useRef<((level: 'critical' | 'high' | 'medium' | 'info', tag: string, text: string, sizing?: string) => void) | null>(null);
-
-  const enrichCoins = useCallback(async (mapped: CoinData[]) => {
-    const key = birdKeyRef.current;
-    const dexTargets = mapped
-      .filter(c => c.vmcap > 50 && c.mcap < 2e9)
-      .slice(0, 15);
-
-    const solTargets = mapped.filter(c => c.isSol && CFG.SOL_ADDRS[c.symbol]);
-
-    for (const coin of dexTargets) {
-      try {
-        const dex = await fetchDexData(coin.symbol, coin.volume);
-        if (!dex.dexHot && !dex.dsLiq) continue;
-        setCoins(prev => prev.map(c => {
-          if (c.symbol !== coin.symbol) return c;
-          const det = detect({
-            vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
-            supplyPct: c.supplyPct, vol: c.volume, mcap: c.mcap,
-            dexHot: dex.dexHot, dsLiq: dex.dsLiq, isSol: c.isSol, birdData: c.birdData,
-          });
-          return { ...c, dexHot: dex.dexHot, dsLiq: dex.dsLiq,
-            score: det.score, threat: det.threat, category: det.category,
-            confidence: det.confidence, reasons: det.reasons };
-        }));
-      } catch { /* ignore */ }
-    }
-
-    if (!key) return;
-    for (const coin of solTargets) {
-      const addr = CFG.SOL_ADDRS[coin.symbol];
-      try {
-        const bird = await fetchBirdeyeToken(addr, coin.symbol, key);
-        if (!bird) continue;
-        setCoins(prev => prev.map(c => {
-          if (c.symbol !== coin.symbol) return c;
-          const det = detect({
-            vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
-            supplyPct: c.supplyPct, vol: c.volume, mcap: c.mcap,
-            dexHot: c.dexHot, dsLiq: c.dsLiq, isSol: true, birdData: bird,
-          });
-          return { ...c, birdData: bird,
-            score: det.score, threat: det.threat, category: det.category,
-            confidence: det.confidence, reasons: det.reasons };
-        }));
-      } catch { /* ignore */ }
-    }
-  }, []);
-  // Keep the ref in sync with the latest enrichCoins
-  useEffect(() => { enrichCoinsRef.current = enrichCoins; }, [enrichCoins]);
-
-  const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
-
-  // Cancellable per-scan controller — aborts in-flight requests when
-  // a new scan starts or when the component unmounts.
-  const scanAbortRef = useRef<AbortController | null>(null);
-  useEffect(() => () => { try { scanAbortRef.current?.abort(); } catch {} }, []);
-
-  const triggerScan = useCallback(async () => {
-    if (scanning) return;
-    setScanning(true);
-    setScanBadge('SCANNING');
-
-    try { scanAbortRef.current?.abort(); } catch {}
-    scanAbortRef.current = new AbortController();
-    const signal = scanAbortRef.current.signal;
-
-    try {
-      const result = await runScan({ apiKey, signal });
-
-      if (isScanError(result)) {
-        if (result.kind === 'rate_limited') {
-          setScanBadge(`WAIT ${result.cooldownSec ?? 60}s`);
-          setScanning(false);
-          return;
-        }
-        throw new Error(result.message);
-      }
-
-      const { data: scanData, source } = result;
-      setDataSource(source);
-      setApiCallCount(c => c + (source === 'live' ? 1 : 0));
-      // BUG-FIX: Call via refs so we always use the latest version of processData
-      // and enrichCoins, avoiding stale-closure bugs when prevVolumes updates between
-      // scan cycles (they were missing from triggerScan's dep array).
-      const mapped = processDataRef.current ? processDataRef.current(scanData) : processData(scanData);
-      setScanBadge(source === 'live' ? 'LIVE' : source === 'cached' ? 'CACHED' : 'DEGRADED');
-      setLastScanTs(Date.now());
-
-      saveScan(mapped).catch(() => {});
-      (enrichCoinsRef.current ?? enrichCoins)(mapped).catch(() => {});
-    } catch (e: unknown) {
-      if ((e as Error)?.name === 'AbortError') return;
-      console.error('[triggerScan] failed', { error: (e as Error)?.message });
-      setScanBadge('ERROR');
-      setDataSource('fallback');
-      addAlertRef.current?.('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
-    } finally {
-      setScanning(false);
-    }
-  }, [scanning, apiKey, prevVolumes]);
-
-  // ══ DATA NORMALIZER ═══════════════════════════════════════════════════════
-  //
-  // FIX BUG-001 (ROOT CAUSE): The old code used `|| 1` as an mcap fallback:
-  //
-  //   const mcap     = (c.market_cap as number) || (c.mcap as number) || 1;
-  //   const safeMcap = Math.max(mcap, 1);
-  //   const vmcap    = Math.max(0, (vol / safeMcap) * 100);
-  //
-  // When CoinGecko returns market_cap=0 or null (unlisted tokens, no circulating
-  // supply data), mcap became 1 and vmcap = (54M / 1) × 100 = 5,400,000,000%.
-  // This false-triggered CRITICAL WASH on every such token via three independent
-  // scoring functions, all of which exit early when vmcap > 800.
-  //
-  // FIX: Reject any token whose raw mcap is below MCAP_MIN_RELIABLE ($10K).
-  // These are not tradeable tokens — they have no usable mcap from the API.
-  // We use flatMap so the type stays CoinData[] without nullable entries.
-  //
-  const processData = useCallback((data: unknown[]): CoinData[] => {
-    const newVols: Record<string, number> = {};
-
-    const mapped: CoinData[] = (data as Record<string, unknown>[]).flatMap((c, i) => {
-      const vol    = (c.total_volume as number) || (c.volume as number) || 0;
-
-      // FIX: Read raw mcap — do NOT use || 1 fallback.
-      // 0 and null are intentional API responses meaning "no data", not "mcap = $1".
-      const rawMcap = (c.market_cap as number) || (c.mcap as number) || 0;
-
-      // Skip tokens with unreliable / missing mcap — vmcap would be meaningless.
-      // These are excluded from the scanner entirely rather than showing garbage %.
-      if (rawMcap < MCAP_MIN_RELIABLE) {
-        newVols[(c.id as string)] = vol; // still track vol for next scan spike calc
-        return [];
-      }
-
-      const mcap = rawMcap;
-
-      // Always recalculate vmcap from vol/mcap — never trust c.vmcap from API,
-      // which may use a stale or exchange-specific mcap figure.
-      const vmcap = Math.round(Math.max(0, (vol / mcap) * 100));
-
-      const chg24      = (c.price_change_percentage_24h as number) || (c.change_24h as number) || (c.change as number) || 0;
-      const prevVol    = prevVolumes[(c.id as string)] || vol;
-      const volSpike   = prevVol > 0 && prevVol !== vol ? vol / prevVol : 1;
-      const supplyPct  = c.total_supply
-        ? (((c.circulating_supply as number) / (c.total_supply as number)) * 100)
-        : null;
-      const sym        = ((c.symbol as string) || '').toUpperCase();
-      const dexHot     = false;
-      const dsLiq      = null;
-      const isSol      = isSolToken(sym);
-      const birdData   = null;
-
-      newVols[(c.id as string)] = vol;
-
-      const det = detect({ vmcap, chg24, volSpike, supplyPct, vol, mcap, dexHot, dsLiq, isSol, birdData });
-      const { score, threat, category, confidence, reasons } = det;
-
-      return [{
-        rank:     (c.rank as number) || (i + 1),
-        id:       c.id as string,
-        symbol:   sym,
-        name:     c.name as string,
-        price:    (c.current_price as number) || (c.price as number) || 0,
-        change:   chg24,
-        volume:   vol,
-        mcap,
-        vmcap,
-        volSpike,
-        supplyPct,
-        score,
-        threat,
-        category,
-        confidence,
-        reasons,
-        dexHot,
-        dsLiq,
-        isSol,
-        birdData,
-      }];
-    });
-
-    setPrevVolumes(newVols);
-    setCoins(mapped);
-
-    // Snapshot history
-    const critCount = mapped.filter(c => c.threat === 'CRITICAL').length;
-    const highCount = mapped.filter(c => c.threat === 'HIGH').length;
-    setScanHistory(prev => {
-      const snap: ScanSnapshot = {
-        ts: Date.now(),
-        coins: mapped.map(c => ({
-          symbol: c.symbol, score: c.score, threat: c.threat,
-          category: c.category, price: c.price, change: c.change, vmcap: c.vmcap,
-        })),
-        critCount,
-        highCount,
-      };
-      return [snap, ...prev].slice(0, CFG.HISTORY_MAX);
-    });
-
-    // Record CEO signal outcomes (only for tokens with valid scores)
-    mapped
-      .filter(c => c.score >= 35)
-      .slice(0, 20)
-      .forEach(c => {
-        const signal = getCeoSignalLabel(c.score, c.threat, c.category || '', c.vmcap);
-        recordSignalOutcome({
-          symbol:      c.symbol,
-          coin_id:     c.id,
-          signal,
-          score:       c.score,
-          category:    c.category,
-          vmcap:       c.vmcap,
-          entry_price: c.price,
-        });
-      });
-
-    // Generate alerts for critical/high
-    mapped.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
-      addAlert('critical', c.symbol, `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
-    });
-    mapped.filter(c => c.threat === 'HIGH' && c.category).slice(0, 3).forEach(c => {
-      addAlert('high', c.symbol, `[${c.category}] SCORE=${c.score}/100 — ${c.reasons.join(' · ')}`);
-    });
-
-    return mapped;
-  }, [prevVolumes]);
-  // Keep the ref in sync with the latest processData
-  useEffect(() => { processDataRef.current = processData; }, [processData]);
-
-  // ══ ALERTS ════════════════════════════════════════════════════════════════
+  // ══ ALERTS (declared before useMarketData so it can inject the alert sink) ═
   const addAlert = useCallback((level: AlertItem['level'], tag: string, text: string, sizing?: string) => {
     const tc = level === 'critical' ? 'C' : level === 'high' ? 'H' : level === 'medium' ? 'M' : 'I';
     const newItem: AlertItem = { ts: Date.now(), level, tag, text, tc, sizing, pinned: false };
     setAlerts(prev => [newItem, ...prev].slice(0, CFG.AFEED_MAX * 2));
     saveAlert(newItem).catch(() => {});
   }, []);
-  useEffect(() => { addAlertRef.current = addAlert; }, [addAlert]);
+
+  // ══ SCAN ENGINE (extracted to useMarketData hook) ═════════════════════════
+  // Stable getter for Birdeye key — avoids hook re-render whenever birdKey changes.
+  const birdKeyRef = useRef('');
+  useEffect(() => { birdKeyRef.current = birdKey; }, [birdKey]);
+  const getBirdKey = useCallback(() => birdKeyRef.current, []);
+
+  const {
+    coins, setCoins,
+    scanning, scanBadge, dataSource, apiCallCount, lastScanTs,
+    prevVolumes, setPrevVolumes,
+    scanHistory, setScanHistory,
+    triggerScan,
+  } = useMarketData({ apiKey, getBirdKey, addAlert });
+
+  // Save persisted state on changes (depends on hook-owned scanHistory/prevVolumes).
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveState({
+        theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
+        vmcapThr, pchgThr, whaleThr, soundOn, scanHistory: scanHistory.slice(-CFG.HISTORY_MAX),
+        prevVolumes, aggressiveMode, watchlistOnly, bybitEnabled, whaleFeedEx,
+        autoScan, autoPaused,
+        hlScannerEnabled, hlMegaTxUsd,
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
+    vmcapThr, pchgThr, whaleThr, soundOn, scanHistory, prevVolumes, aggressiveMode,
+    watchlistOnly, bybitEnabled, whaleFeedEx, autoScan, autoPaused,
+    hlScannerEnabled, hlMegaTxUsd]);
+
 
   // ══ TRACKING ══════════════════════════════════════════════════════════════
   const trackToken = useCallback((id: string, symbol: string, price: number) => {
