@@ -624,6 +624,38 @@ export default function WhaleRadarApp() {
 
   return (
     <div className="min-h-screen flex flex-col">
+      {/* SEO: crawlable static content (visually hidden, indexable by search engines) */}
+      <section className="sr-only" aria-hidden="false">
+        <h1>Whale Radar — Real-Time Crypto Whale Tracker &amp; Market Manipulation Detector</h1>
+        <p>
+          Whale Radar is a free, real-time cryptocurrency whale tracker and AI-powered
+          market manipulation detector. We monitor large orders across Binance, Bybit,
+          and Solana DEXs via live WebSocket feeds, and integrate Hyperliquid perpetual
+          markets for funding rates, L2 order books, and opportunity scanning. Detect
+          pumps, dumps, wash trading, short squeezes, and insider activity as they happen.
+          Unlike paid services such as Whale Alert, Whale Radar is free, browser-based,
+          and includes Hyperliquid whale explorer plus on-chain Solana gem hunting in one
+          unified dashboard.
+        </p>
+        <h2>Features</h2>
+        <ul>
+          <li>Binance whale alerts — live large-order detection on spot and perpetuals</li>
+          <li>Bybit whale trades — real-time WebSocket feed with custom size thresholds</li>
+          <li>Solana whale detector — Birdeye and DexScreener enrichment for memecoins</li>
+          <li>Hyperliquid whale explorer — markets, funding, L2 book, opportunity scanner</li>
+          <li>Market manipulation detector — pump, dump, wash, squeeze, insider patterns</li>
+          <li>On-chain whale scanner, free — no API key, no subscription</li>
+          <li>Custom alerts, sound notifications, portfolio tracking, signal backtesting</li>
+        </ul>
+        <h2>Sections</h2>
+        <ul>
+          <li><a href="/">Whale Radar dashboard</a></li>
+          <li><a href="/orderflow">Order flow panel</a></li>
+          <li><a href="/nexus/whale">Nexus whale watch</a></li>
+          <li><a href="/nexus/arbitrage">Arbitrage command center</a></li>
+        </ul>
+      </section>
+
       {showOnboarding && <WROnboarding onFinish={finishOnboarding} />}
 
       <HLConfigBanner onOpenSettings={() => setSettingsOpen(true)} />
