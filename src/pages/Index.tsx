@@ -83,16 +83,14 @@ export default function WhaleRadarApp() {
   const [scanPage, setScanPage] = useState(1);
 
   // Stats
-  const [apiCallCount, setApiCallCount] = useState(0);
+  // Owned by useMarketData below: apiCallCount, lastScanTs.
   const [aiCallCount, setAiCallCount] = useState(0);
   const [nextScan, setNextScan] = useState('—');
-  const [lastScanTs, setLastScanTs] = useState(0);
 
   // Modals
   const [activeModal, setActiveModal] = useState<string | null>(null);
 
-  // Previous volumes for spike detection
-  const [prevVolumes, setPrevVolumes] = useState<Record<string, number>>({});
+  // Owned by useMarketData below: prevVolumes (for vol-spike calc).
 
   // ══ PERSISTENCE ═══════════════════════════════════════════════════════════
   useEffect(() => {
