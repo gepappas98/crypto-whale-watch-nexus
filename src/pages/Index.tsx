@@ -186,6 +186,23 @@ export default function WhaleRadarApp() {
     triggerScan,
   } = useMarketData({ apiKey, getBirdKey, addAlert });
 
+  // Save persisted state on changes (depends on hook-owned scanHistory/prevVolumes).
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveState({
+        theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
+        vmcapThr, pchgThr, whaleThr, soundOn, scanHistory: scanHistory.slice(-CFG.HISTORY_MAX),
+        prevVolumes, aggressiveMode, watchlistOnly, bybitEnabled, whaleFeedEx,
+        autoScan, autoPaused,
+        hlScannerEnabled, hlMegaTxUsd,
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
+    vmcapThr, pchgThr, whaleThr, soundOn, scanHistory, prevVolumes, aggressiveMode,
+    watchlistOnly, bybitEnabled, whaleFeedEx, autoScan, autoPaused,
+    hlScannerEnabled, hlMegaTxUsd]);
+
 
   // ══ TRACKING ══════════════════════════════════════════════════════════════
   const trackToken = useCallback((id: string, symbol: string, price: number) => {
