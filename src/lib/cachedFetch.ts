@@ -385,7 +385,21 @@ export async function raceProviders<T>(
   external?.addEventListener('abort', onExternalAbort);
   const timer = setTimeout(() => controllers.forEach(c => c.abort()), timeoutMs);
   try {
-    const winner = await Promise.any(providers.map((fn, i) => fn(controllers[i].signal)));
+    // Manual Promise.any polyfill for broad lib targets
+    const winner = await new Promise<T>((resolve, reject) => {
+      const errors: unknown[] = [];
+      let settled = false;
+      let pending = providers.length;
+      providers.forEach((fn, i) => {
+        fn(controllers[i].signal).then(
+          v => { if (!settled) { settled = true; resolve(v); } },
+          e => {
+            errors.push(e);
+            if (--pending === 0 && !settled) reject(new AggregateErrorLike(errors));
+          }
+        );
+      });
+    });
     controllers.forEach(c => { try { c.abort(); } catch {} });
     return winner;
   } finally {
