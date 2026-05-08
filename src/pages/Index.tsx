@@ -19,9 +19,8 @@ import {
   WalletEntry, ScanSnapshot, CFG, fmtN, fmtP, isSolToken,
   calcSizing, saveState, loadState,
 } from '@/lib/whaleRadarState';
-import { handleRateLimit, isRateLimited, getCooldownRemaining, getActiveCooldowns, onRateLimitChange, RL_KEYS } from '@/lib/rateLimit';
+import { handleRateLimit, getActiveCooldowns, onRateLimitChange } from '@/lib/rateLimit';
 import { detect } from '@/lib/detection';
-import { cachedFetch } from '@/lib/cachedFetch';
 import { saveWhaleEvent, recordSignalOutcome, saveScan, initBackendCheck, saveAlert, loadAlerts, savePortfolioEntry, deletePortfolioEntry, loadPortfolio, saveTrackedToken, deleteTrackedToken, loadTracked } from '@/lib/db';
 import { fillSignalPrices } from '@/lib/signalStore';
 import { fetchBirdeyeToken } from '@/lib/birdeye';
@@ -31,49 +30,11 @@ import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
 import { startPerfMonitoring } from '@/lib/perfBudget';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
+import { runScan, isScanError } from '@/services/api';
+import { getCeoSignalLabel, MCAP_MIN_RELIABLE } from '@/services/signals';
 
-// ── Minimum mcap to treat as real data ($10K) ─────────────────────────────────
-// CoinGecko returns market_cap=0 or null for unlisted / no-circulating-supply
-// tokens. The old `|| 1` fallback caused mcap=1, inflating vmcap to billions
-// and false-triggering CRITICAL WASH on every such token.
-const MCAP_MIN_RELIABLE = 10_000;
-
-// ── CEO Signal label (mirrors WRScanner getCeoSignal) ─────────────────────────
-// FIX BUG-004: Decoupled WASH/data-error path from legitimate CRITICAL signals.
-//
-// BEFORE (broken):
-//   if (score >= 88 || vmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH'))
-//     return 'AVOID / SHORT';
-//   // AGGRESSIVE LONG was unreachable for any CRITICAL token regardless of pattern.
-//
-// AFTER (fixed): check wash/bad-data first, then allow CRITICAL+PUMP/SQUEEZE
-// through to AGGRESSIVE LONG before falling back to AVOID on other CRITICAL cases.
-//
-function getCeoSignalLabel(score: number, threat: string, category: string, vmcap: number): string {
-  const t   = threat.toUpperCase();
-  const cat = (category || '').toUpperCase();
-
-  // 1. Wash trade or unreliable vmcap (> 1000% = either wash or bad API data)
-  if (vmcap > 1000 || cat.includes('WASH')) return 'AVOID / SHORT';
-
-  // 2. Legitimate CRITICAL pump / squeeze — actionable long signal
-  if (t === 'CRITICAL' && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) return 'AGGRESSIVE LONG';
-
-  // 3. Extreme score with no positive pattern
-  if (score >= 88) return 'AVOID / SHORT';
-
-  // 4. CRITICAL alone (RUG_PULL, DUMP, no pattern) — avoid
-  if (t === 'CRITICAL') return 'AVOID / SHORT';
-
-  // 5. High-confidence pump / squeeze from HIGH threat
-  if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) return 'AGGRESSIVE LONG';
-
-  // 6. Moderate signals
-  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) return 'LONG (tight stop)';
-  if (score >= 45) return 'LONG';
-  if (score >= 35) return 'WATCH';
-  return 'HOLD';
-}
+// MCAP_MIN_RELIABLE and getCeoSignalLabel moved to @/services/signals
+// (pure functions, easier to test, keeps Index.tsx as a thin container).
 
 export default function WhaleRadarApp() {
   // ══ CORE STATE ═══════════════════════════════════════════════════════════
@@ -283,68 +244,33 @@ export default function WhaleRadarApp() {
 
   const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('live');
 
+  // Cancellable per-scan controller — aborts in-flight requests when
+  // a new scan starts or when the component unmounts.
+  const scanAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { try { scanAbortRef.current?.abort(); } catch {} }, []);
+
   const triggerScan = useCallback(async () => {
     if (scanning) return;
     setScanning(true);
     setScanBadge('SCANNING');
 
-    const isCgDemoKey = apiKey && apiKey.startsWith('CG-');
-    const isCgProKey  = apiKey && !apiKey.startsWith('CG-');
+    try { scanAbortRef.current?.abort(); } catch {}
+    scanAbortRef.current = new AbortController();
+    const signal = scanAbortRef.current.signal;
 
     try {
-      let scanData: unknown[] | null = null;
-      let source: 'live' | 'cached' | 'fallback' = 'live';
+      const result = await runScan({ apiKey, signal });
 
-      try {
-        const proxyHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (apiKey) proxyHeaders['x-cg-api-key'] = apiKey;
-        const proxyRes = await fetch('/api/scan', { headers: proxyHeaders, signal: AbortSignal.timeout(20000) });
-        if (proxyRes.ok) {
-          const result = await proxyRes.json();
-          if (result.success && result.data?.length) {
-            scanData = result.data;
-            source = result.source || 'live';
-          }
-        }
-      } catch { /* backend unavailable */ }
-
-      if (!scanData) {
-        if (isRateLimited(RL_KEYS.COINGECKO)) {
-          const rem = getCooldownRemaining(RL_KEYS.COINGECKO);
-          setScanBadge(`WAIT ${rem}s`);
+      if (isScanError(result)) {
+        if (result.kind === 'rate_limited') {
+          setScanBadge(`WAIT ${result.cooldownSec ?? 60}s`);
           setScanning(false);
           return;
         }
-
-        const cgBase = isCgProKey
-          ? 'https://pro-api.coingecko.com/api/v3'
-          : 'https://api.coingecko.com/api/v3';
-        const cgUrl = `${cgBase}/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h&include_platform=false`;
-        const cgHeaders: Record<string, string> = {};
-        if (isCgProKey)  cgHeaders['x-cg-pro-api-key']  = apiKey;
-        if (isCgDemoKey) cgHeaders['x-cg-demo-api-key'] = apiKey;
-
-        const result = await cachedFetch<unknown[]>(cgUrl, {
-          headers: cgHeaders,
-          signal: AbortSignal.timeout(18000),
-          cacheTtl: 10_000,
-          swrTtl: 30_000,
-          rateLimitKey: RL_KEYS.COINGECKO,
-          rateLimitName: 'CoinGecko',
-        });
-
-        if (result.data?.length) {
-          scanData = result.data;
-          source = result.fromCache ? 'cached' : 'live';
-        } else if (result.error) {
-          throw new Error(result.error);
-        }
+        throw new Error(result.message);
       }
 
-      if (!scanData?.length) {
-        throw new Error('No data from any source');
-      }
-
+      const { data: scanData, source } = result;
       setDataSource(source);
       setApiCallCount(c => c + (source === 'live' ? 1 : 0));
       // BUG-FIX: Call via refs so we always use the latest version of processData
@@ -357,6 +283,8 @@ export default function WhaleRadarApp() {
       saveScan(mapped).catch(() => {});
       (enrichCoinsRef.current ?? enrichCoins)(mapped).catch(() => {});
     } catch (e: unknown) {
+      if ((e as Error)?.name === 'AbortError') return;
+      console.error('[triggerScan] failed', { error: (e as Error)?.message });
       setScanBadge('ERROR');
       setDataSource('fallback');
       addAlertRef.current?.('medium', 'API', 'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
