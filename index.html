@@ -17,8 +17,8 @@
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Whale Radar v9 — Real-Time Crypto Whale Tracker &amp; Manipulation Detector" />
     <meta property="og:description" content="Detect whale movements and market manipulation in real-time. Binance, Bybit, Solana &amp; Hyperliquid integration." />
-    <meta property="og:image" content="https://whaleradar.app/og-image.jpg" />
-    <meta property="og:url" content="https://whaleradar.app" />
+    <meta property="og:image" content="https://crypto-whale-watch-nexus.lovable.app/og-image.png" />
+    <meta property="og:url" content="https://crypto-whale-watch-nexus.lovable.app" />
     <meta property="og:site_name" content="Whale Radar" />
     <meta property="og:locale" content="en_US" />
 
@@ -26,19 +26,19 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Whale Radar v9 — Crypto Whale Tracker &amp; Manipulation Radar" />
     <meta name="twitter:description" content="Real-time whale alerts and AI manipulation detection for serious traders." />
-    <meta name="twitter:image" content="https://whaleradar.app/og-image.jpg" />
+    <meta name="twitter:image" content="https://crypto-whale-watch-nexus.lovable.app/og-image.png" />
     <meta name="twitter:site" content="@whaleradar" />
 
     <!-- Canonical -->
-    <link rel="canonical" href="https://whaleradar.app" />
+    <link rel="canonical" href="https://crypto-whale-watch-nexus.lovable.app" />
 
     <!-- Security Headers -->
     <meta http-equiv="Content-Security-Policy" content="
       default-src 'self';
-      script-src 'self' 'unsafe-inline' 'unsafe-eval';
-      style-src 'self' 'unsafe-inline';
+      script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.gpteng.co;
+      style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
       img-src 'self' data: https: blob:;
-      font-src 'self' data:;
+      font-src 'self' data: https://fonts.gstatic.com;
       connect-src 'self'
         wss://stream.binance.com
         wss://stream.bybit.com
@@ -80,10 +80,6 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
 
-    <!-- Preload Critical Resources -->
-    <link rel="preload" href="/src/main.tsx" as="script" type="module" />
-    <link rel="preload" as="style" href="/src/index.css" />
-
     <!-- Structured Data (JSON-LD) for SEO -->
     <script type="application/ld+json">
     {
@@ -91,7 +87,7 @@
       "@type": "WebApplication",
       "name": "Whale Radar v9",
       "description": "Real-time crypto whale tracker and market manipulation detection tool",
-      "url": "https://whaleradar.app",
+      "url": "https://crypto-whale-watch-nexus.lovable.app",
       "applicationCategory": "FinanceApplication",
       "operatingSystem": "Web Browser",
       "offers": {
