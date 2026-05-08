@@ -21,20 +21,18 @@ import {
   calcSizing, saveState, loadState,
 } from '@/lib/whaleRadarState';
 import { handleRateLimit, getActiveCooldowns, onRateLimitChange } from '@/lib/rateLimit';
-import { detect } from '@/lib/detection';
-import { saveWhaleEvent, recordSignalOutcome, saveScan, initBackendCheck, saveAlert, loadAlerts, savePortfolioEntry, deletePortfolioEntry, loadPortfolio, saveTrackedToken, deleteTrackedToken, loadTracked } from '@/lib/db';
+import { saveWhaleEvent, initBackendCheck, saveAlert, loadAlerts, savePortfolioEntry, deletePortfolioEntry, loadPortfolio, saveTrackedToken, deleteTrackedToken, loadTracked } from '@/lib/db';
 import { fillSignalPrices } from '@/lib/signalStore';
-import { fetchBirdeyeToken } from '@/lib/birdeye';
-import { fetchDexData } from '@/lib/dexscreener';
 import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
 import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
 import { startPerfMonitoring } from '@/lib/perfBudget';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
-import { runScan, isScanError } from '@/services/api';
-import { getCeoSignalLabel, MCAP_MIN_RELIABLE } from '@/services/signals';
 
-// MCAP_MIN_RELIABLE and getCeoSignalLabel moved to @/services/signals
+// Scan engine, signal computation and CG fetching live in:
+//   - @/hooks/useMarketData  (state + orchestration)
+//   - @/services/api         (cancellable fetchers)
+//   - @/services/signals     (pure scoring functions)
 // (pure functions, easier to test, keeps Index.tsx as a thin container).
 
 export default function WhaleRadarApp() {
