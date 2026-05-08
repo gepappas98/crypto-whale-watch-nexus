@@ -39,13 +39,12 @@ import { getCeoSignalLabel, MCAP_MIN_RELIABLE } from '@/services/signals';
 
 export default function WhaleRadarApp() {
   // ══ CORE STATE ═══════════════════════════════════════════════════════════
-  const [coins, setCoins] = useState<CoinData[]>([]);
+  // Owned by useMarketData below: coins, scanHistory.
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [whaleFeed, setWhaleFeed] = useState<WhaleTrade[]>([]);
   const [tracked, setTracked] = useState<Record<string, TrackedToken>>({});
   const [portfolio, setPortfolio] = useState<Record<string, PortfolioEntry>>({});
   const [wallets, setWallets] = useState<WalletEntry[]>([]);
-  const [scanHistory, setScanHistory] = useState<ScanSnapshot[]>([]);
 
   // UI State
   const [theme, setTheme] = useState<'cyber' | 'matrix' | 'dark'>('cyber');
