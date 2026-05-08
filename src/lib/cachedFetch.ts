@@ -375,6 +375,15 @@ export async function fetchWithControl(
 /* ── raceProviders ────────────────────────────────────────────────────────────
  * Run providers in parallel, resolve with first success, abort the rest.
  * Each provider receives an AbortSignal it MUST honor. */
+class AggregateErrorLike extends Error {
+  errors: unknown[];
+  constructor(errors: unknown[]) {
+    super('All providers failed');
+    this.name = 'AggregateError';
+    this.errors = errors;
+  }
+}
+
 export async function raceProviders<T>(
   providers: Array<(signal: AbortSignal) => Promise<T>>,
   opts: { timeoutMs?: number; signal?: AbortSignal } = {}
