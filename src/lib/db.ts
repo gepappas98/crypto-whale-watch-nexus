@@ -62,8 +62,8 @@ async function api<T = unknown>(
 ): Promise<T | null> {
   const silent = options?._silent ?? false;
 
-  // If backend confirmed offline this session, skip all calls silently
-  if (_backendAvailable === false) return null;
+  // Treat null (pending check) and false (confirmed offline) as offline.
+  if (_backendAvailable !== true) return null;
 
   // Skip if backend is currently rate-limited
   if (isRateLimited(RL_KEYS.BACKEND)) {
