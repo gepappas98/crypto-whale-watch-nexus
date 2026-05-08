@@ -34,48 +34,8 @@ import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
 import { runScan, isScanError } from '@/services/api';
 import { getCeoSignalLabel, MCAP_MIN_RELIABLE } from '@/services/signals';
 
-// ── Minimum mcap to treat as real data ($10K) ─────────────────────────────────
-// CoinGecko returns market_cap=0 or null for unlisted / no-circulating-supply
-// tokens. The old `|| 1` fallback caused mcap=1, inflating vmcap to billions
-// and false-triggering CRITICAL WASH on every such token.
-const MCAP_MIN_RELIABLE = 10_000;
-
-// ── CEO Signal label (mirrors WRScanner getCeoSignal) ─────────────────────────
-// FIX BUG-004: Decoupled WASH/data-error path from legitimate CRITICAL signals.
-//
-// BEFORE (broken):
-//   if (score >= 88 || vmcap > 1000 || t === 'CRITICAL' || cat.includes('WASH'))
-//     return 'AVOID / SHORT';
-//   // AGGRESSIVE LONG was unreachable for any CRITICAL token regardless of pattern.
-//
-// AFTER (fixed): check wash/bad-data first, then allow CRITICAL+PUMP/SQUEEZE
-// through to AGGRESSIVE LONG before falling back to AVOID on other CRITICAL cases.
-//
-function getCeoSignalLabel(score: number, threat: string, category: string, vmcap: number): string {
-  const t   = threat.toUpperCase();
-  const cat = (category || '').toUpperCase();
-
-  // 1. Wash trade or unreliable vmcap (> 1000% = either wash or bad API data)
-  if (vmcap > 1000 || cat.includes('WASH')) return 'AVOID / SHORT';
-
-  // 2. Legitimate CRITICAL pump / squeeze — actionable long signal
-  if (t === 'CRITICAL' && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) return 'AGGRESSIVE LONG';
-
-  // 3. Extreme score with no positive pattern
-  if (score >= 88) return 'AVOID / SHORT';
-
-  // 4. CRITICAL alone (RUG_PULL, DUMP, no pattern) — avoid
-  if (t === 'CRITICAL') return 'AVOID / SHORT';
-
-  // 5. High-confidence pump / squeeze from HIGH threat
-  if (score >= 70 && (cat.includes('PUMP') || cat.includes('SQUEEZE'))) return 'AGGRESSIVE LONG';
-
-  // 6. Moderate signals
-  if (score >= 60 && (cat.includes('PUMP') || cat.includes('SQUEEZE') || vmcap > 300)) return 'LONG (tight stop)';
-  if (score >= 45) return 'LONG';
-  if (score >= 35) return 'WATCH';
-  return 'HOLD';
-}
+// MCAP_MIN_RELIABLE and getCeoSignalLabel moved to @/services/signals
+// (pure functions, easier to test, keeps Index.tsx as a thin container).
 
 export default function WhaleRadarApp() {
   // ══ CORE STATE ═══════════════════════════════════════════════════════════
