@@ -295,7 +295,7 @@ export async function loadAlerts(): Promise<AlertItem[]> {
     level: r.level as AlertItem['level'],
     tag: r.tag,
     text: r.text,
-    tc: new Date(r.created_at).toLocaleTimeString(),
+    tc: r.level === 'critical' ? 'C' : r.level === 'high' ? 'H' : r.level === 'medium' ? 'M' : 'I',
     sizing: r.sizing,
     pinned: r.pinned,
   }));
