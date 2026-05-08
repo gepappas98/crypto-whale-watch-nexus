@@ -52,8 +52,7 @@ export default function WhaleRadarApp() {
   const [soundOn, setSoundOn] = useState(true);
   const [autoScan, setAutoScan] = useState(false);
   const [autoPaused, setAutoPaused] = useState(false);
-  const [scanning, setScanning] = useState(false);
-  const [scanBadge, setScanBadge] = useState('IDLE');
+  // Owned by useMarketData below: scanning, scanBadge.
   const [kbdOpen, setKbdOpen] = useState(false);
   const [alertFilter, setAlertFilter] = useState('ALL');
   const [watchlistOnly, setWatchlistOnly] = useState(false);
