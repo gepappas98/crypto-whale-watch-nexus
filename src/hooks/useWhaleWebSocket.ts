@@ -64,6 +64,8 @@ export function useWhaleWebSocket({
   const pollTimer      = useRef<ReturnType<typeof setInterval> | null>(null);
   const wsCircuitOpen = useRef(false);
   const wsCircuitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const httpAbortRef = useRef<AbortController | null>(null);
+  if (!httpAbortRef.current) httpAbortRef.current = new AbortController();
 
   const binanceReadyRef = useRef(false);
   const bybitReadyRef   = useRef(false);
