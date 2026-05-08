@@ -31,6 +31,8 @@ import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
 import { startPerfMonitoring } from '@/lib/perfBudget';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
+import { runScan, isScanError } from '@/services/api';
+import { getCeoSignalLabel, MCAP_MIN_RELIABLE } from '@/services/signals';
 
 // ── Minimum mcap to treat as real data ($10K) ─────────────────────────────────
 // CoinGecko returns market_cap=0 or null for unlisted / no-circulating-supply
