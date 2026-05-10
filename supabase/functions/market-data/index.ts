@@ -94,9 +94,16 @@ Deno.serve(async (req: Request) => {
         });
       }
       const text = await res.text();
-      return new Response(JSON.stringify({ error: "upstream error", status: res.status, body: text.slice(0, 500) }), {
-        status: res.status, headers: { ...corsHeaders, "content-type": "application/json" },
-      });
+      // Soft-fail upstream 4xx (e.g. Binance "Invalid symbol") as 200 + fallback flag
+      // so the client can gracefully skip instead of crashing on a thrown error.
+      const isClientErr = res.status >= 400 && res.status < 500;
+      return new Response(
+        JSON.stringify({ error: "upstream error", upstreamStatus: res.status, body: text.slice(0, 500), fallback: true }),
+        {
+          status: isClientErr ? 200 : res.status,
+          headers: { ...corsHeaders, "content-type": "application/json", "x-upstream-status": String(res.status) },
+        },
+      );
     }
 
     const data = await res.json();
