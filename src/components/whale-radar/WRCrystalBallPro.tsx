@@ -219,8 +219,11 @@ const SIGNAL_META: Record<string, { color: string; icon: typeof TrendingUp; labe
 };
 
 // ==================== PROXY ROTATION — NEVER FAILS ====================
+// Lovable Cloud edge function (server-side CoinGecko proxy) is tried first;
+// public CORS proxies are kept as fallbacks only.
+const COINGECKO_EDGE = `https://${import.meta.env.VITE_SUPABASE_PROJECT_ID}.functions.supabase.co/coingecko-proxy`;
 const PROXY_LIST = [
-  (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  (url: string) => `${COINGECKO_EDGE}?url=${encodeURIComponent(url)}`,
   (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
 ];
