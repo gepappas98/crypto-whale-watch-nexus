@@ -831,7 +831,7 @@ export default function WRCrystalBallPro() {
           const coin = COIN_LIST.find(c => c.id === e.target.value);
           if (coin) setSelectedCoin(coin);
         }} className="bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm flex-1 max-w-[260px]">
-          {COIN_LIST.map(c => <option key={c.id} value={c.id}>{c.symbol} - {c.name}</option>)}
+          {COIN_LIST.map((c, i) => <option key={`${c.symbol}-${c.id}-${i}`} value={c.id}>{c.symbol} - {c.name}</option>)}
         </select>
 
         <select value={timeframe.label} onChange={e => {
