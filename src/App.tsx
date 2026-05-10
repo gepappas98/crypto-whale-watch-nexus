@@ -14,6 +14,14 @@ import NexusVolumeMaker from "./pages/nexus/NexusVolumeMaker";
 import NexusPortfolio from "./pages/nexus/NexusPortfolio";
 import NexusCrystalBall from "./pages/nexus/NexusCrystalBall";
 import { Navigate } from "react-router-dom";
+import TradingHubLayout from "./pages/trading-hub/Layout";
+import TradingDashboard from "./pages/trading-hub/Dashboard";
+import TradingTechnical from "./pages/trading-hub/Technical";
+import TradingBacktest from "./pages/trading-hub/Backtest";
+import TradingScreener from "./pages/trading-hub/Screener";
+import TradingSentiment from "./pages/trading-hub/Sentiment";
+import TradingTimeframes from "./pages/trading-hub/Timeframes";
+import TradingPatterns from "./pages/trading-hub/Patterns";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,6 +44,15 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/orderflow" element={<Orderflow />} />
+          <Route path="/trading-hub" element={<TradingHubLayout />}>
+            <Route index element={<TradingDashboard />} />
+            <Route path="technical" element={<TradingTechnical />} />
+            <Route path="backtest" element={<TradingBacktest />} />
+            <Route path="screener" element={<TradingScreener />} />
+            <Route path="sentiment" element={<TradingSentiment />} />
+            <Route path="timeframes" element={<TradingTimeframes />} />
+            <Route path="patterns" element={<TradingPatterns />} />
+          </Route>
           <Route path="/nexus" element={<NexusLayout />}>
             <Route index element={<Navigate to="/nexus/whale" replace />} />
             <Route path="whale" element={<NexusWhaleWatch />} />
