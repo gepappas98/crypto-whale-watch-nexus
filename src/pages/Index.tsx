@@ -12,6 +12,7 @@ import { WROnboarding } from '@/components/whale-radar/WROnboarding';
 import { WRModal } from '@/components/whale-radar/WRModal';
 import { WRKeyboardHelp } from '@/components/whale-radar/WRKeyboardHelp';
 import { WRAlertBell } from '@/components/whale-radar/WRAlertBell';
+import { WRCoinGeckoStatus } from '@/components/whale-radar/WRCoinGeckoStatus';
 import { WRMobileFilterSheet } from '@/components/whale-radar/WRMobileFilterSheet';
 import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
 import { useWhaleStream, type StreamSignal } from '@/hooks/useWhaleStream';
@@ -428,6 +429,8 @@ export default function WhaleRadarApp() {
         {wsStatus === 'reconnecting' && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-amber animate-pulse" /> <span className="text-wr-amber">RECONNECTING…</span></span>}
         {wsStatus === 'offline'      && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-wr-muted" /> <span className="text-wr-muted">OFFLINE</span></span>}
         <span className="text-wr-muted ml-1">BIN: {binanceReady ? '✓' : '—'} | BYB: {bybitReady ? '✓' : '—'}</span>
+        <span className="text-wr-muted mx-1">|</span>
+        <WRCoinGeckoStatus dataSource={dataSource} scanBadge={scanBadge} lastScanTs={lastScanTs} scanning={scanning} />
         <div className="flex-1" />
         <WRAlertBell whaleFeed={whaleFeed} />
         <WRMobileFilterSheet
