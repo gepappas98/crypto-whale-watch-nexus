@@ -10,6 +10,7 @@ import { useHLBlocks, useHLTxs, useHLLeaderboard, useHLMarkets, useAgeMsLive } f
 import { shortAddr, fmtAgo } from '@/lib/hyperliquid';
 import { HLWalletTracker } from './HLWalletTracker';
 import { HLManipulationScanner } from './HLManipulationScanner';
+import { TechnicalContextBadge } from '@/components/trading/TechnicalContextBadge';
 
 const SUB_TABS = [
   { id: 'perps', label: 'Perpetuals' },
@@ -86,29 +87,37 @@ function HLPerpsTable() {
               <th className="text-right p-2">OI</th>
               <th className="text-right p-2">24h Vol</th>
               <th className="text-right p-2">Max Lev</th>
+              <th className="text-right p-2">Live TA</th>
             </tr>
           </thead>
           <tbody>
-            {markets.map((m) => (
-              <tr key={m.symbol} className="border-b border-wr-border/50 hover:bg-wr-surface/50">
-                <td className="p-2 font-mono font-bold">{m.symbol}</td>
-                <td className="p-2 text-right font-mono">{fmtPrice(m.markPrice)}</td>
-                <td className="p-2 text-right font-mono text-wr-muted">{fmtPrice(m.oraclePrice)}</td>
-                <td className="p-2 text-right font-mono">
-                  <span className={m.premium > 0 ? 'text-wr-green' : 'text-wr-red'}>
-                    {fmtPct(m.premium)}
-                  </span>
-                </td>
-                <td className="p-2 text-right font-mono">
-                  <span className={m.fundingRate > 0 ? 'text-wr-green' : 'text-wr-red'}>
-                    {fmtPct(m.fundingRate)}
-                  </span>
-                </td>
-                <td className="p-2 text-right font-mono">${fmtNum(m.openInterest)}</td>
-                <td className="p-2 text-right font-mono">${fmtNum(m.dayVolume)}</td>
-                <td className="p-2 text-right font-mono">{m.maxLeverage}x</td>
-              </tr>
-            ))}
+            {markets.map((m, idx) => {
+              // Map HL perp symbol → Yahoo ticker. kPEPE/kBONK/kSHIB skipped (no spot equiv).
+              const yahooSym = /^k[A-Z]/.test(m.symbol) ? null : `${m.symbol}-USD`;
+              return (
+                <tr key={m.symbol} className="border-b border-wr-border/50 hover:bg-wr-surface/50">
+                  <td className="p-2 font-mono font-bold">{m.symbol}</td>
+                  <td className="p-2 text-right font-mono">{fmtPrice(m.markPrice)}</td>
+                  <td className="p-2 text-right font-mono text-wr-muted">{fmtPrice(m.oraclePrice)}</td>
+                  <td className="p-2 text-right font-mono">
+                    <span className={m.premium > 0 ? 'text-wr-green' : 'text-wr-red'}>
+                      {fmtPct(m.premium)}
+                    </span>
+                  </td>
+                  <td className="p-2 text-right font-mono">
+                    <span className={m.fundingRate > 0 ? 'text-wr-green' : 'text-wr-red'}>
+                      {fmtPct(m.fundingRate)}
+                    </span>
+                  </td>
+                  <td className="p-2 text-right font-mono">${fmtNum(m.openInterest)}</td>
+                  <td className="p-2 text-right font-mono">${fmtNum(m.dayVolume)}</td>
+                  <td className="p-2 text-right font-mono">{m.maxLeverage}x</td>
+                  <td className="p-2 text-right">
+                    {yahooSym && idx < 15 ? <TechnicalContextBadge symbol={yahooSym} /> : <span className="text-wr-muted text-[10px]">—</span>}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

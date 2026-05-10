@@ -27,6 +27,9 @@ export default function NexusLayout() {
         <Link to="/" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary mr-3">
           <ArrowLeft className="w-3.5 h-3.5" /> Radar
         </Link>
+        <Link to="/trading-hub" className="text-[10px] tracking-[2px] px-2 py-0.5 rounded border border-primary/40 text-primary hover:bg-primary/10 mr-3">
+          TRADING HUB →
+        </Link>
         <div className="flex items-center gap-2 mr-6">
           <Activity className="w-5 h-5 text-primary" />
           <span className="font-bold text-lg tracking-tight">NEXUS</span>
