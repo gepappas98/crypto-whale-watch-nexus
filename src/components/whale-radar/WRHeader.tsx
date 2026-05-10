@@ -56,6 +56,13 @@ export function WRHeader({
         <HeaderStat label="NEXT SCAN" value={nextScan} />
         <HeaderStat label="AI CALLS" value={String(aiCallCount)} color="purple" />
         <Link
+          to="/trading-hub"
+          className="text-[10px] tracking-[2px] px-2 py-1 rounded border border-primary/40 text-primary hover:bg-primary/10 transition-colors"
+          title="Open Trading Intelligence Hub"
+        >
+          TRADING HUB →
+        </Link>
+        <Link
           to="/nexus"
           className="text-[10px] tracking-[2px] px-2 py-1 rounded border border-wr-green/40 text-wr-green hover:bg-wr-green/10 transition-colors"
           title="Open Nexus Trading Terminal"
