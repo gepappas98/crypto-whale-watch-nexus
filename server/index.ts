@@ -30,6 +30,35 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '2mb' }));
 
+// ── Auth middleware ────────────────────────────────────────────────────────
+// Protects all /api/* routes with a shared bearer token (API_AUTH_TOKEN env).
+// Whitelisted public paths: /api/health, /api/scan (used by the public SPA).
+// Without API_AUTH_TOKEN set, the server refuses to start protected routes —
+// fail-closed by design so a misconfigured deploy never silently exposes data.
+const API_AUTH_TOKEN = process.env.API_AUTH_TOKEN || '';
+const PUBLIC_PATHS = new Set(['/api/health', '/api/scan']);
+
+if (!API_AUTH_TOKEN) {
+  console.warn('[AUTH] ⚠ API_AUTH_TOKEN not set — all protected routes will return 503');
+}
+
+app.use('/api', (req, res, next) => {
+  // Allow CORS preflight + whitelisted public reads
+  if (req.method === 'OPTIONS') return next();
+  if (PUBLIC_PATHS.has(req.baseUrl + req.path) || PUBLIC_PATHS.has(req.originalUrl.split('?')[0])) {
+    return next();
+  }
+  if (!API_AUTH_TOKEN) {
+    return res.status(503).json({ error: 'Server auth not configured' });
+  }
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (token !== API_AUTH_TOKEN) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+});
+
 // ── Health ─────────────────────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {
   const db = await ping();
