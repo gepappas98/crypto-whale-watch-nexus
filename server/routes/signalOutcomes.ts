@@ -91,7 +91,7 @@ signalOutcomesRouter.post('/', async (req: Request, res: Response) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[signal-outcomes POST]', err);
-    res.status(500).json({ error: 'DB error', detail: String(err) });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -125,7 +125,7 @@ signalOutcomesRouter.get('/eval', async (_req: Request, res: Response) => {
     res.json(unwrap(raw));
   } catch (err) {
     console.error('[signal-outcomes/eval]', err);
-    res.status(500).json({ error: 'DB error', detail: String(err) });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -147,7 +147,7 @@ signalOutcomesRouter.get('/recent', async (req: Request, res: Response) => {
     res.json(unwrap(raw));
   } catch (err) {
     console.error('[signal-outcomes/recent]', err);
-    res.status(500).json({ error: 'DB error', detail: String(err) });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -158,7 +158,7 @@ signalOutcomesRouter.post('/fill-prices', async (_req: Request, res: Response) =
     res.json({ ok: true, filled });
   } catch (err) {
     console.error('[signal-outcomes/fill-prices]', err);
-    res.status(500).json({ error: 'Fill failed', detail: String(err) });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
