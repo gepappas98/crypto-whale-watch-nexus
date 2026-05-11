@@ -791,6 +791,16 @@ Deno.serve(async (req) => {
 
     return err(`Unknown path: ${path}`, 404);
   } catch (e) {
-    return err(String(e?.message ?? e), 500);
+    const msg = String(e?.message ?? e);
+    // Upstream data issues (Yahoo empty/no-data, transient 4xx/5xx) should not
+    // crash the client. Return 200 + fallback flag so the UI can render an
+    // empty-state instead of a blank screen.
+    const isUpstreamData =
+      /Yahoo:|empty series|no data|Yahoo \w+ \d{3}|Binance \d{3}|Reddit \d{3}/i.test(msg);
+    if (isUpstreamData) {
+      console.warn("[trading-bridge] upstream fallback:", msg);
+      return json({ error: msg, fallback: true, data: null });
+    }
+    return err(msg, 500);
   }
 });
