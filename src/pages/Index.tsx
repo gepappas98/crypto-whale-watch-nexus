@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useMarketData } from '@/hooks/useMarketData';
 import btcQr from '@/assets/btc-qr.jpg';
 import { WRHeader } from '@/components/whale-radar/WRHeader';
@@ -78,7 +78,7 @@ export default function WhaleRadarApp() {
   const [hlMegaTxUsd, setHlMegaTxUsd] = useState(500_000);
   const [supabaseUrl, setSupabaseUrl] = useState('');
   const [supabaseAnonKey, setSupabaseAnonKey] = useState('');
-  const [subscribedPairs] = useState(() => new Set<string>());
+  const [subscribedPairs, setSubscribedPairs] = useState<Set<string>>(() => new Set(['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT']));
   const [advancedFilters, setAdvancedFilters] = useState<WhaleFilters>(DEFAULT_FILTERS);
   const [scanPage, setScanPage] = useState(1);
 
@@ -256,8 +256,21 @@ export default function WhaleRadarApp() {
     setLatestSignals(prev => ({ ...prev, [`${s.sym}:${s.window}`]: s }));
   }, []);
 
+  // Keep subscribedPairs in sync with tracked tokens (defaults + tracked symbols).
+  useEffect(() => {
+    const pairs = new Set(['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT']);
+    Object.keys(tracked).forEach(sym => pairs.add(sym + 'USDT'));
+    setSubscribedPairs(pairs);
+  }, [tracked]);
+
+  // Bare symbols (without USDT) for whale-stream edge fn which appends 'usdt' itself.
+  const subscribedSymbols = useMemo(
+    () => new Set([...subscribedPairs].map(p => p.replace(/USDT$/, ''))),
+    [subscribedPairs]
+  );
+
   const { status: streamStatus, reconnectAttempts: streamReconnects } = useWhaleStream({
-    subscribedPairs,
+    subscribedPairs: subscribedSymbols,
     whaleThr,
     onWhaleTrade: handleWhaleTrade,
     onSignal: handleStreamSignal,

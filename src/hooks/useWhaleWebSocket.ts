@@ -321,6 +321,7 @@ export function useWhaleWebSocket({
       if (ws2Ref.current !== ws) return;
       setBybitReady(true);
       ws2Retries.current = 0;
+      setReconnectAttempts(0);
       const pairs = optionsRef.current.subscribedPairs;
       ws.send(JSON.stringify({ op: 'subscribe', args: [...pairs].map(p => 'publicTrade.' + p) }));
       ws2PingInterval.current = setInterval(() => {

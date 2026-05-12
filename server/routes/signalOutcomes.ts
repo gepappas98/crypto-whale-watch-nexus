@@ -235,10 +235,17 @@ export async function fillOutcomePrices(): Promise<FillResult> {
 
     for (const batch of batches) {
       const cgUrl = `https://api.coingecko.com/api/v3/simple/price?ids=${batch.join(',')}&vs_currencies=usd`;
-      const cgRes = await fetch(cgUrl, {
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(12_000),
-      });
+      const cgAbort = new AbortController();
+      const cgTimer = setTimeout(() => cgAbort.abort(), 12_000);
+      let cgRes: Response;
+      try {
+        cgRes = await fetch(cgUrl, {
+          headers: { Accept: 'application/json' },
+          signal: cgAbort.signal,
+        });
+      } finally {
+        clearTimeout(cgTimer);
+      }
       if (!cgRes.ok) {
         console.warn('[priceFiller] CoinGecko returned', cgRes.status);
         continue;
