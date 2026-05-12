@@ -78,7 +78,7 @@ export default function WhaleRadarApp() {
   const [hlMegaTxUsd, setHlMegaTxUsd] = useState(500_000);
   const [supabaseUrl, setSupabaseUrl] = useState('');
   const [supabaseAnonKey, setSupabaseAnonKey] = useState('');
-  const [subscribedPairs] = useState(() => new Set<string>());
+  const [subscribedPairs, setSubscribedPairs] = useState<Set<string>>(() => new Set(['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT']));
   const [advancedFilters, setAdvancedFilters] = useState<WhaleFilters>(DEFAULT_FILTERS);
   const [scanPage, setScanPage] = useState(1);
 
