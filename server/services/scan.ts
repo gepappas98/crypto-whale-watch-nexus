@@ -102,23 +102,30 @@ async function fetchWithRetry(
 }
 
 // ── Transform CoinGecko → ScanCoin ──────────────────────────────────────────
+function transformOne(c: CoinGeckoRaw, i: number): ScanCoin | null {
+  const vol = c.total_volume || 0;
+  const rawMcap = c.market_cap ?? 0;
+  if (rawMcap < 10_000) return null;
+  const mcap = rawMcap;
+  return {
+    id: c.id,
+    symbol: (c.symbol || '').toUpperCase(),
+    name: c.name,
+    price: c.current_price,
+    change_24h: c.price_change_percentage_24h ?? 0,
+    volume: vol,
+    mcap,
+    vmcap: (vol / mcap) * 100,
+    rank: c.market_cap_rank ?? (i + 1),
+    circulating_supply: c.circulating_supply,
+    total_supply: c.total_supply,
+  };
+}
+
 function transform(raw: CoinGeckoRaw[]): ScanCoin[] {
-  return raw.map((c, i) => {
-    const vol = c.total_volume || 0;
-    const mcap = c.market_cap || 1;
-    return {
-      id: c.id,
-      symbol: (c.symbol || '').toUpperCase(),
-      name: c.name,
-      price: c.current_price,
-      change_24h: c.price_change_percentage_24h ?? 0,
-      volume: vol,
-      mcap,
-      vmcap: (vol / mcap) * 100,
-      rank: c.market_cap_rank ?? (i + 1),
-      circulating_supply: c.circulating_supply,
-      total_supply: c.total_supply,
-    };
+  return raw.flatMap((c, i) => {
+    const t = transformOne(c, i);
+    return t ? [t] : [];
   });
 }
 
