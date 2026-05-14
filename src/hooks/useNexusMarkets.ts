@@ -7,7 +7,9 @@ export function useNexusMarkets(refetchMs = 3000) {
     queryKey: ["nexus", "markets"],
     queryFn: fetchAllMarkets,
     refetchInterval: refetchMs,
-    staleTime: 1000,
+    staleTime: refetchMs,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 }
 

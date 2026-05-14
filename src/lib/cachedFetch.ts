@@ -155,9 +155,14 @@ export async function cachedFetch<T = unknown>(
       return { data: cached.data as T, fromCache: true };
     }
     if (age < swrTtl) {
-      doFetchWithTimeout(url, headers, externalSignal, timeoutMs, rateLimitKey, rateLimitName, retries)
-        .then(result => { if (result.data) writeCache(url, result.data); })
-        .catch(() => {});
+      const swrDedupKey = `swr:${url}:${JSON.stringify(headers)}`;
+      if (!inFlightRequests.has(swrDedupKey)) {
+        const swrPromise = doFetchWithTimeout(url, headers, externalSignal, timeoutMs, rateLimitKey, rateLimitName, retries)
+          .then(result => { if (result.data) writeCache(url, result.data); return result; })
+          .catch(() => ({ data: null, fromCache: false as const }))
+          .finally(() => inFlightRequests.delete(swrDedupKey));
+        inFlightRequests.set(swrDedupKey, swrPromise as any);
+      }
       return { data: cached.data as T, fromCache: true };
     }
   }
