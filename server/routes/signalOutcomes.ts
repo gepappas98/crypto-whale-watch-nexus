@@ -68,26 +68,18 @@ signalOutcomesRouter.post('/', async (req: Request, res: Response) => {
   try {
     await ensureTable();
 
-    // Dedup: skip if the same (symbol, signal) was already recorded this clock-hour
-    const existing = await query<{ id: number }>(
-      `SELECT id FROM signal_outcomes
-       WHERE symbol = $1
-         AND signal = $2
-         AND fired_at >= date_trunc('hour', NOW())
-         AND fired_at <  date_trunc('hour', NOW()) + INTERVAL '1 hour'
-       LIMIT 1`,
-      [sym, signal]
-    );
-    const rows = unwrap<{ id: number }>(existing);
-    if (rows.length > 0) return res.json({ ok: true, skipped: true });
-
-    await query(
+    // Atomic upsert — ON CONFLICT DO NOTHING uses idx_so_dedup (schema.sql)
+    // to deduplicate without a race condition.
+    const result = await query<{ id: number }>(
       `INSERT INTO signal_outcomes
          (symbol, coin_id, signal, score, category, vmcap, entry_price)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT ON CONSTRAINT idx_so_dedup DO NOTHING
+       RETURNING id`,
       [sym, coin_id ?? null, signal, score ?? null, category ?? null, vmcap ?? null, entry_price]
     );
-    res.json({ ok: true });
+    const inserted = unwrap<{ id: number }>(result);
+    res.json({ ok: true, skipped: inserted.length === 0 });
   } catch (err) {
     console.error('[signal-outcomes POST]', err);
     res.status(500).json({ error: 'Internal server error' });
