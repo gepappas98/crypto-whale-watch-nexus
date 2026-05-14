@@ -28,6 +28,7 @@ const PAIRS = [
   { symbol: "LINK", binance: "LINKUSDT", backpack: "LINK_USDC", hyperliquid: "LINK" },
   { symbol: "ARB", binance: "ARBUSDT", backpack: "ARB_USDC", hyperliquid: "ARB" },
   { symbol: "SUI", binance: "SUIUSDT", backpack: "SUI_USDC", hyperliquid: "SUI" },
+  { symbol: "OP",  binance: "OPUSDT",  backpack: "OP_USDC",  hyperliquid: "OP"  },
 ];
 
 const MIN_SPREAD = 0.05; // %

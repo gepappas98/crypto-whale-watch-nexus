@@ -121,10 +121,17 @@ async function fetchCgPrices(coinIds: string[]): Promise<Record<string, number>>
     for (const batch of batches) {
       const url =
         `https://api.coingecko.com/api/v3/simple/price?ids=${batch.join(',')}&vs_currencies=usd`;
-      const res = await fetch(url, {
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(12_000),
-      });
+      const _cgAbort = new AbortController();
+      const _cgTimer = setTimeout(() => _cgAbort.abort(), 12_000);
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          headers: { Accept: 'application/json' },
+          signal: _cgAbort.signal,
+        });
+      } finally {
+        clearTimeout(_cgTimer);
+      }
       if (!res.ok) continue;
       const data = (await res.json()) as Record<string, { usd?: number }>;
       for (const [id, v] of Object.entries(data)) {
