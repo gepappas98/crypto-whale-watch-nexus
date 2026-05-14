@@ -25,9 +25,14 @@ const API_TOKEN = (import.meta as any).env?.VITE_API_TOKEN as string | undefined
 export async function initBackendCheck(): Promise<boolean> {
   if (_backendAvailable !== null) return _backendAvailable;
   try {
-    const res = await fetch(BASE + '/health', {
-      signal: AbortSignal.timeout(4000),
-    });
+    const _healthAbort = new AbortController();
+    const _healthTimer = setTimeout(() => _healthAbort.abort(), 4000);
+    let res: Response;
+    try {
+      res = await fetch(BASE + '/health', { signal: _healthAbort.signal });
+    } finally {
+      clearTimeout(_healthTimer);
+    }
     _backendAvailable = res.ok;
   } catch {
     _backendAvailable = false;
@@ -83,8 +88,11 @@ async function api<T = unknown>(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
+      const authHeaders: Record<string, string> = API_TOKEN
+        ? { 'Content-Type': 'application/json', Authorization: `Bearer ${API_TOKEN}` }
+        : { 'Content-Type': 'application/json' };
       const res = await fetch(BASE + path, {
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         ...options,
       });
 
