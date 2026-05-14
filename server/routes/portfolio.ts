@@ -9,7 +9,7 @@ portfolioRouter.get('/', async (_req: Request, res: Response) => {
   try {
     const rows = await query(
       `SELECT p.*, sc.price AS current_price,
-         ROUND(((sc.price - p.entry_price) / p.entry_price * 100)::NUMERIC, 2) AS pnl_pct,
+         ROUND(((sc.price - p.entry_price) / NULLIF(p.entry_price, 0) * 100)::NUMERIC, 2) AS pnl_pct,
          ROUND((p.amount * (sc.price - p.entry_price))::NUMERIC, 2) AS pnl_usd
        FROM portfolio p
        LEFT JOIN LATERAL (
@@ -30,6 +30,9 @@ portfolioRouter.post('/', async (req: Request, res: Response) => {
   const { symbol, amount, entry_price } = req.body as Record<string, unknown>;
   if (!symbol || amount == null || entry_price == null) {
     return res.status(400).json({ error: 'symbol, amount, entry_price required' });
+  }
+  if (Number(entry_price) <= 0) {
+    return res.status(400).json({ error: 'entry_price must be greater than 0' });
   }
   try {
     const [row] = await query(

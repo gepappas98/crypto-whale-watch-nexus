@@ -91,7 +91,16 @@ scansRouter.get('/threats/top', async (_req: Request, res: Response) => {
   try {
     const rows = await query(
       `SELECT symbol, MAX(score) AS peak_score, COUNT(DISTINCT session_id) AS appearances,
-              MAX(threat) AS worst_threat, MAX(scanned_at) AS last_seen
+              (ARRAY['LOW','MEDIUM','HIGH','CRITICAL'])[MAX(
+                CASE threat
+                  WHEN 'LOW'      THEN 1
+                  WHEN 'MEDIUM'   THEN 2
+                  WHEN 'HIGH'     THEN 3
+                  WHEN 'CRITICAL' THEN 4
+                  ELSE 0
+                END
+              )] AS worst_threat,
+              MAX(scanned_at) AS last_seen
        FROM scan_coins WHERE score >= 45
        GROUP BY symbol ORDER BY peak_score DESC LIMIT 50`
     );
@@ -105,10 +114,14 @@ scansRouter.get('/threats/top', async (_req: Request, res: Response) => {
 // GET /api/scans/:id — full coin list for a session
 // Kept LAST — would shadow /symbol/:sym and /threats/top if placed earlier
 scansRouter.get('/:id', async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id) || id <= 0) {
+    return res.status(400).json({ error: 'id must be a positive integer' });
+  }
   try {
     const rows = await query(
       `SELECT * FROM scan_coins WHERE session_id = $1 ORDER BY score DESC`,
-      [req.params.id]
+      [id]
     );
     res.json(rows);
   } catch (err) {
