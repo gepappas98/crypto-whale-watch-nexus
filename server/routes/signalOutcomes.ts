@@ -263,20 +263,34 @@ export async function fillOutcomePrices(): Promise<FillResult> {
     outcomeCol: 'outcome_1h' | 'outcome_4h' | 'outcome_24h',
     filledAtCol: 'filled_1h_at' | 'filled_4h_at' | 'filled_24h_at'
   ) {
+    const ids: number[] = [];
+    const newPrices: number[] = [];
+    const pctChanges: (number | null)[] = [];
     for (const row of rows) {
       if (!row.coin_id) continue;
       const p = prices[row.coin_id];
       if (!p) continue;
       const entry = parseFloat(row.entry_price);
-      const pctChange = entry > 0 ? ((p - entry) / entry) * 100 : null;
-      await query(
-        `UPDATE signal_outcomes
-         SET ${col} = $1, ${outcomeCol} = $2, ${filledAtCol} = NOW()
-         WHERE id = $3`,
-        [p, pctChange, row.id]
-      );
-      filled++;
+      ids.push(row.id);
+      newPrices.push(p);
+      pctChanges.push(entry > 0 ? ((p - entry) / entry) * 100 : null);
     }
+    if (!ids.length) return;
+    await query(
+      `UPDATE signal_outcomes so
+       SET ${col}        = v.price,
+           ${outcomeCol} = v.pct,
+           ${filledAtCol} = NOW()
+       FROM (
+         SELECT
+           unnest($1::int[])           AS id,
+           unnest($2::numeric[])       AS price,
+           unnest($3::numeric[])       AS pct
+       ) v
+       WHERE so.id = v.id`,
+      [ids, newPrices, pctChanges]
+    );
+    filled += ids.length;
   }
 
   await applyFill(need1h,  'price_1h',  'outcome_1h',  'filled_1h_at');
