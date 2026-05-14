@@ -117,7 +117,17 @@ SELECT
   symbol,
   MAX(score)                    AS peak_score,
   COUNT(DISTINCT session_id)    AS scan_appearances,
-  MAX(threat)                   AS worst_threat,
+  (ARRAY['LOW','MEDIUM','HIGH','CRITICAL'])[
+    MAX(
+      CASE threat
+        WHEN 'LOW'      THEN 1
+        WHEN 'MEDIUM'   THEN 2
+        WHEN 'HIGH'     THEN 3
+        WHEN 'CRITICAL' THEN 4
+        ELSE 0
+      END
+    )
+  ]                             AS worst_threat,
   MODE() WITHIN GROUP (ORDER BY category) AS dominant_category,
   MAX(scanned_at)               AS last_seen
 FROM scan_coins
@@ -132,7 +142,7 @@ SELECT
   p.amount,
   p.entry_price,
   sc.price      AS current_price,
-  ROUND(((sc.price - p.entry_price) / p.entry_price * 100)::NUMERIC, 2) AS pnl_pct,
+  ROUND(((sc.price - p.entry_price) / NULLIF(p.entry_price, 0) * 100)::NUMERIC, 2) AS pnl_pct,
   ROUND((p.amount * (sc.price - p.entry_price))::NUMERIC, 2)            AS pnl_usd
 FROM portfolio p
 LEFT JOIN LATERAL (
