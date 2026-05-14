@@ -15,6 +15,10 @@ let _dbOnline = true;
 let _backendAvailable: boolean | null = null;
 let _offlineToastShown = false;
 
+// Read bearer token from Vite env. Set VITE_API_TOKEN in your .env.local or
+// Railway frontend environment variables. Must match API_AUTH_TOKEN on the server.
+const API_TOKEN = (import.meta as any).env?.VITE_API_TOKEN as string | undefined;
+
 // ── Backend availability check ────────────────────────────────────────────────
 // Call once on app mount. If the backend is unreachable, silently marks it
 // offline for the session so no further error toasts are shown.
