@@ -102,7 +102,7 @@ export class EtherscanService {
 
     return etherscanLimiter.add(async () => {
       const url = `${this.baseUrl}?module=stats&action=tokensupply&contractaddress=${contractAddress}&apikey=${this.apiKey}`;
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
       const data = await response.json();
 
       if (data.status !== '1') throw new Error(data.message);
@@ -167,7 +167,7 @@ export class EtherscanService {
 
     return etherscanLimiter.add(async () => {
       const url = `${this.baseUrl}?module=account&action=tokentx&contractaddress=${contractAddress}&page=1&offset=100&sort=desc&apikey=${this.apiKey}`;
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
       const data = await response.json();
 
       if (data.status !== '1') throw new Error(data.message);
@@ -184,7 +184,7 @@ export class EtherscanService {
 
     return etherscanLimiter.add(async () => {
       const url = `${this.baseUrl}?module=proxy&action=eth_getCode&address=${address}&tag=latest&apikey=${this.apiKey}`;
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
       const data = await response.json();
 
       setCached(cacheKey, data.result);
@@ -284,7 +284,7 @@ export class BirdeyeService {
     if (cached) return cached;
 
     return birdeyeLimiter.add(async () => {
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${this.baseUrl}/defi/token_overview?address=${mintAddress}`,
         {
           headers: {
@@ -308,7 +308,7 @@ export class BirdeyeService {
     if (cached) return cached;
 
     return birdeyeLimiter.add(async () => {
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${this.baseUrl}/defi/token_holder?address=${mintAddress}&offset=0&limit=10`,
         {
           headers: {
