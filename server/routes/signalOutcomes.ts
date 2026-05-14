@@ -44,11 +44,8 @@ async function ensureTable(): Promise<void> {
       fired_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  // Unique index — safe to run repeatedly
-  await query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS signal_outcomes_dedup_idx
-    ON signal_outcomes (symbol, signal, date_trunc('hour', fired_at))
-  `);
+  // Unique index already created by schema.sql (idx_so_dedup) — do not duplicate here.
+  _tableReady = true;
 }
 
 // POST /api/signal-outcomes — record a CEO signal fire
