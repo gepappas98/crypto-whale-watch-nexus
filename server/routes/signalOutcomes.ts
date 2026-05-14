@@ -19,7 +19,9 @@ function unwrap<T = unknown>(result: unknown): T[] {
 }
 
 // ── helper: ensure the table exists before we query it ───────────────────────
+let _tableReady = false;
 async function ensureTable(): Promise<void> {
+  if (_tableReady) return;
   await query(`
     CREATE TABLE IF NOT EXISTS signal_outcomes (
       id            SERIAL PRIMARY KEY,
@@ -42,11 +44,8 @@ async function ensureTable(): Promise<void> {
       fired_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  // Unique index — safe to run repeatedly
-  await query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS signal_outcomes_dedup_idx
-    ON signal_outcomes (symbol, signal, date_trunc('hour', fired_at))
-  `);
+  // Unique index already created by schema.sql (idx_so_dedup) — do not duplicate here.
+  _tableReady = true;
 }
 
 // POST /api/signal-outcomes — record a CEO signal fire
@@ -69,26 +68,18 @@ signalOutcomesRouter.post('/', async (req: Request, res: Response) => {
   try {
     await ensureTable();
 
-    // Dedup: skip if the same (symbol, signal) was already recorded this clock-hour
-    const existing = await query<{ id: number }>(
-      `SELECT id FROM signal_outcomes
-       WHERE symbol = $1
-         AND signal = $2
-         AND fired_at >= date_trunc('hour', NOW())
-         AND fired_at <  date_trunc('hour', NOW()) + INTERVAL '1 hour'
-       LIMIT 1`,
-      [sym, signal]
-    );
-    const rows = unwrap<{ id: number }>(existing);
-    if (rows.length > 0) return res.json({ ok: true, skipped: true });
-
-    await query(
+    // Atomic upsert — ON CONFLICT DO NOTHING uses idx_so_dedup (schema.sql)
+    // to deduplicate without a race condition.
+    const result = await query<{ id: number }>(
       `INSERT INTO signal_outcomes
          (symbol, coin_id, signal, score, category, vmcap, entry_price)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT ON CONSTRAINT idx_so_dedup DO NOTHING
+       RETURNING id`,
       [sym, coin_id ?? null, signal, score ?? null, category ?? null, vmcap ?? null, entry_price]
     );
-    res.json({ ok: true });
+    const inserted = unwrap<{ id: number }>(result);
+    res.json({ ok: true, skipped: inserted.length === 0 });
   } catch (err) {
     console.error('[signal-outcomes POST]', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -272,20 +263,34 @@ export async function fillOutcomePrices(): Promise<FillResult> {
     outcomeCol: 'outcome_1h' | 'outcome_4h' | 'outcome_24h',
     filledAtCol: 'filled_1h_at' | 'filled_4h_at' | 'filled_24h_at'
   ) {
+    const ids: number[] = [];
+    const newPrices: number[] = [];
+    const pctChanges: (number | null)[] = [];
     for (const row of rows) {
       if (!row.coin_id) continue;
       const p = prices[row.coin_id];
       if (!p) continue;
       const entry = parseFloat(row.entry_price);
-      const pctChange = entry > 0 ? ((p - entry) / entry) * 100 : null;
-      await query(
-        `UPDATE signal_outcomes
-         SET ${col} = $1, ${outcomeCol} = $2, ${filledAtCol} = NOW()
-         WHERE id = $3`,
-        [p, pctChange, row.id]
-      );
-      filled++;
+      ids.push(row.id);
+      newPrices.push(p);
+      pctChanges.push(entry > 0 ? ((p - entry) / entry) * 100 : null);
     }
+    if (!ids.length) return;
+    await query(
+      `UPDATE signal_outcomes so
+       SET ${col}        = v.price,
+           ${outcomeCol} = v.pct,
+           ${filledAtCol} = NOW()
+       FROM (
+         SELECT
+           unnest($1::int[])           AS id,
+           unnest($2::numeric[])       AS price,
+           unnest($3::numeric[])       AS pct
+       ) v
+       WHERE so.id = v.id`,
+      [ids, newPrices, pctChanges]
+    );
+    filled += ids.length;
   }
 
   await applyFill(need1h,  'price_1h',  'outcome_1h',  'filled_1h_at');

@@ -38,11 +38,14 @@ alertsRouter.post('/', async (req: Request, res: Response) => {
 
 // PATCH /api/alerts/:id/pin
 alertsRouter.patch('/:id/pin', async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id) || id <= 0) return res.status(400).json({ error: 'id must be a positive integer' });
   try {
     const [row] = await query(
       `UPDATE alerts SET pinned = NOT pinned WHERE id = $1 RETURNING *`,
-      [req.params.id]
+      [id]
     );
+    if (!row) return res.status(404).json({ error: 'Alert not found' });
     res.json(row);
   } catch (err) {
     res.status(500).json({ error: 'DB error' });
@@ -51,8 +54,10 @@ alertsRouter.patch('/:id/pin', async (req: Request, res: Response) => {
 
 // DELETE /api/alerts/:id
 alertsRouter.delete('/:id', async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id) || id <= 0) return res.status(400).json({ error: 'id must be a positive integer' });
   try {
-    await query(`DELETE FROM alerts WHERE id = $1`, [req.params.id]);
+    await query(`DELETE FROM alerts WHERE id = $1`, [id]);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'DB error' });
