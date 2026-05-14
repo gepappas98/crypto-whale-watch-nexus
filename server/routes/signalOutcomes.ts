@@ -19,7 +19,9 @@ function unwrap<T = unknown>(result: unknown): T[] {
 }
 
 // ── helper: ensure the table exists before we query it ───────────────────────
+let _tableReady = false;
 async function ensureTable(): Promise<void> {
+  if (_tableReady) return;
   await query(`
     CREATE TABLE IF NOT EXISTS signal_outcomes (
       id            SERIAL PRIMARY KEY,
