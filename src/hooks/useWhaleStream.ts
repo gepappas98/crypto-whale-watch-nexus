@@ -63,7 +63,15 @@ export function useWhaleStream({
   }, []);
 
   const connect = useCallback(() => {
-    if (!enabled || !PROJECT_ID) { setStatus('offline'); return; }
+    if (!enabled) { setStatus('offline'); return; }
+    if (!PROJECT_ID) {
+      if (!(globalThis as { __wsProjectIdWarned?: boolean }).__wsProjectIdWarned) {
+        (globalThis as { __wsProjectIdWarned?: boolean }).__wsProjectIdWarned = true;
+        console.warn('[whale-stream] VITE_SUPABASE_PROJECT_ID is missing — stream disabled');
+      }
+      setStatus('offline');
+      return;
+    }
     if (wsRef.current && (wsRef.current.readyState === 0 || wsRef.current.readyState === 1)) return;
 
     const url = `wss://${PROJECT_ID}.functions.supabase.co/whale-stream`;
