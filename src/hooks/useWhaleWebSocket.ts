@@ -395,6 +395,11 @@ export function useWhaleWebSocket({
   scheduleRebuildWsRef.current = scheduleRebuildWs;
   scheduleRebuildWs2Ref.current = scheduleRebuildWs2;
 
+  // Stable signature so a parent re-render that creates a new Set with the SAME
+  // contents does NOT re-trigger this effect (which would abort all in-flight
+  // HTTP requests and rebuild the WS in a tight loop).
+  const pairsKey = [...subscribedPairs].sort().join(',');
+
   useEffect(() => {
     if (subscribedPairs.size) scheduleRebuildWs(300);
     return () => {
@@ -409,7 +414,8 @@ export function useWhaleWebSocket({
       try { httpAbortRef.current?.abort(); } catch {}
       httpAbortRef.current = new AbortController();
     };
-  }, [subscribedPairs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairsKey]);
 
   useEffect(() => {
     if (bybitEnabled && subscribedPairs.size) {
@@ -433,7 +439,8 @@ export function useWhaleWebSocket({
       if (ws2RebuildTimer.current) clearTimeout(ws2RebuildTimer.current);
       if (ws2ReconnectTimer.current) clearTimeout(ws2ReconnectTimer.current);
     };
-  }, [bybitEnabled, subscribedPairs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bybitEnabled, pairsKey]);
 
   return { binanceReady, bybitReady, wsStatus, wsLagMs, reconnectAttempts };
 }
