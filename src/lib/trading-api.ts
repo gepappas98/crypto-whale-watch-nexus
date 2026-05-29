@@ -1,7 +1,7 @@
 // Trading Bridge API client — calls the Lovable Cloud edge function.
 // Every function returns LIVE data from the Deno bridge. No fallbacks.
 
-import { supabase } from "@/integrations/supabase/client";
+import { safeInvoke } from "@/lib/safeInvoke";
 import type {
   TechnicalAnalysis, BacktestResult, MarketSnapshotItem, SentimentResult,
   NewsItem, ScreenerRow, PatternHit, MultiTimeframeRow, CombinedAnalysis, YahooQuote,
@@ -10,14 +10,10 @@ import type {
 const FN = "trading-bridge";
 
 async function call<T>(path: string, body: Record<string, unknown> = {}): Promise<T> {
-  const { data, error } = await supabase.functions.invoke(`${FN}${path}`, {
-    body,
-  });
-  if (error) throw new Error(error.message ?? String(error));
-  if (data && typeof data === "object" && "error" in data) {
-    throw new Error(String((data as any).error));
-  }
-  return data as T;
+  const { data, error } = await safeInvoke<T>(`${FN}${path}`, { body });
+  if (error) throw error;
+  if (data == null) throw new Error(`${FN}${path}: empty response`);
+  return data;
 }
 
 export const tradingApi = {

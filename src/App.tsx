@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import Orderflow from "./pages/Orderflow.tsx";
@@ -36,38 +37,40 @@ const queryClient = new QueryClient({
 });
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/orderflow" element={<Orderflow />} />
-          <Route path="/trading-hub" element={<TradingHubLayout />}>
-            <Route index element={<TradingDashboard />} />
-            <Route path="technical" element={<TradingTechnical />} />
-            <Route path="backtest" element={<TradingBacktest />} />
-            <Route path="screener" element={<TradingScreener />} />
-            <Route path="sentiment" element={<TradingSentiment />} />
-            <Route path="timeframes" element={<TradingTimeframes />} />
-            <Route path="patterns" element={<TradingPatterns />} />
-          </Route>
-          <Route path="/nexus" element={<NexusLayout />}>
-            <Route index element={<Navigate to="/nexus/whale" replace />} />
-            <Route path="whale" element={<NexusWhaleWatch />} />
-            <Route path="arbitrage" element={<NexusArbitrage />} />
-            <Route path="grid" element={<NexusGridStudio />} />
-            <Route path="volume" element={<NexusVolumeMaker />} />
-            <Route path="portfolio" element={<NexusPortfolio />} />
-            <Route path="crystal-ball" element={<NexusCrystalBall />} />
-          </Route>
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
+  <ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<ErrorBoundary><Index /></ErrorBoundary>} />
+            <Route path="/orderflow" element={<ErrorBoundary><Orderflow /></ErrorBoundary>} />
+            <Route path="/trading-hub" element={<ErrorBoundary><TradingHubLayout /></ErrorBoundary>}>
+              <Route index element={<TradingDashboard />} />
+              <Route path="technical" element={<TradingTechnical />} />
+              <Route path="backtest" element={<TradingBacktest />} />
+              <Route path="screener" element={<TradingScreener />} />
+              <Route path="sentiment" element={<TradingSentiment />} />
+              <Route path="timeframes" element={<TradingTimeframes />} />
+              <Route path="patterns" element={<TradingPatterns />} />
+            </Route>
+            <Route path="/nexus" element={<ErrorBoundary><NexusLayout /></ErrorBoundary>}>
+              <Route index element={<Navigate to="/nexus/whale" replace />} />
+              <Route path="whale" element={<NexusWhaleWatch />} />
+              <Route path="arbitrage" element={<NexusArbitrage />} />
+              <Route path="grid" element={<NexusGridStudio />} />
+              <Route path="volume" element={<NexusVolumeMaker />} />
+              <Route path="portfolio" element={<NexusPortfolio />} />
+              <Route path="crystal-ball" element={<NexusCrystalBall />} />
+            </Route>
+            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;
