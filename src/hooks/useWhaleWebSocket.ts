@@ -104,7 +104,9 @@ export function useWhaleWebSocket({
         }
       });
     } catch (err) {
-      console.error('[WS] seedFromHttp failed', { error: (err as Error).message });
+      if ((err as DOMException)?.name !== 'AbortError') {
+        console.error('[WS] seedFromHttp failed', { error: (err as Error).message });
+      }
     }
   }, []);
 
@@ -141,7 +143,8 @@ export function useWhaleWebSocket({
           optionsRef.current.onWhaleTrade(trade);
         });
       } catch (err) {
-        if (!parentSig.aborted) {
+        const isAbort = (err as DOMException)?.name === 'AbortError';
+        if (!parentSig.aborted && !isAbort) {
           console.error('[WS] poll fallback failed', { symbol: [...optionsRef.current.subscribedPairs][0], error: (err as Error).message });
         }
       } finally {

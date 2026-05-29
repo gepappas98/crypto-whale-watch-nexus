@@ -60,9 +60,17 @@ app.use('/api', (req, res, next) => {
 });
 
 // ── Health ─────────────────────────────────────────────────────────────────
-app.get('/api/health', async (_req, res) => {
-  const db = await ping();
-  res.json({ ok: true, db, ts: new Date().toISOString() });
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime(), timestamp: Date.now() });
+});
+
+app.get('/api/health/db', async (_req, res) => {
+  try {
+    const db = await ping();
+    res.json({ ok: true, db, ts: new Date().toISOString() });
+  } catch (err) {
+    res.status(503).json({ ok: false, error: (err as Error).message });
+  }
 });
 
 // ── Routes ─────────────────────────────────────────────────────────────────

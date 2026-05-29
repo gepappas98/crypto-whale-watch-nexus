@@ -80,6 +80,14 @@ export default defineConfig(({ mode }) => {
     },
     optimizeDeps: {
       exclude: ["lovable-tagger"],
+      include: [
+        "react",
+        "react-dom",
+        "react-dom/client",
+        "react/jsx-runtime",
+        "react-router-dom",
+        "@tanstack/react-query",
+      ],
     },
   };
 });

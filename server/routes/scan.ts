@@ -12,13 +12,13 @@ scanRouter.get('/', async (req: Request, res: Response) => {
     const result = await performScan(apiKey);
     res.json(result);
   } catch (err) {
-    console.error('[scan GET]', err);
+    console.error('[scan GET] failed:', (err as Error).stack || err);
     res.status(500).json({
       success: false,
       data: [],
       source: 'error',
       ts: new Date().toISOString(),
-      error: 'Internal server error',
+      error: 'Scan service temporarily unavailable',
     });
   }
 });
