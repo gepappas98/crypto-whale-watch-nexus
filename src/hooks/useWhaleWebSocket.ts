@@ -115,7 +115,8 @@ export function useWhaleWebSocket({
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 8000);
       const onAbort = () => ctrl.abort();
-      const parentSig = httpAbortRef.current!.signal;
+      if (!httpAbortRef.current) httpAbortRef.current = new AbortController();
+      const parentSig = httpAbortRef.current.signal;
       parentSig.addEventListener('abort', onAbort);
       try {
         const pairs = [...optionsRef.current.subscribedPairs].slice(0, 5);
