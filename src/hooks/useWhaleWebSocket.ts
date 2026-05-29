@@ -82,7 +82,8 @@ export function useWhaleWebSocket({
       const pairs = [...optionsRef.current.subscribedPairs].slice(0, 10);
       if (!pairs.length) return;
       const signal = httpAbortRef.current!.signal;
-      const endpoints = pairs.map(sym => `https://api.binance.com/api/v3/ticker/24hr?symbol=${sym}USDT`);
+      // Pairs already include the USDT suffix (e.g. "BTCUSDT") — do NOT append again.
+      const endpoints = pairs.map(sym => `https://api.binance.com/api/v3/ticker/24hr?symbol=${sym.endsWith('USDT') ? sym : sym + 'USDT'}`);
       // Parallel with manual per-request timeout (no AbortSignal.timeout — wider support, cancellable on unmount)
       const responses = await Promise.allSettled(
         endpoints.map(url => {
@@ -119,8 +120,10 @@ export function useWhaleWebSocket({
         const pairs = [...optionsRef.current.subscribedPairs].slice(0, 5);
         if (!pairs.length) return;
         const symbol = pairs[0];
+        // pairs are already full Binance pair names (e.g. "BTCUSDT") — never re-append USDT.
+        const fullPair = symbol.endsWith('USDT') ? symbol : symbol + 'USDT';
         const res = await fetch(
-          `https://api.binance.com/api/v3/trades?symbol=${symbol}USDT&limit=5`,
+          `https://api.binance.com/api/v3/trades?symbol=${fullPair}&limit=5`,
           { signal: ctrl.signal }
         );
         if (!res.ok) return;

@@ -8,7 +8,13 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
 };
 
-const ALLOWED_HOSTS = new Set(['api.coingecko.com', 'pro-api.coingecko.com']);
+const ALLOWED_HOSTS = new Set([
+  'api.coingecko.com',
+  'pro-api.coingecko.com',
+  'api.binance.com',
+  'fapi.binance.com',
+  'api.bybit.com',
+]);
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
