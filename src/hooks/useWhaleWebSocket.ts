@@ -81,7 +81,8 @@ export function useWhaleWebSocket({
     try {
       const pairs = [...optionsRef.current.subscribedPairs].slice(0, 10);
       if (!pairs.length) return;
-      const signal = httpAbortRef.current!.signal;
+      if (!httpAbortRef.current) httpAbortRef.current = new AbortController();
+      const signal = httpAbortRef.current.signal;
       // Pairs already include the USDT suffix (e.g. "BTCUSDT") — do NOT append again.
       const endpoints = pairs.map(sym => `https://api.binance.com/api/v3/ticker/24hr?symbol=${sym.endsWith('USDT') ? sym : sym + 'USDT'}`);
       // Parallel with manual per-request timeout (no AbortSignal.timeout — wider support, cancellable on unmount)
@@ -114,7 +115,8 @@ export function useWhaleWebSocket({
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 8000);
       const onAbort = () => ctrl.abort();
-      const parentSig = httpAbortRef.current!.signal;
+      if (!httpAbortRef.current) httpAbortRef.current = new AbortController();
+      const parentSig = httpAbortRef.current.signal;
       parentSig.addEventListener('abort', onAbort);
       try {
         const pairs = [...optionsRef.current.subscribedPairs].slice(0, 5);
@@ -393,6 +395,11 @@ export function useWhaleWebSocket({
   scheduleRebuildWsRef.current = scheduleRebuildWs;
   scheduleRebuildWs2Ref.current = scheduleRebuildWs2;
 
+  // Stable signature so a parent re-render that creates a new Set with the SAME
+  // contents does NOT re-trigger this effect (which would abort all in-flight
+  // HTTP requests and rebuild the WS in a tight loop).
+  const pairsKey = [...subscribedPairs].sort().join(',');
+
   useEffect(() => {
     if (subscribedPairs.size) scheduleRebuildWs(300);
     return () => {
@@ -407,7 +414,8 @@ export function useWhaleWebSocket({
       try { httpAbortRef.current?.abort(); } catch {}
       httpAbortRef.current = new AbortController();
     };
-  }, [subscribedPairs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairsKey]);
 
   useEffect(() => {
     if (bybitEnabled && subscribedPairs.size) {
@@ -431,7 +439,8 @@ export function useWhaleWebSocket({
       if (ws2RebuildTimer.current) clearTimeout(ws2RebuildTimer.current);
       if (ws2ReconnectTimer.current) clearTimeout(ws2ReconnectTimer.current);
     };
-  }, [bybitEnabled, subscribedPairs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bybitEnabled, pairsKey]);
 
   return { binanceReady, bybitReady, wsStatus, wsLagMs, reconnectAttempts };
 }
