@@ -4,9 +4,11 @@ import App from './App';
 import { registerServiceWorker } from './lib/pwa';
 import { installChunkRecovery } from './lib/chunkRecovery';
 import { installStartupDiagnostics } from './lib/startupDiagnostics';
+import { installDebugOverlay } from './lib/debugOverlay';
 import './index.css';
 
 // Install BEFORE anything else so we catch failures from the very first import.
+installDebugOverlay();
 installChunkRecovery();
 installStartupDiagnostics();
 
