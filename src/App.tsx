@@ -46,6 +46,8 @@ const App = () => (
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<ErrorBoundary><Index /></ErrorBoundary>} />
+            <Route path="/index" element={<Navigate to="/" replace />} />
+            <Route path="/index.html" element={<Navigate to="/" replace />} />
             <Route path="/orderflow" element={<ErrorBoundary><Orderflow /></ErrorBoundary>} />
             <Route path="/trading-hub" element={<ErrorBoundary><TradingHubLayout /></ErrorBoundary>}>
               <Route index element={<TradingDashboard />} />
