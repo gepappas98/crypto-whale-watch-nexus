@@ -121,7 +121,6 @@ export default function WhaleRadarApp() {
       setAutoScan(true);
       setAutoPaused(saved.autoPaused as boolean ?? true);
     }
-    if (!localStorage.getItem('wr_v9_onboarded')) setShowOnboarding(true);
   }, []);
 
   // ══ PERFORMANCE MONITORING ═══════════════════════════════════════════════
