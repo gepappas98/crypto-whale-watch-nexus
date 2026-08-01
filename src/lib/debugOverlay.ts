@@ -26,6 +26,10 @@ interface Entry {
 
 const MAX_ENTRIES = 200;
 const STORAGE_KEY = 'wr_debug_overlay_open';
+const IGNORED_CONSOLE_MESSAGES = [
+  'Function components cannot be given refs',
+  'React Router Future Flag Warning',
+];
 
 let installed = false;
 let nextId = 1;
@@ -171,6 +175,8 @@ function render() {
 
 function push(kind: EntryKind, title: string, detail = '', stack?: string) {
   ensureMounted();
+  const previous = entries[entries.length - 1];
+  if (previous?.kind === kind && previous.title === title && previous.detail === detail) return;
   entries.push({ id: nextId++, ts: Date.now(), kind, title, detail, stack });
   if (entries.length > MAX_ENTRIES) entries.splice(0, entries.length - MAX_ENTRIES);
   // Auto-open the first time a real error lands so blank screens become visible.
@@ -234,6 +240,10 @@ export function installDebugOverlay(): void {
     try {
       const first = args[0];
       const title = typeof first === 'string' ? first : (first as any)?.message || 'console.error';
+      if (IGNORED_CONSOLE_MESSAGES.some((message) => String(title).includes(message))) {
+        origErr(...args);
+        return;
+      }
       const detail = args.slice(typeof first === 'string' ? 1 : 0).map(safeStringify).join(' ');
       const stack = args.map((a) => (a as Error)?.stack).find(Boolean) as string | undefined;
       push('console', String(title).slice(0, 300), detail.slice(0, 2000), stack);
