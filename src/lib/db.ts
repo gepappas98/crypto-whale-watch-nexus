@@ -282,8 +282,30 @@ export async function deleteTrackedToken(symbol: string): Promise<void> {
 
 // ══ ALERTS ════════════════════════════════════════════════════════════════════
 
+const ALERTS_LS_KEY = 'wr_v9_alerts';
+const ALERTS_LS_MAX = 200;
+
+function loadLocalAlerts(): AlertItem[] {
+  try {
+    const raw = localStorage.getItem(ALERTS_LS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveLocalAlerts(alerts: AlertItem[]): void {
+  try {
+    localStorage.setItem(ALERTS_LS_KEY, JSON.stringify(alerts.slice(0, ALERTS_LS_MAX)));
+  } catch { /* ignore */ }
+}
+
 export async function saveAlert(alert: AlertItem): Promise<void> {
   if (alert.level === 'info') return;
+
+  // Persist locally first — mirrors the portfolio/tracked-token pattern —
+  // so the alert survives even when the backend API is unreachable instead
+  // of being silently dropped.
+  saveLocalAlerts([alert, ...loadLocalAlerts()]);
+
   await api('/alerts', {
     method: 'POST',
     body: JSON.stringify({
@@ -301,16 +323,19 @@ export async function loadAlerts(): Promise<AlertItem[]> {
     id: number; level: string; tag: string; text: string;
     sizing: string | null; pinned: boolean; created_at: string;
   }>>('/alerts', { _silent: true });
-  if (!rows) return [];
-  return rows.map(r => ({
-    ts: new Date(r.created_at).getTime(),
-    level: r.level as AlertItem['level'],
-    tag: r.tag,
-    text: r.text,
-    tc: r.level === 'critical' ? 'C' : r.level === 'high' ? 'H' : r.level === 'medium' ? 'M' : 'I',
-    sizing: r.sizing,
-    pinned: r.pinned,
-  }));
+  if (rows) {
+    return rows.map(r => ({
+      ts: new Date(r.created_at).getTime(),
+      level: r.level as AlertItem['level'],
+      tag: r.tag,
+      text: r.text,
+      tc: r.level === 'critical' ? 'C' : r.level === 'high' ? 'H' : r.level === 'medium' ? 'M' : 'I',
+      sizing: r.sizing,
+      pinned: r.pinned,
+    }));
+  }
+  // Backend unreachable — fall back to whatever was persisted locally.
+  return loadLocalAlerts();
 }
 
 export async function toggleAlertPin(dbId: number): Promise<void> {
