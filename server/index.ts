@@ -4,7 +4,7 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 import express from 'express';
 import cors from 'cors';
-import { ping } from './db';
+import { ping, pool } from './db';
 import { scansRouter }          from './routes/scans';
 import { scanRouter }           from './routes/scan';
 import { portfolioRouter }      from './routes/portfolio';
@@ -22,7 +22,7 @@ const PORT = Number(process.env.API_PORT) || 3001;
 // In dev the Vite proxy handles /api so CORS is only needed for direct calls.
 const corsOrigin = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
-  : (process.env.NODE_ENV === 'production' ? false : 'http://localhost:8080');
+  : (process.env.NODE_ENV === 'production' ? false : 'http://localhost:5173');
 
 app.use(cors({
   origin: corsOrigin,
@@ -48,6 +48,12 @@ app.use('/api', (req, res, next) => {
   if (PUBLIC_PATHS.has(req.baseUrl + req.path) || PUBLIC_PATHS.has(req.originalUrl.split('?')[0])) {
     return next();
   }
+
+  // DB guard: fail-fast with helpful message when persistence is disabled
+  if (!pool) {
+    return res.status(503).json({ error: 'Database not configured' });
+  }
+
   if (!API_AUTH_TOKEN) {
     return res.status(503).json({ error: 'Server auth not configured' });
   }
@@ -59,7 +65,7 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// ── Health ─────────────────────────────────────────────────────────────────
+// ── Health ───────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), timestamp: Date.now() });
 });
@@ -73,7 +79,7 @@ app.get('/api/health/db', async (_req, res) => {
   }
 });
 
-// ── Routes ─────────────────────────────────────────────────────────────────
+// ── Routes ───────────────────────────────────────────────────────────────
 app.use('/api/scan',             scanRouter);
 app.use('/api/scans',            scansRouter);
 app.use('/api/portfolio',        portfolioRouter);
@@ -82,10 +88,10 @@ app.use('/api/alerts',           alertsRouter);
 app.use('/api/whale-events',     whaleEventsRouter);
 app.use('/api/signal-outcomes',  signalOutcomesRouter);
 
-// ── 404 ────────────────────────────────────────────────────────────────────
+// ── 404 ───────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
-// ── Start ──────────────────────────────────────────────────────────────────
+// ── Start ─────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`[API] Whale RADAR server listening on :${PORT}`);
   ping().then(ok => console.log(`[DB]  PostgreSQL ${ok ? '✓ connected' : '✗ OFFLINE'}`));
