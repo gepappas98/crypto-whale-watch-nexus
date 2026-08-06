@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Ignore bun lockfile when keeping npm package-lock.json as authoritative
+bun.lock
