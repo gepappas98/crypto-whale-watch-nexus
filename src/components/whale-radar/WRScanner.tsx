@@ -160,6 +160,8 @@ interface WRScannerProps {
   onPageChange: (p: number) => void;
   hlScannerEnabled?: boolean;
   hlMegaTxUsd?: number;
+  councilEnabled?: boolean;
+  onLaunchCouncil?: (coin: CoinData) => void;
 }
 
 interface AiRowData {
@@ -196,6 +198,8 @@ export function WRScanner({
   onPageChange,
   hlScannerEnabled = true,
   hlMegaTxUsd,
+  councilEnabled = true,
+  onLaunchCouncil,
 }: WRScannerProps) {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<string>('score');
@@ -610,6 +614,19 @@ export function WRScanner({
                       >
                         ✦
                       </button>
+                      {councilEnabled && onLaunchCouncil && (
+                        <button
+                          className={`text-[9px] px-2 py-1 border ml-1 ${
+                            scoreVal >= 70 || c.threat === 'CRITICAL' || c.threat === 'HIGH'
+                              ? 'text-wr-purple border-wr-purple/60 bg-wr-purple/10 animate-pulse'
+                              : 'text-wr-muted border-wr-border'
+                          }`}
+                          onClick={(e) => { e.stopPropagation(); onLaunchCouncil(c); }}
+                          title="Launch Agent Council — AI trading desk"
+                        >
+                          ★AI
+                        </button>
+                      )}
                     </td>
                     <td>
                       <div className={`wr-badge border ${getCeoSignal(scoreVal, c.threat || '', c.category, vmcapVal).cls}`} title="CEO Signal™">

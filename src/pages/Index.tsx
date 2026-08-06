@@ -28,6 +28,8 @@ import { fillSignalPrices } from '@/lib/signalStore';
 import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
 import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
 import { startPerfMonitoring } from '@/lib/perfBudget';
+import { WRCouncilPanel } from '@/components/whale-radar/WRCouncilPanel';
+import type { CouncilLlmSettings } from '@/lib/council/api';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
 
@@ -89,6 +91,29 @@ export default function WhaleRadarApp() {
 
   // Modals
   const [activeModal, setActiveModal] = useState<string | null>(null);
+
+  // ── Agent Council ────────────────────────────────────────────────────────
+  const [councilEnabled, setCouncilEnabled] = useState(() => localStorage.getItem('wr_council_enabled') !== '0');
+  const [councilCoin, setCouncilCoin] = useState<CoinData | null>(null);
+  const [councilLlm, setCouncilLlm] = useState<CouncilLlmSettings>(() => {
+    try {
+      const raw = localStorage.getItem('wr_council_llm');
+      if (raw) return JSON.parse(raw) as CouncilLlmSettings;
+    } catch { /* ignore */ }
+    return { provider: 'lovable' };
+  });
+  const updateCouncilLlm = useCallback((patch: Partial<CouncilLlmSettings>) => {
+    setCouncilLlm(prev => {
+      const next = { ...prev, ...patch };
+      localStorage.setItem('wr_council_llm', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+  const toggleCouncil = useCallback((v: boolean) => {
+    setCouncilEnabled(v);
+    localStorage.setItem('wr_council_enabled', v ? '1' : '0');
+  }, []);
+
 
   // Owned by useMarketData below: prevVolumes (for vol-spike calc).
 
@@ -492,6 +517,13 @@ export default function WhaleRadarApp() {
             if (v.length > 20) localStorage.setItem('wr_supabase_anon_key', v);
             else localStorage.removeItem('wr_supabase_anon_key');
           }}
+          councilEnabled={councilEnabled}
+          onCouncilEnabledChange={toggleCouncil}
+          councilProvider={councilLlm.provider}
+          councilKey={councilLlm.apiKey ?? ''}
+          councilModel={councilLlm.model ?? ''}
+          councilBaseUrl={councilLlm.baseUrl ?? ''}
+          onCouncilLlmChange={(p) => updateCouncilLlm(p as Partial<CouncilLlmSettings>)}
         />
       )}
 
@@ -526,6 +558,8 @@ export default function WhaleRadarApp() {
           onPageChange={setScanPage}
           hlScannerEnabled={hlScannerEnabled}
           hlMegaTxUsd={hlMegaTxUsd}
+          councilEnabled={councilEnabled}
+          onLaunchCouncil={setCouncilCoin}
         />
 
         <WRRightPanel
@@ -563,6 +597,15 @@ export default function WhaleRadarApp() {
       <WRCrystalBallPro />
 
       {kbdOpen && <WRKeyboardHelp onClose={() => setKbdOpen(false)} />}
+
+      {councilEnabled && councilCoin && (
+        <WRCouncilPanel
+          coin={councilCoin}
+          whaleTrades={whaleFeed}
+          llm={councilLlm}
+          onClose={() => setCouncilCoin(null)}
+        />
+      )}
 
       {activeModal === 'backtest' && (
         <WRModal title="📊 BACKTESTING MODULE" onClose={() => setActiveModal(null)}>

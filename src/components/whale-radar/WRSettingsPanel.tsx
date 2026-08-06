@@ -17,6 +17,10 @@ interface WRSettingsPanelProps {
   hlMegaTxUsd: number; onHlMegaTxUsdChange: (v: number) => void;
   supabaseUrl: string; onSupabaseUrlChange: (v: string) => void;
   supabaseAnonKey: string; onSupabaseAnonKeyChange: (v: string) => void;
+  // ── Agent Council ──
+  councilEnabled?: boolean; onCouncilEnabledChange?: (v: boolean) => void;
+  councilProvider?: string; councilKey?: string; councilModel?: string; councilBaseUrl?: string;
+  onCouncilLlmChange?: (patch: { provider?: string; apiKey?: string; model?: string; baseUrl?: string }) => void;
 }
 
 export function WRSettingsPanel({
@@ -31,6 +35,9 @@ export function WRSettingsPanel({
   hlMegaTxUsd, onHlMegaTxUsdChange,
   supabaseUrl, onSupabaseUrlChange,
   supabaseAnonKey, onSupabaseAnonKeyChange,
+  councilEnabled = true, onCouncilEnabledChange,
+  councilProvider = 'lovable', councilKey = '', councilModel = '', councilBaseUrl = '',
+  onCouncilLlmChange,
 }: WRSettingsPanelProps) {
   const hlOk = isHLConfigured();
 
@@ -148,6 +155,61 @@ export function WRSettingsPanel({
           {hlOk ? '✓ HL cache active — 200 req/min server-side' : 'Required for Hyperliquid Explorer & Scanner'}
         </Note>
         <Note cls="text-wr-amber">Stored locally · Run: supabase functions deploy hyperliquid-cache</Note>
+      </SettingsGroup>
+
+      {/* ── Agent Council ────────────────────────────────────────────────── */}
+      <SettingsGroup label="★ AGENT COUNCIL (AI DESK)">
+        <div className="flex gap-1.5 items-center">
+          <button
+            className={`wr-btn ${councilEnabled ? 'active' : ''} ai text-[8px]`}
+            onClick={() => onCouncilEnabledChange?.(!councilEnabled)}
+          >
+            {councilEnabled ? '● ON' : '○ OFF'}
+          </button>
+          <span className="text-[8px] font-mono text-wr-purple">
+            {councilProvider === 'lovable' ? '✓ Built-in AI (no key)' : `${councilProvider} key`}
+          </span>
+        </div>
+        <select
+          className="wr-input text-[8px]"
+          value={councilProvider}
+          onChange={e => onCouncilLlmChange?.({ provider: e.target.value })}
+        >
+          <option value="lovable">Built-in (Lovable AI)</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="openai">OpenAI</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="groq">Groq</option>
+          <option value="custom">Custom OpenAI-compatible</option>
+        </select>
+        {councilProvider !== 'lovable' && (
+          <>
+            <input
+              className="wr-input text-[8px]"
+              type="password"
+              placeholder="Provider API key"
+              value={councilKey}
+              onChange={e => onCouncilLlmChange?.({ apiKey: e.target.value })}
+            />
+            {councilProvider === 'custom' && (
+              <input
+                className="wr-input text-[8px]"
+                type="text"
+                placeholder="https://your-endpoint/v1"
+                value={councilBaseUrl}
+                onChange={e => onCouncilLlmChange?.({ baseUrl: e.target.value })}
+              />
+            )}
+          </>
+        )}
+        <input
+          className="wr-input text-[8px]"
+          type="text"
+          placeholder="Model (optional override)"
+          value={councilModel}
+          onChange={e => onCouncilLlmChange?.({ model: e.target.value })}
+        />
+        <Note cls="text-wr-muted">5-agent debate · memory + reflection per token</Note>
       </SettingsGroup>
     </div>
   );
