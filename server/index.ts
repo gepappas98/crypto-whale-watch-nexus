@@ -22,7 +22,7 @@ const PORT = Number(process.env.API_PORT) || 3001;
 // In dev the Vite proxy handles /api so CORS is only needed for direct calls.
 const corsOrigin = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
-  : (process.env.NODE_ENV === 'production' ? false : 'http://localhost:8080');
+  : (process.env.NODE_ENV === 'production' ? false : 'http://localhost:5173');
 
 app.use(cors({
   origin: corsOrigin,
@@ -59,7 +59,7 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// ── Health ─────────────────────────────────────────────────────────────────
+// ── Health ───────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), timestamp: Date.now() });
 });
@@ -73,7 +73,7 @@ app.get('/api/health/db', async (_req, res) => {
   }
 });
 
-// ── Routes ─────────────────────────────────────────────────────────────────
+// ── Routes ───────────────────────────────────────────────────────────────
 app.use('/api/scan',             scanRouter);
 app.use('/api/scans',            scansRouter);
 app.use('/api/portfolio',        portfolioRouter);
@@ -82,10 +82,10 @@ app.use('/api/alerts',           alertsRouter);
 app.use('/api/whale-events',     whaleEventsRouter);
 app.use('/api/signal-outcomes',  signalOutcomesRouter);
 
-// ── 404 ────────────────────────────────────────────────────────────────────
+// ── 404 ───────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
-// ── Start ──────────────────────────────────────────────────────────────────
+// ── Start ─────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`[API] Whale RADAR server listening on :${PORT}`);
   ping().then(ok => console.log(`[DB]  PostgreSQL ${ok ? '✓ connected' : '✗ OFFLINE'}`));
