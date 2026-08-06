@@ -551,6 +551,8 @@ export default function WhaleRadarApp() {
           onPageChange={setScanPage}
           hlScannerEnabled={hlScannerEnabled}
           hlMegaTxUsd={hlMegaTxUsd}
+          councilEnabled={councilEnabled}
+          onLaunchCouncil={setCouncilCoin}
         />
 
         <WRRightPanel
