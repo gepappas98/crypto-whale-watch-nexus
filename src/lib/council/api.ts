@@ -119,9 +119,9 @@ export async function saveCouncilDecision(
         depth,
         final_verdict: decision.finalVerdict,
         conviction: decision.conviction,
-        decision: decision as unknown as Record<string, unknown>,
-        context: ctx as unknown as Record<string, unknown>,
-        transcript: transcript as unknown as Record<string, unknown>[],
+        decision: JSON.parse(JSON.stringify(decision)),
+        context: JSON.parse(JSON.stringify(ctx)),
+        transcript: JSON.parse(JSON.stringify(transcript)),
         price_at: ctx.price,
         reflection,
       })
