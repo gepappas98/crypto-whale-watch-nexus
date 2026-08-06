@@ -45,4 +45,8 @@ export async function ping(): Promise<boolean> {
   }
 }
 
+export function isDbConfigured(): boolean {
+  return pool !== null;
+}
+
 export { pool };

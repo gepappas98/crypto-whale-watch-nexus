@@ -1,5 +1,5 @@
-
 ```markdown
+
 # 🐋 Crypto Whale Watch Nexus
 
 ![Version](https://img.shields.io/badge/version-9.0-blue)
@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Deployment](https://img.shields.io/badge/deployment-Lovable-success)
 
-A next-generation, real-time crypto intelligence platform designed to track whale movements, detect market manipulation, and provide actionable trading signals. Built with a modern React stack, it features live WebSocket feeds, advanced analytics, and a modular architecture for professional crypto traders and enthusiasts.
+A next-generation, real-time crypto intelligence platform designed to track whale movements, detect market manipulation, and provide actionable trading signals. Built with a modern React stack, it[...]
 
 ---
 
@@ -31,7 +31,7 @@ A next-generation, real-time crypto intelligence platform designed to track whal
 
 ## 🔭 Overview
 
-Crypto Whale Watch Nexus is a frontend-focused application that transforms raw blockchain and market data into a unified, real-time command center. It empowers users to monitor high-value transactions, analyze order flow, and uncover market patterns. While originally designed for visualization, the project now includes a suite of advanced modules for trading, backtesting, and sentiment analysis, serving as a foundation for a complete crypto intelligence ecosystem.
+Crypto Whale Watch Nexus is a frontend-focused application that transforms raw blockchain and market data into a unified, real-time command center. It empowers users to monitor high-value transact[...]
 
 ---
 
@@ -156,9 +156,10 @@ crypto-whale-watch-nexus/
 │   └── main.tsx
 ├── package.json
 ├── vite.config.ts
-├── tailwind.config.js
+├── tailwind.config.ts
+├── tsconfig.app.json
+├── tsconfig.json
 └── README.md
-
 ```
 
 ---
@@ -208,7 +209,7 @@ Once the application is running, navigate through the main sections:
 
 ## 🔗 API Integration
 
-The application is designed to be API-driven. It aggregates data from multiple external sources. To configure your own API keys or endpoints, modify the `src/services/api.ts` file. The current integration points include:
+The application is designed to be API-driven. It aggregates data from multiple external sources. To configure your own API keys or endpoints, modify the `src/services/api.ts` file. The current in[...]
 
 *   Cryptocurrency price and volume APIs
 *   Hyperliquid exchange-specific endpoints
@@ -249,7 +250,7 @@ Contributions are what make the open-source community an amazing place to learn,
 
 ## ⚠️ Disclaimer
 
-This project is for **educational and informational purposes only**. It does not provide financial, investment, or trading advice. Always do your own research before making any trading decisions. The developers are not responsible for any financial losses incurred from the use of this software.
+This project is for **educational and informational purposes only**. It does not provide financial, investment, or trading advice. Always do your own research before making any trading decisions.[...]
 
 ---
 
@@ -260,4 +261,3 @@ This project is for **educational and informational purposes only**. It does not
 *   GitHub: [https://github.com/gepappas98](https://github.com/gepappas98)
 *   Project Link: [https://github.com/gepappas98/crypto-whale-watch-nexus](https://github.com/gepappas98/crypto-whale-watch-nexus)
 ```
-

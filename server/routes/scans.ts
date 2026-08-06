@@ -25,17 +25,27 @@ scansRouter.post('/', async (req: Request, res: Response) => {
     // Bulk-insert coins
     const values: unknown[] = [];
     const placeholders = coins.map((c, i) => {
-      const base = i * 17; // 17 values pushed per coin — was wrongly 13, causing corrupt $N offsets for i > 0
+      const base = i * 17; // 17 values pushed per coin
       values.push(
-        session.id, c.symbol, c.name, c.rank,
-        c.price, c.change, c.volume, c.mcap,
-        c.vmcap, c.volSpike, c.score, c.threat,
-        c.category, c.confidence,
+        session.id,
+        c.symbol,
+        c.name,
+        c.rank,
+        c.price,
+        c.change,
+        c.volume,
+        c.mcap,
+        c.vmcap,
+        c.volSpike,
+        c.score,
+        c.threat,
+        c.category,
+        c.confidence,
         JSON.stringify(c.reasons ?? []),
         c.isSol ?? false,
         c.birdData ? JSON.stringify(c.birdData) : null
       );
-      return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7},$${base+8},$${base+9},$${base+10},$${base+11},$${base+12},$${base+13},$${base+14},$${base+15},$${base+16},$${base+17})`;
+      return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16},$${base + 17})`;
     });
 
     await query(
