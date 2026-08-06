@@ -92,6 +92,29 @@ export default function WhaleRadarApp() {
   // Modals
   const [activeModal, setActiveModal] = useState<string | null>(null);
 
+  // ── Agent Council ────────────────────────────────────────────────────────
+  const [councilEnabled, setCouncilEnabled] = useState(() => localStorage.getItem('wr_council_enabled') !== '0');
+  const [councilCoin, setCouncilCoin] = useState<CoinData | null>(null);
+  const [councilLlm, setCouncilLlm] = useState<CouncilLlmSettings>(() => {
+    try {
+      const raw = localStorage.getItem('wr_council_llm');
+      if (raw) return JSON.parse(raw) as CouncilLlmSettings;
+    } catch { /* ignore */ }
+    return { provider: 'lovable' };
+  });
+  const updateCouncilLlm = useCallback((patch: Partial<CouncilLlmSettings>) => {
+    setCouncilLlm(prev => {
+      const next = { ...prev, ...patch };
+      localStorage.setItem('wr_council_llm', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+  const toggleCouncil = useCallback((v: boolean) => {
+    setCouncilEnabled(v);
+    localStorage.setItem('wr_council_enabled', v ? '1' : '0');
+  }, []);
+
+
   // Owned by useMarketData below: prevVolumes (for vol-spike calc).
 
   // ══ PERSISTENCE ═══════════════════════════════════════════════════════════
