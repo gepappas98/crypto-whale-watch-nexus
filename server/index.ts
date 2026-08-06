@@ -4,7 +4,7 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 import express from 'express';
 import cors from 'cors';
-import { ping } from './db';
+import { ping, pool } from './db';
 import { scansRouter }          from './routes/scans';
 import { scanRouter }           from './routes/scan';
 import { portfolioRouter }      from './routes/portfolio';
@@ -48,6 +48,12 @@ app.use('/api', (req, res, next) => {
   if (PUBLIC_PATHS.has(req.baseUrl + req.path) || PUBLIC_PATHS.has(req.originalUrl.split('?')[0])) {
     return next();
   }
+
+  // DB guard: fail-fast with helpful message when persistence is disabled
+  if (!pool) {
+    return res.status(503).json({ error: 'Database not configured' });
+  }
+
   if (!API_AUTH_TOKEN) {
     return res.status(503).json({ error: 'Server auth not configured' });
   }

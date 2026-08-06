@@ -2,9 +2,9 @@
  *  Records CEO Signal Engine fires and fills in 1h/4h/24h price outcomes.
  *  This is the profit-proof layer: after 2 weeks of data you can run the
  *  eval query and know if your signals actually have alpha.
- * ═══════════════════════════════════════════════════════════════════════════ */
+ * ════════════════════════════════════════════════════════════════ */
 import { Router, Request, Response } from 'express';
-import { query } from '../db';
+import { query, pool } from '../db';
 
 export const signalOutcomesRouter = Router();
 
@@ -160,9 +160,14 @@ export interface FillResult { filled: number }
 export async function fillOutcomePrices(): Promise<FillResult> {
   let filled = 0;
 
+  if (!pool) {
+    console.warn('[priceFiller] DB disabled — skipping fillOutcomePrices');
+    return { filled: 0 };
+  }
+
   await ensureTable();
 
-  // ── 1h window ─────────────────────────────────────────────────────────────
+  // ── 1h window ─────────────────────────────────────────────────────────
   const raw1h = await query<{
     id: number; coin_id: string | null; symbol: string; entry_price: string;
   }>(
@@ -175,7 +180,7 @@ export async function fillOutcomePrices(): Promise<FillResult> {
   );
   const need1h = unwrap<{ id: number; coin_id: string | null; symbol: string; entry_price: string }>(raw1h);
 
-  // ── 4h window ─────────────────────────────────────────────────────────────
+  // ── 4h window ─────────────────────────────────────────────────────────
   const raw4h = await query<{
     id: number; coin_id: string | null; symbol: string; entry_price: string;
   }>(
@@ -188,7 +193,7 @@ export async function fillOutcomePrices(): Promise<FillResult> {
   );
   const need4h = unwrap<{ id: number; coin_id: string | null; symbol: string; entry_price: string }>(raw4h);
 
-  // ── 24h window ────────────────────────────────────────────────────────────
+  // ── 24h window ─────────────────────────────────────────────────────────
   const raw24h = await query<{
     id: number; coin_id: string | null; symbol: string; entry_price: string;
   }>(
