@@ -9,7 +9,7 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 
 **Live:**
 - Lovable: https://crypto-whale-watch-nexus.lovable.app
-- Vercel: https://crypto-whale-watch-nexus-v9.vercel.app
+- Vercel: https://crypto-whale-watch-nexusv9.vercel.app
 
 ---
 
