@@ -28,6 +28,8 @@ import { fillSignalPrices } from '@/lib/signalStore';
 import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
 import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
 import { startPerfMonitoring } from '@/lib/perfBudget';
+import { WRCouncilPanel } from '@/components/whale-radar/WRCouncilPanel';
+import type { CouncilLlmSettings } from '@/lib/council/api';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
 
