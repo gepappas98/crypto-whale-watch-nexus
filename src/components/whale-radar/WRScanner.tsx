@@ -198,6 +198,8 @@ export function WRScanner({
   onPageChange,
   hlScannerEnabled = true,
   hlMegaTxUsd,
+  councilEnabled = true,
+  onLaunchCouncil,
 }: WRScannerProps) {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<string>('score');
