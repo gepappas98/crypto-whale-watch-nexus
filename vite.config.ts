@@ -9,6 +9,9 @@ export default defineConfig(({ mode }) => {
     server: {
       host: "::",
       port: 8080,
+      // Allow the app to be served through the v0 / Vercel sandbox preview
+      // hosts (e.g. *.vercel.run). Vite blocks unknown hosts by default.
+      allowedHosts: true,
       hmr: { overlay: false },
       proxy: {
         "/api": {
@@ -17,6 +20,11 @@ export default defineConfig(({ mode }) => {
           secure: false,
         },
       },
+    },
+    preview: {
+      host: "::",
+      port: 8080,
+      allowedHosts: true,
     },
     plugins: [
       react(),

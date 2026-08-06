@@ -2,16 +2,66 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+// Vite inlines `VITE_*` variables at BUILD time. If they are absent from the
+// build environment, they resolve to `undefined` here and `createClient` would
+// throw ("supabaseUrl is required."), crashing the app before React mounts and
+// producing a silent white screen. We guard against that below so a
+// misconfiguration surfaces as a readable message instead of a blank page.
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const SUPABASE_PUBLISHABLE_KEY = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
+
+const missingVars: string[] = [];
+if (!SUPABASE_URL) missingVars.push('VITE_SUPABASE_URL');
+if (!SUPABASE_PUBLISHABLE_KEY) missingVars.push('VITE_SUPABASE_PUBLISHABLE_KEY');
+
+export const isSupabaseConfigured = missingVars.length === 0;
+
+if (!isSupabaseConfigured) {
+  const message =
+    `Supabase is not configured. Missing build-time environment variable(s): ${missingVars.join(', ')}. ` +
+    `These VITE_* variables must be set in the deployment's build environment (Vite inlines them at build time), ` +
+    `then the app must be redeployed.`;
+
+  // Routed through console.error so the runtime debug overlay captures it too.
+  console.error('[supabase] ' + message);
+
+  // Paint a persistent, framework-independent banner so the failure is visible
+  // even though React has not mounted yet.
+  const paintBanner = () => {
+    if (typeof document === 'undefined' || document.getElementById('__supabase_config_error')) return;
+    const el = document.createElement('div');
+    el.id = '__supabase_config_error';
+    el.style.cssText =
+      'position:fixed;top:0;left:0;right:0;z-index:2147483646;background:#3a0d0d;color:#ffd7d7;' +
+      'font:600 13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;padding:12px 16px;' +
+      'border-bottom:1px solid #ff5d5d;box-shadow:0 2px 12px rgba(0,0,0,.5);';
+    el.textContent = 'Configuration error: ' + message;
+    document.body.appendChild(el);
+  };
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', paintBanner, { once: true });
+    } else {
+      paintBanner();
+    }
+  }
+}
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
-
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: {
-    storage: localStorage,
-    persistSession: true,
-    autoRefreshToken: true,
-  }
-});
+//
+// Fall back to harmless placeholders when unconfigured so this module never
+// throws at import time. Any actual query will fail (and be surfaced by the
+// debug overlay), but the app shell still renders instead of white-screening.
+export const supabase = createClient<Database>(
+  SUPABASE_URL ?? 'https://placeholder.supabase.co',
+  SUPABASE_PUBLISHABLE_KEY ?? 'placeholder-anon-key',
+  {
+    auth: {
+      storage: localStorage,
+      persistSession: true,
+      autoRefreshToken: true,
+    },
+  },
+);
