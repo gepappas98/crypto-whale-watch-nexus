@@ -35,6 +35,9 @@ export function WRSettingsPanel({
   hlMegaTxUsd, onHlMegaTxUsdChange,
   supabaseUrl, onSupabaseUrlChange,
   supabaseAnonKey, onSupabaseAnonKeyChange,
+  councilEnabled = true, onCouncilEnabledChange,
+  councilProvider = 'lovable', councilKey = '', councilModel = '', councilBaseUrl = '',
+  onCouncilLlmChange,
 }: WRSettingsPanelProps) {
   const hlOk = isHLConfigured();
 
