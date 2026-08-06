@@ -2,8 +2,30 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+// IMPORTANT: createClient() throws synchronously if the URL/key are missing.
+// That throw happens at MODULE IMPORT TIME (before React ever mounts), so a
+// missing or misnamed env var here previously took down the entire app with
+// a blank white screen — no ErrorBoundary can catch an import-time crash.
+// We accept either key env-var name and fall back to inert placeholders so
+// the client always constructs; callers already handle `error` from every
+// call, so misconfiguration degrades to "Supabase features disabled"
+// instead of a blank page.
+const SUPABASE_URL =
+  (import.meta.env.VITE_SUPABASE_URL as string | undefined) || 'https://placeholder.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY =
+  (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ||
+  (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ||
+  'placeholder-anon-key';
+
+if (
+  !import.meta.env.VITE_SUPABASE_URL ||
+  !(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY)
+) {
+  console.warn(
+    '[supabase] VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY (or VITE_SUPABASE_ANON_KEY) ' +
+      'not set — Supabase-backed features (council memory, edge functions, cache stats) will be disabled.',
+  );
+}
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
