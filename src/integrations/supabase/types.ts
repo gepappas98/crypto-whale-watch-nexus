@@ -14,7 +14,57 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      council_decisions: {
+        Row: {
+          context: Json
+          conviction: number
+          created_at: string
+          decision: Json
+          depth: string
+          final_verdict: string
+          id: string
+          performance: Json
+          price_at: number | null
+          reflection: string | null
+          symbol: string
+          token_id: string | null
+          transcript: Json
+          updated_at: string
+        }
+        Insert: {
+          context?: Json
+          conviction?: number
+          created_at?: string
+          decision: Json
+          depth?: string
+          final_verdict: string
+          id?: string
+          performance?: Json
+          price_at?: number | null
+          reflection?: string | null
+          symbol: string
+          token_id?: string | null
+          transcript?: Json
+          updated_at?: string
+        }
+        Update: {
+          context?: Json
+          conviction?: number
+          created_at?: string
+          decision?: Json
+          depth?: string
+          final_verdict?: string
+          id?: string
+          performance?: Json
+          price_at?: number | null
+          reflection?: string | null
+          symbol?: string
+          token_id?: string | null
+          transcript?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
