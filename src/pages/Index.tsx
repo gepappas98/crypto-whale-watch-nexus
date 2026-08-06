@@ -517,6 +517,13 @@ export default function WhaleRadarApp() {
             if (v.length > 20) localStorage.setItem('wr_supabase_anon_key', v);
             else localStorage.removeItem('wr_supabase_anon_key');
           }}
+          councilEnabled={councilEnabled}
+          onCouncilEnabledChange={toggleCouncil}
+          councilProvider={councilLlm.provider}
+          councilKey={councilLlm.apiKey ?? ''}
+          councilModel={councilLlm.model ?? ''}
+          councilBaseUrl={councilLlm.baseUrl ?? ''}
+          onCouncilLlmChange={(p) => updateCouncilLlm(p as Partial<CouncilLlmSettings>)}
         />
       )}
 
