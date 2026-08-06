@@ -591,6 +591,15 @@ export default function WhaleRadarApp() {
 
       {kbdOpen && <WRKeyboardHelp onClose={() => setKbdOpen(false)} />}
 
+      {councilEnabled && councilCoin && (
+        <WRCouncilPanel
+          coin={councilCoin}
+          whaleTrades={whaleFeed}
+          llm={councilLlm}
+          onClose={() => setCouncilCoin(null)}
+        />
+      )}
+
       {activeModal === 'backtest' && (
         <WRModal title="📊 BACKTESTING MODULE" onClose={() => setActiveModal(null)}>
           <BacktestContent scanHistory={scanHistory} />
