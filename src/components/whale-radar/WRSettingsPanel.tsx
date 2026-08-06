@@ -17,6 +17,10 @@ interface WRSettingsPanelProps {
   hlMegaTxUsd: number; onHlMegaTxUsdChange: (v: number) => void;
   supabaseUrl: string; onSupabaseUrlChange: (v: string) => void;
   supabaseAnonKey: string; onSupabaseAnonKeyChange: (v: string) => void;
+  // ── Agent Council ──
+  councilEnabled?: boolean; onCouncilEnabledChange?: (v: boolean) => void;
+  councilProvider?: string; councilKey?: string; councilModel?: string; councilBaseUrl?: string;
+  onCouncilLlmChange?: (patch: { provider?: string; apiKey?: string; model?: string; baseUrl?: string }) => void;
 }
 
 export function WRSettingsPanel({
