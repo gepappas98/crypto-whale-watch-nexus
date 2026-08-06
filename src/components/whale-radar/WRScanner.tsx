@@ -160,6 +160,8 @@ interface WRScannerProps {
   onPageChange: (p: number) => void;
   hlScannerEnabled?: boolean;
   hlMegaTxUsd?: number;
+  councilEnabled?: boolean;
+  onLaunchCouncil?: (coin: CoinData) => void;
 }
 
 interface AiRowData {
