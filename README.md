@@ -1,263 +1,252 @@
-
-```markdown
-# 🐋 Crypto Whale Watch Nexus
+# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9
 
 ![Version](https://img.shields.io/badge/version-9.0-blue)
-![React](https://img.shields.io/badge/React-18.0-61DAFB?logo=react)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?logo=typescript)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Deployment](https://img.shields.io/badge/deployment-Lovable-success)
+![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript)
+![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite)
 
-A next-generation, real-time crypto intelligence platform designed to track whale movements, detect market manipulation, and provide actionable trading signals. Built with a modern React stack, it features live WebSocket feeds, advanced analytics, and a modular architecture for professional crypto traders and enthusiasts.
+Real-time crypto intelligence platform: whale-transaction tracking, market-manipulation detection, Hyperliquid perps analytics, orderflow scanning, and an AI "council" of trading agents — built as a React/TypeScript SPA with an optional Express + Postgres backend.
+
+**Live:**
+- Lovable: https://crypto-whale-watch-nexus.lovable.app
+- Vercel: https://crypto-whale-watch-nexus-v9.vercel.app
 
 ---
 
 ## 📑 Table of Contents
 
-- [Overview](#-overview)
-- [Key Features](#-key-features)
-- [Live Demo](#-live-demo)
+- [What's New](#-whats-new)
+- [Core Features](#-core-features)
+- [Nexus Suite](#-nexus-suite-nexus)
+- [Trading Hub](#-trading-hub-trading-hub)
+- [Hyperliquid Module](#-hyperliquid-module)
+- [AI Council](#-ai-council)
+- [Reliability & Resilience Engineering](#-reliability--resilience-engineering)
+- [PWA & Performance](#-pwa--performance)
+- [Backend (optional)](#-backend-optional)
 - [Tech Stack](#-tech-stack)
 - [Project Structure](#-project-structure)
 - [Getting Started](#-getting-started)
-- [Usage Guide](#-usage-guide)
-- [API Integration](#-api-integration)
+- [Environment Variables](#-environment-variables)
+- [Deployment Notes](#-deployment-notes)
 - [Roadmap](#-roadmap)
-- [Contributing](#-contributing)
 - [Disclaimer](#-disclaimer)
-- [Author](#-author)
 
 ---
 
-## 🔭 Overview
+## 🆕 What's New
 
-Crypto Whale Watch Nexus is a frontend-focused application that transforms raw blockchain and market data into a unified, real-time command center. It empowers users to monitor high-value transactions, analyze order flow, and uncover market patterns. While originally designed for visualization, the project now includes a suite of advanced modules for trading, backtesting, and sentiment analysis, serving as a foundation for a complete crypto intelligence ecosystem.
-
----
-
-## ✨ Key Features
-
-### 📊 Core Dashboard
-*   **Live Market Data:** Real-time display of cryptocurrency prices, volumes, and market caps.
-*   **Whale Transaction Visibility:** Dedicated feed highlighting large, impactful transactions across multiple assets.
-*   **Responsive UI:** A mobile-first design that adapts seamlessly to any screen size for on-the-go monitoring.
-
-### 🐋 Nexus Intelligence Suite
-*   **Nexus Whale Watch:** Advanced visualization of whale accumulation and distribution patterns.
-*   **Nexus Arbitrage:** Real-time cross-exchange arbitrage opportunity scanner.
-*   **Nexus Crystal Ball:** Predictive market trend analysis and probability modeling.
-*   **Nexus Grid Studio:** Visual grid-based trading strategy builder and backtester.
-*   **Nexus Portfolio:** Comprehensive portfolio tracking with real-time P&L and risk metrics.
-*   **Nexus Volume Maker:** Synthetic volume generation for market making strategies.
-
-### 🧠 Trading Hub
-*   **Dashboard:** Centralized trading command center with configurable widgets.
-*   **Screener:** Advanced multi-timeframe market screener with customizable filters.
-*   **Technical Analysis:** Integrated charting with popular indicators (MA, RSI, MACD, Bollinger Bands).
-*   **Patterns:** Automated recognition of bullish and bearish candlestick patterns.
-*   **Sentiment Analysis:** AI-driven social media and news sentiment aggregation.
-*   **Backtest Engine:** Historical strategy testing with detailed performance reports.
-*   **Timeframes:** Support for 1m, 5m, 15m, 1h, 4h, 1D, and 1W intervals.
-
-### 📡 Real-Time Order Flow Scanner
-*   **Orderflow Page:** Live visualization of bid/ask imbalances and large block trades.
-*   **Manipulation Detection:** Algorithms to flag potential market manipulation (spoofing, layering).
-*   **Hyperliquid Integration:** Dedicated hooks and services for deep Hyperliquid exchange analytics.
-
-### 🔔 Signals & Alerts (Planned/In Progress)
-*   **Signal Engine:** Customizable alert conditions based on whale activity or technical breakouts.
-*   **Multi-Channel Notifications:** Browser, Email, Telegram, and Discord alerts.
+- **Fixed white-screen crash on Vercel/Lovable** — `src/integrations/supabase/client.ts` used to call `createClient()` unguarded at module import time; a missing/misnamed `VITE_SUPABASE_*` env var crashed the whole app before React could mount, and no `ErrorBoundary` could catch it (import-time errors aren't render errors). It now falls back to inert placeholder credentials and accepts either `VITE_SUPABASE_PUBLISHABLE_KEY` or `VITE_SUPABASE_ANON_KEY`, so a missing key just disables Supabase-backed features instead of blanking the whole app.
+- **Debug/startup diagnostics** (`src/lib/startupDiagnostics.ts`, `src/lib/debugOverlay.ts`) — installed before any other import in `main.tsx` specifically to surface bootstrap failures instead of a silent blank page.
+- **Chunk-recovery** (`src/lib/chunkRecovery.ts`) — auto-reloads the app if a lazy-loaded chunk fails to fetch (stale deploy after a new build goes live).
+- **`safeInvoke` wrapper** for all Supabase Edge Function calls — pre-flight config check + try/catch so a bad/localhost Supabase URL in production degrades gracefully instead of throwing.
+- **Hyperliquid data pipeline moved server-side** — all Hypurrscan calls now go through a Supabase Edge Function (`hyperliquid-cache`) with a Postgres-backed cache + rate counter, instead of calling `api.hypurrscan.io` directly from the browser (see `HYPERLIQUID_DEPLOY.md`).
+- **SEO overhaul** — full Open Graph / Twitter Card / JSON-LD structured data, canonical URL, PWA manifest, and a strict `Content-Security-Policy` meta tag whitelisting every external host the app talks to (Binance, Bybit, Supabase, CoinGecko, DexScreener, Birdeye, Etherscan, Helius, Hyperliquid, Backpack, and CORS proxies).
+- **21+ confirmed bugs fixed** across multiple systematic audit passes (real-data pipeline correctness, Hyperliquid perps integration, WebSocket reconnect logic).
 
 ---
 
-## 🌐 Live Demo
+## 📊 Core Features
 
-The application is deployed and can be accessed via two endpoints:
+- **Live market ticker** — real-time prices/volumes across tracked assets.
+- **Whale transaction scanner** (`WRScanner`, `useWhaleStream`, `useWhaleWebSocket`) — streams large trades from Binance and Bybit WebSockets, with an HTTP-seed fallback and exponential backoff + jitter reconnect if the socket drops.
+- **Advanced filters** (`WRAdvancedFilters`) — filter the whale feed by exchange, size, side, symbol, etc.
+- **Stats bar, tracker & portfolio** (`WRStatsBar`, `WRTracker`) — running session stats and a watchlist/portfolio with local persistence.
+- **Alerts** (`WRAlertBell`) — configurable alert conditions with in-app notification bell.
+- **Signal evaluation** (`WRSignalEval`, `src/lib/signalStore.ts`) — stores emitted signals and fills in their realized outcome price later for backtesting signal quality.
+- **Onboarding & keyboard shortcuts** (`WROnboarding`, `WRKeyboardHelp`) — first-run walkthrough and a shortcuts cheat-sheet.
+- **Mobile filter sheet & responsive layout** (`WRMobileFilterSheet`, `use-mobile`) — full mobile-first UI, not just a scaled-down desktop view.
+- **CoinGecko status indicator** (`WRCoinGeckoStatus`) — shows live/degraded/rate-limited state of the price-data source.
+- **Insider-risk scanner** (`WRInsiderRiskScanner`, `WRInsiderRiskSettings`, `WRInsiderProgress`) — screens tokens for insider-trading-style risk signals with configurable thresholds.
+- **Settings panel** (`WRSettingsPanel`) — runtime configuration, including optional per-browser Supabase URL/key override (no rebuild needed to point at your own project).
 
-*   **Primary Domain (Lovable):** [https://crypto-whale-watch-nexus.lovable.app](https://crypto-whale-watch-nexus.lovable.app)
-*   **Alternative (Vercel):** [https://crypto-whale-watch-nexus.vercel.app](https://crypto-whale-watch-nexus.vercel.app)
+## 🐋 Nexus Suite (`/nexus/*`)
 
-> Note: The application requires JavaScript enabled to deliver live data via WebSocket connections.
+- **Whale Watch** — accumulation/distribution visualization.
+- **Arbitrage** (`useNexusMarkets`, `src/lib/nexus/arbitrage.ts`) — cross-exchange arbitrage opportunity scanner over live aggregated market data.
+- **Crystal Ball** (`NexusCrystalBallV5`, `WRCrystalBallPro`) — predictive trend/probability modeling.
+- **Grid Studio** — grid-trading strategy builder.
+- **Volume Maker** — synthetic volume/market-making strategy tooling.
+- **Portfolio** — P&L and risk tracking.
+- **Nexus Bot** (`useNexusBot`, `src/lib/nexus/bot.ts`) — connects to a configurable automated trading bot backend and reports connection state in the UI.
+
+## 🧠 Trading Hub (`/trading-hub/*`)
+
+Dashboard, Screener, Technical Analysis, Patterns, Sentiment, Backtest, and Timeframes (1m–1W) pages under a shared layout (`TradingHubLayout`), with a technical-context badge component shared across views.
+
+## ⚡ Hyperliquid Module
+
+- **Explorer** (`HLExplorer`, `HLBlockTable`) — blocks/txs/wallets browsing.
+- **Manipulation Scanner** (`useHLManipulationScanner`, `HLManipulationScanner`) — flags spoofing/layering-style patterns on Hyperliquid perps.
+- **Opportunity Panel** (`useHLOpportunities`, `HLOpportunityPanel`) — 8 detection strategies: funding-rate arbitrage, basis trade, long/short squeeze, whale impact, and more, exposed both as a dedicated panel and indexed by symbol so the main scanner can flag matching rows.
+- **Wallet Tracker** (`HLWalletTracker`) — watch specific on-chain wallets.
+- **Config banner** (`HLConfigBanner`) — warns in-app if Hyperliquid/Supabase config is incomplete instead of failing silently.
+- Server-cached via Supabase Edge Function with a 500ms TTL Postgres cache + rate counter (see `HYPERLIQUID_DEPLOY.md`).
+
+## 🏛️ AI Council
+
+`WRCouncilPanel` + `src/lib/council/` — a multi-agent "council" that debates a symbol and produces a final verdict + conviction score. Decisions are persisted to Supabase (`council_decisions` table) with a running memory of past calls, and performance is back-filled against live price at 1h/4h/24h/7d checkpoints to score how each past verdict actually played out.
+
+## 📡 Order Flow Scanner (`/orderflow`)
+
+`useOrderflowEngine` streams Binance spot orderbook depth (`@depth20@100ms`), aggregated trades, and futures liquidations (`@forceOrder`) directly over WebSocket for live bid/ask imbalance and large-block-trade visualization.
+
+## 🛡️ Reliability & Resilience Engineering
+
+This app has been through multiple hardening passes — worth calling out because it's most of what separates v9 from a typical dashboard demo:
+
+- **Error boundaries** wrapped around every route individually, so one broken page doesn't blank the whole app.
+- **Startup diagnostics + debug overlay** installed before any other code runs, to catch and surface bootstrap-time failures.
+- **Chunk recovery** — reloads automatically on a stale/failed lazy-chunk fetch after a redeploy.
+- **`safeInvoke`** — every Supabase Edge Function call is pre-checked and try/caught so misconfiguration degrades gracefully.
+- **`db.ts` offline fallback** — all persistence (portfolio, tracked tokens, alerts) falls back to `localStorage` with retry/backoff + toast notifications if the backend API is unreachable, so the app stays usable offline.
+- **Rate-limit handling** (`src/lib/rateLimit.ts`) — tracks and surfaces active cooldowns per data source instead of silently failing requests.
+- **Network resilience helpers** (`src/lib/networkResilience.ts`, `src/lib/cachedFetch.ts`) — shared retry/backoff/caching layer used across data hooks.
+- **Perf budget monitor** (`src/lib/perfBudget.ts`) — tracks runtime performance budgets.
+- **Strict CSP** in `index.html` whitelisting only the exact external hosts the app needs.
+
+## 📲 PWA & Performance
+
+- Installable PWA via `manifest.json` + service worker (`registerServiceWorker`), with offline no-JS fallback messaging.
+- Manual Vite chunk-splitting (vendor / charts / query / full Radix UI bundle) for faster first paint.
+- `esnext` build target, dev-only sourcemaps.
+
+## 🖥️ Backend (optional)
+
+A companion Express + TypeScript API in `server/` (deployed separately, e.g. Railway — see `Procfile`):
+
+| Route | Purpose |
+|---|---|
+| `GET /api/health`, `/api/health/db` | Liveness + DB connectivity checks (public) |
+| `/api/scan` | Scan endpoint (public) |
+| `/api/scans` | Scan history |
+| `/api/portfolio` | Portfolio persistence |
+| `/api/tracked` | Tracked-token watchlist persistence |
+| `/api/alerts` | Alert persistence |
+| `/api/whale-events` | Whale event log |
+| `/api/signal-outcomes` | Signal outcome backfill (`npm run fill-prices`) |
+
+All non-public routes require a shared bearer token (`API_AUTH_TOKEN` on the server, `VITE_API_TOKEN` on the client — they must match). Postgres schema lives in `server/schema.sql` (`npm run db:migrate`).
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Category | Technology | Purpose |
-|----------|------------|---------|
-| **Frontend** | React 18 + TypeScript | Core UI and type safety |
-| **Build Tool** | Vite | Fast development and bundling |
-| **Styling** | Tailwind CSS, shadcn/ui | Utility-first design system |
-| **State Management** | React Context + Hooks | Component-level reactive state |
-| **Real-Time Data** | WebSocket Client | Live market feeds and order flow |
-| **Data Sources** | External Crypto APIs, Hyperliquid, Supabase | Multi-source data aggregation |
-| **Testing** | Vitest | Unit and integration testing |
-| **Deployment** | Lovable, Vercel | Cloud hosting with continuous deployment |
-| **Service Worker** | Workbox | Offline caching and performance |
+| Category | Technology |
+|---|---|
+| Frontend | React 18 + TypeScript, Vite 5 (SWC) |
+| Styling | Tailwind CSS + shadcn/ui (Radix primitives) |
+| Data/State | TanStack React Query, custom hooks |
+| Realtime | Native WebSocket (Binance, Bybit), Supabase Edge Functions |
+| Backend (optional) | Express + TypeScript, PostgreSQL |
+| Backend-as-a-Service | Supabase (Postgres + Edge Functions + Auth client) |
+| Charts | Recharts |
+| Forms/Validation | react-hook-form + Zod |
+| Testing | Vitest, Testing Library, Playwright |
+| PWA | Workbox-style manual service worker |
+| Deployment | Vercel, Lovable, Railway/Fly.io (backend) |
 
 ---
 
 ## 📁 Project Structure
 
 ```
-
-crypto-whale-watch-nexus/
-├── public/
-│   ├── favicon.ico
-│   ├── manifest.json
-│   ├── og-image.png
-│   ├── robots.txt
-│   ├── sitemap.xml
-│   └── sw.js
+crypto-whale-watch-nexus-main/
+├── server/                     # Optional Express + Postgres API (Procfile deploy)
+├── public/                     # manifest.json, favicons, robots.txt, sitemap.xml
 ├── src/
-│   ├── assets/             # Static images and fonts
-│   ├── components/         # Reusable UI components (shadcn)
-│   ├── hooks/              # Custom React hooks
-│   │   ├── useMarketData.ts        # Core market data fetching
-│   │   ├── useHyperliquid.ts       # Hyperliquid exchange API
-│   │   ├── useOrderflowEngine.ts   # Real-time order flow analysis
-│   │   ├── useHLManipulationScanner.ts  # Market manipulation detection
-│   │   ├── useHLOpportunities.ts   # Hyperliquid opportunity finder
-│   │   ├── useNexusBot.ts          # Automated trading bot logic
-│   │   ├── useNexusMarkets.ts      # Cross-exchange market data
-│   │   ├── use-mobile.tsx          # Responsive breakpoint hook
-│   │   └── use-toast.ts           # Toast notification handler
-│   ├── integrations/
-│   │   └── supabase/        # Backend-as-a-service configuration
-│   ├── lib/                 # Utility functions and helpers
+│   ├── assets/
+│   ├── components/
+│   │   ├── whale-radar/        # WR* — core dashboard UI
+│   │   ├── nexus/               # Nexus suite UI
+│   │   ├── hyperliquid/         # HL* — Hyperliquid module UI
+│   │   ├── trading/             # Trading Hub shared UI
+│   │   └── ui/                  # shadcn/ui primitives
+│   ├── hooks/                   # useMarketData, useWhaleStream/WebSocket,
+│   │                             # useHyperliquid, useHLManipulationScanner,
+│   │                             # useHLOpportunities, useOrderflowEngine,
+│   │                             # useNexusBot, useNexusMarkets, ...
+│   ├── integrations/supabase/   # Generated Supabase client + DB types
+│   ├── lib/
+│   │   ├── council/              # AI council engine + persistence
+│   │   ├── nexus/                # Arbitrage engine, bot connector, exchanges
+│   │   ├── db.ts                 # Frontend persistence client (offline fallback)
+│   │   ├── safeInvoke.ts         # Guarded Supabase Edge Function calls
+│   │   ├── supabase.ts           # Lazy, override-friendly Supabase client
+│   │   ├── startupDiagnostics.ts, debugOverlay.ts, chunkRecovery.ts
+│   │   ├── rateLimit.ts, networkResilience.ts, cachedFetch.ts, perfBudget.ts
+│   │   └── detection.ts, analyzeToken.ts, insiderRisk*.ts, ...
 │   ├── pages/
-│   │   ├── Index.tsx               # Main entry dashboard
-│   │   ├── Orderflow.tsx           # Order flow scanner page
-│   │   ├── NotFound.tsx            # 404 error page
-│   │   ├── nexus/                  # Nexus intelligence modules
-│   │   │   ├── NexusWhaleWatch.tsx
-│   │   │   ├── NexusArbitrage.tsx
-│   │   │   ├── NexusCrystalBall.tsx
-│   │   │   ├── NexusGridStudio.tsx
-│   │   │   ├── NexusPortfolio.tsx
-│   │   │   └── NexusVolumeMaker.tsx
-│   │   └── trading-hub/            # Advanced trading tools
-│   │       ├── Dashboard.tsx
-│   │       ├── Screener.tsx
-│   │       ├── Technical.tsx
-│   │       ├── Patterns.tsx
-│   │       ├── Sentiment.tsx
-│   │       ├── Backtest.tsx
-│   │       ├── Timeframes.tsx
-│   │       └── Layout.tsx
-│   ├── services/
-│   │   ├── api.ts           # Generic API client
-│   │   └── signals.ts       # Signal generation service
-│   ├── test/                # Unit and integration tests
-│   ├── types/               # TypeScript type definitions
-│   ├── App.css
-│   ├── App.tsx
-│   ├── index.css
-│   └── main.tsx
-├── package.json
+│   │   ├── Index.tsx             # Main dashboard ("/")
+│   │   ├── Orderflow.tsx
+│   │   ├── nexus/                # 6 Nexus pages
+│   │   └── trading-hub/          # 7 Trading Hub pages
+│   ├── services/                 # api.ts, signals.ts
+│   ├── test/
+│   ├── App.tsx, main.tsx
+├── HYPERLIQUID_DEPLOY.md         # Edge Function + DB migration deploy guide
+├── Procfile                      # Backend deploy (Railway-style)
 ├── vite.config.ts
-├── tailwind.config.js
-└── README.md
-
+└── package.json
 ```
 
 ---
 
 ## 🚀 Getting Started
 
-### Prerequisites
-*   Node.js (v16.x or later)
-*   npm (v7.x or later) or yarn
+```bash
+git clone <your-repo-url>
+cd crypto-whale-watch-nexus-main
+npm install
+npm run dev            # frontend only, http://localhost:8080
+npm run dev:all        # frontend + local Express API together
+```
 
-### Installation
+Build for production:
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/gepappas98/crypto-whale-watch-nexus.git
-    cd crypto-whale-watch-nexus
-    ```
+```bash
+npm run build
+```
 
-2.  **Install dependencies:**
-    ```bash
-    npm install
-    ```
+Run tests:
 
-3.  **Run the development server:**
-    ```bash
-    npm run dev
-    ```
-    The app will be available at `http://localhost:5173`.
-
-4.  **Build for production:**
-    ```bash
-    npm run build
-    ```
+```bash
+npm run test           # or: npm run test:watch
+```
 
 ---
 
-## 📘 Usage Guide
+## 🔐 Environment Variables
 
-Once the application is running, navigate through the main sections:
+| Variable | Required? | Purpose |
+|---|---|---|
+| `VITE_SUPABASE_URL` | Optional | Supabase project URL. Missing → Supabase features disabled, rest of app still works. |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` or `VITE_SUPABASE_ANON_KEY` | Optional | Supabase anon/publishable key (either name works). |
+| `API_AUTH_TOKEN` | Only if self-hosting `server/` | Bearer token required by protected `/api/*` routes. |
+| `VITE_API_TOKEN` | Only if self-hosting `server/` | Must exactly match `API_AUTH_TOKEN`. |
 
-*   **Main Dashboard (`/`):** View live market tickers and recent whale transactions. Use the sidebar to switch between different views.
-*   **Nexus Modules (`/nexus/*`):** Explore dedicated tools like Whale Watch for large-transaction visualization or Arbitrage for cross-exchange opportunities.
-*   **Trading Hub (`/trading-hub/*`):** Access the complete suite of trading tools, including the Market Screener, Technical Analysis charts, and the Strategy Backtester.
-*   **Order Flow (`/orderflow`):** Monitor real-time bid/ask flows and manipulation alerts. This page is highly interactive and uses WebSocket streams.
+In **Lovable**, set these under Project Settings → Environment Variables (not `.env.local`). In **Vercel**, set them under Project Settings → Environment Variables and trigger a redeploy. Supabase URL/key can also be overridden at runtime per-browser from the in-app Settings panel — no rebuild required.
 
 ---
 
-## 🔗 API Integration
+## 🚢 Deployment Notes
 
-The application is designed to be API-driven. It aggregates data from multiple external sources. To configure your own API keys or endpoints, modify the `src/services/api.ts` file. The current integration points include:
-
-*   Cryptocurrency price and volume APIs
-*   Hyperliquid exchange-specific endpoints
-*   Supabase for optional user authentication and data persistence
-*   Social media sentiment analysis APIs (planned)
+- Frontend: Vercel or Lovable, static Vite build.
+- Backend (`server/`): Railway/Fly.io via `Procfile` (`npm run build:server && node server/dist/index.js`).
+- Hyperliquid data: deploy the `hyperliquid-cache` Supabase Edge Function + run the DB migration — see `HYPERLIQUID_DEPLOY.md`.
+- If the deployed site ever shows a **blank page**: open DevTools Console first. As of this version, `src/integrations/supabase/client.ts` no longer crashes on missing env vars, so a blank screen now points to a genuine runtime error rather than a silent import-time crash — the console will show it.
 
 ---
 
 ## 🗺️ Roadmap
 
-The project is actively being developed. Future improvements include:
-
-*   **Short Term:**
-    *   Enhanced real-time WebSocket streams for all market data.
-    *   User-configurable whale alert thresholds.
-*   **Mid Term:**
-    *   Full-featured wallet tracking and labeling.
-    *   Smart money detection and wallet scoring.
-    *   Backend integration for persistent user preferences.
-*   **Long Term:**
-    *   AI-driven trade signal generation.
-    *   Automated trading strategy execution.
-    *   Community-driven indicator and strategy marketplace.
-
----
-
-## 🤝 Contributing
-
-Contributions are what make the open-source community an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-
-1.  Fork the Project
-2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4.  Push to the Branch (`git push origin feature/AmazingFeature`)
-5.  Open a Pull Request
+- Full-featured wallet tracking and smart-money wallet scoring.
+- Multi-channel alerts (Telegram, Discord, email) beyond the in-app bell.
+- Automated strategy execution from Grid Studio / Volume Maker.
+- Expand AI Council with additional agent personas and longer-horizon memory scoring.
 
 ---
 
 ## ⚠️ Disclaimer
 
-This project is for **educational and informational purposes only**. It does not provide financial, investment, or trading advice. Always do your own research before making any trading decisions. The developers are not responsible for any financial losses incurred from the use of this software.
-
----
-
-## 👤 Author
-
-**Gepappas98**
-
-*   GitHub: [https://github.com/gepappas98](https://github.com/gepappas98)
-*   Project Link: [https://github.com/gepappas98/crypto-whale-watch-nexus](https://github.com/gepappas98/crypto-whale-watch-nexus)
-```
-
+Educational and informational purposes only. Not financial or trading advice. Do your own research before making any trading decisions.
