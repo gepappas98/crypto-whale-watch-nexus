@@ -3,10 +3,11 @@
  *  Data source: localStorage (always) + backend DB (when available).
  *  Outcome prices fetched from CoinGecko at 1h / 4h / 24h marks.
  * ═══════════════════════════════════════════════════════════════════════════ */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { loadSignalEval } from '@/lib/db';
 import type { SignalEvalRow } from '@/lib/db';
 import { fillSignalPrices, getSignalStoreStats } from '@/lib/signalStore';
+import { computeRiskMetrics, computePortfolioMetrics, type Horizon, type RiskMetricsRow } from '@/lib/backtestMetrics';
 
 const SIGNAL_ORDER = [
   'AGGRESSIVE LONG',
@@ -62,6 +63,11 @@ export function WRSignalEval() {
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const [lastFilled, setLastFilled] = useState<number>(0);
   const [storeStats, setStoreStats] = useState({ total: 0, pendingFill: 0, oldestFiredAt: null as number | null });
+
+  // ── Risk metrics (freqtrade-style: profit factor, expectancy, max DD, Sharpe) ──
+  const [riskHorizon, setRiskHorizon] = useState<Horizon>('4h');
+  const riskRows = useMemo(() => computeRiskMetrics(riskHorizon), [riskHorizon, storeStats.total, lastFilled]);
+  const portfolioRow = useMemo(() => computePortfolioMetrics(riskHorizon), [riskHorizon, storeStats.total, lastFilled]);
 
   const refreshStats = useCallback(() => {
     setStoreStats(getSignalStoreStats());
@@ -211,6 +217,89 @@ export function WRSignalEval() {
         </div>
       )}
 
+      {/* ── Risk Metrics (freqtrade-style backtest report) ─────────────────── */}
+      {storeStats.total > 0 && (
+        <div className="border-t border-wr-border pt-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-[8px] text-wr-cyan tracking-widest">🎯 RISK METRICS — SEQUENTIAL, EQUAL-WEIGHTED</div>
+            <div className="flex gap-1">
+              {(['1h', '4h', '24h'] as Horizon[]).map(h => (
+                <button
+                  key={h}
+                  onClick={() => setRiskHorizon(h)}
+                  className={`text-[8px] px-1.5 py-0.5 border font-mono tracking-widest
+                    ${riskHorizon === h
+                      ? 'bg-wr-cyan/10 border-wr-cyan text-wr-cyan'
+                      : 'border-wr-border text-wr-muted hover:border-wr-cyan/40'}`}
+                >
+                  {h.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {riskRows.length === 0 ? (
+            <div className="text-[9px] text-wr-muted py-2">No filled outcomes at this horizon yet.</div>
+          ) : (
+            <>
+              {/* Portfolio-level summary — "if you took every signal" */}
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                <RiskStat label="TOT PROFIT" value={pct(portfolioRow.totalProfitPct)} color={pctColor(portfolioRow.totalProfitPct)} />
+                <RiskStat label="WIN RATE" value={portfolioRow.winRate != null ? `${portfolioRow.winRate}%` : '—'} color={winColor(portfolioRow.winRate)} />
+                <RiskStat
+                  label="PROFIT FACTOR"
+                  value={portfolioRow.profitFactor == null ? '—' : portfolioRow.profitFactor === Infinity ? '∞' : portfolioRow.profitFactor.toFixed(2)}
+                  color={portfolioRow.profitFactor != null && portfolioRow.profitFactor >= 1 ? 'text-wr-green' : 'text-wr-red'}
+                />
+                <RiskStat label="EXPECTANCY" value={pct(portfolioRow.expectancy)} color={pctColor(portfolioRow.expectancy)} />
+                <RiskStat label="MAX DD" value={`-${portfolioRow.maxDrawdownPct}%`} color="text-wr-amber" />
+                <RiskStat label="SHARPE" value={portfolioRow.sharpe == null ? '—' : portfolioRow.sharpe.toFixed(2)} color={portfolioRow.sharpe != null && portfolioRow.sharpe > 0 ? 'text-wr-green' : 'text-wr-red'} />
+              </div>
+
+              {/* Per-signal breakdown */}
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-[9px]">
+                  <thead>
+                    <tr className="border-b border-wr-border">
+                      <th className="text-left py-1 pr-2 text-[7px] text-wr-muted tracking-widest font-normal">SIGNAL</th>
+                      <th className="text-right py-1 px-1.5 text-[7px] text-wr-muted tracking-widest font-normal">N</th>
+                      <th className="text-right py-1 px-1.5 text-[7px] text-wr-muted tracking-widest font-normal">TOT %</th>
+                      <th className="text-right py-1 px-1.5 text-[7px] text-wr-muted tracking-widest font-normal">PF</th>
+                      <th className="text-right py-1 px-1.5 text-[7px] text-wr-muted tracking-widest font-normal">EXPECT</th>
+                      <th className="text-right py-1 px-1.5 text-[7px] text-wr-muted tracking-widest font-normal">MAX DD</th>
+                      <th className="text-right py-1 pl-1.5 text-[7px] text-wr-muted tracking-widest font-normal">SHARPE</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {riskRows.map(row => (
+                      <tr key={row.group} className="border-b border-wr-border/30">
+                        <td className={`py-1.5 pr-2 font-bold ${SIGNAL_COLOR[row.group] ?? 'text-wr-white'}`}>{row.group}</td>
+                        <td className="text-right px-1.5 text-wr-white">{row.trades}</td>
+                        <td className={`text-right px-1.5 font-bold ${pctColor(row.totalProfitPct)}`}>{pct(row.totalProfitPct)}</td>
+                        <td className={`text-right px-1.5 ${row.profitFactor != null && row.profitFactor >= 1 ? 'text-wr-green' : 'text-wr-red'}`}>
+                          {row.profitFactor == null ? '—' : row.profitFactor === Infinity ? '∞' : row.profitFactor.toFixed(2)}
+                        </td>
+                        <td className={`text-right px-1.5 ${pctColor(row.expectancy)}`}>{pct(row.expectancy)}</td>
+                        <td className="text-right px-1.5 text-wr-amber">-{row.maxDrawdownPct}%</td>
+                        <td className={`text-right pl-1.5 ${row.sharpe != null && row.sharpe > 0 ? 'text-wr-green' : 'text-wr-red'}`}>
+                          {row.sharpe == null ? '—' : row.sharpe.toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="text-[7px] text-wr-muted leading-relaxed">
+                PF = profit factor (sum of wins ÷ |sum of losses|; &gt;1 means net profitable).
+                EXPECT = expected % per trade. MAX DD = worst cumulative peak-to-trough decline.
+                SHARPE = mean ÷ stddev of per-trade returns (per-trade, not annualized).
+                All computed sequentially, equal-weighted, from locally recorded signals — not a substitute for real position sizing/risk management.
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* ── Legend ──────────────────────────────────────────────────────────── */}
       <div className="border-t border-wr-border pt-3 space-y-1 text-[8px] text-wr-muted leading-relaxed">
         <div><span className="text-wr-white">Fires</span> = total fires · <span className="text-wr-white">(n)</span> = with 4h outcome filled</div>
@@ -243,6 +332,15 @@ export function WRSignalEval() {
         );
       })()}
 
+    </div>
+  );
+}
+
+function RiskStat({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="bg-wr-bg3 border border-wr-border rounded px-2 py-1.5 text-center">
+      <div className={`font-bold text-[11px] ${color}`}>{value}</div>
+      <div className="text-[6px] text-wr-muted tracking-widest mt-0.5">{label}</div>
     </div>
   );
 }
