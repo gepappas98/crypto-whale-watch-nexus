@@ -1,8 +1,12 @@
 /* ══ WHALE RADAR v9 — SETTINGS PANEL ═════════════════════════════════════════
  *  v9.1: Added Hyperliquid Scanner settings group.
  * ═══════════════════════════════════════════════════════════════════════════ */
+import { useState } from 'react';
 import { fmtN } from '@/lib/whaleRadarState';
 import { isHLConfigured } from '@/lib/hyperliquid';
+import {
+  getNotifyConfig, setNotifyConfig, sendTestNotification, type NotifyLevel,
+} from '@/lib/notifyChannels';
 
 interface WRSettingsPanelProps {
   apiKey: string; onApiKeyChange: (v: string) => void;
@@ -40,6 +44,13 @@ export function WRSettingsPanel({
   onCouncilLlmChange,
 }: WRSettingsPanelProps) {
   const hlOk = isHLConfigured();
+
+  // ── Alert notification channels (self-contained — see lib/notifyChannels.ts) ──
+  const [notifyCfg, setNotifyCfgState] = useState(() => getNotifyConfig());
+  const [testSent, setTestSent] = useState(false);
+  const patchNotify = (patch: Parameters<typeof setNotifyConfig>[0]) => {
+    setNotifyCfgState(setNotifyConfig(patch));
+  };
 
   return (
     <div className="flex flex-wrap gap-4 p-4 bg-wr-bg3 border-b-2 border-wr-amber/60 items-start animate-slide-in">
@@ -210,6 +221,56 @@ export function WRSettingsPanel({
           onChange={e => onCouncilLlmChange?.({ model: e.target.value })}
         />
         <Note cls="text-wr-muted">5-agent debate · memory + reflection per token</Note>
+      </SettingsGroup>
+
+      {/* ── Alert Notification Channels (Discord/Telegram) ──────────────────── */}
+      <SettingsGroup label="📡 ALERT NOTIFICATIONS">
+        <input
+          className="wr-input text-[8px]"
+          type="password"
+          placeholder="Discord webhook URL"
+          value={notifyCfg.discordWebhookUrl}
+          onChange={e => patchNotify({ discordWebhookUrl: e.target.value })}
+        />
+        <input
+          className="wr-input text-[8px] mt-1"
+          type="password"
+          placeholder="Telegram bot token"
+          value={notifyCfg.telegramBotToken}
+          onChange={e => patchNotify({ telegramBotToken: e.target.value })}
+        />
+        <input
+          className="wr-input text-[8px] mt-1"
+          type="text"
+          placeholder="Telegram chat ID"
+          value={notifyCfg.telegramChatId}
+          onChange={e => patchNotify({ telegramChatId: e.target.value })}
+        />
+        <div className="flex gap-1.5 items-center mt-1">
+          <span className="text-[8px] text-wr-muted">Min level</span>
+          <select
+            className="wr-input text-[8px] w-auto"
+            value={notifyCfg.minLevel}
+            onChange={e => patchNotify({ minLevel: e.target.value as NotifyLevel })}
+          >
+            <option value="info">INFO+</option>
+            <option value="medium">MEDIUM+</option>
+            <option value="high">HIGH+</option>
+            <option value="critical">CRITICAL only</option>
+          </select>
+        </div>
+        <button
+          className="wr-btn text-[8px] mt-1"
+          onClick={() => { sendTestNotification(); setTestSent(true); setTimeout(() => setTestSent(false), 2000); }}
+        >
+          {testSent ? '✓ SENT' : '▶ SEND TEST ALERT'}
+        </button>
+        <Note cls={notifyCfg.discordWebhookUrl || (notifyCfg.telegramBotToken && notifyCfg.telegramChatId) ? 'text-wr-green' : 'text-wr-muted'}>
+          {notifyCfg.discordWebhookUrl || (notifyCfg.telegramBotToken && notifyCfg.telegramChatId)
+            ? '✓ Alerts that clear the cooldown gate will also be pushed here'
+            : 'Configure at least one channel to enable push alerts'}
+        </Note>
+        <Note cls="text-wr-amber">Stored in localStorage only — same as your other API keys.</Note>
       </SettingsGroup>
     </div>
   );
