@@ -35,6 +35,7 @@ import { fetchDexData } from '@/lib/dexscreener';
 import { recordSignalOutcome, saveScan } from '@/lib/db';
 import { applyPairFilters } from '@/lib/pairFilters';
 import { alertCooldown } from '@/lib/alertCooldown';
+import { dispatchNotification } from '@/lib/notifyChannels';
 import {
   CoinData, CFG, ScanSnapshot, isSolToken,
 } from '@/lib/whaleRadarState';
@@ -99,6 +100,10 @@ export function useMarketData({
       return;
     }
     addAlertRef.current(level, tag, text, sizing);
+    // Fan out to Discord/Telegram if configured — see lib/notifyChannels.ts.
+    // Only alerts that survived the cooldown gate reach here, so external
+    // channels get the same noise reduction as the in-app feed.
+    dispatchNotification(level, tag, text);
   }, []);
 
   const apiKeyRef = useRef(apiKey);
