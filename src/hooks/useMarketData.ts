@@ -13,6 +13,17 @@
  *
  * Cancellation: every scan creates a fresh AbortController; the previous one
  * is aborted. Unmount aborts in-flight requests.
+ *
+ * NOISE CONTROL (new):
+ *   Before a coin is eligible to fire an alert or a recorded signal, it must
+ *   pass applyPairFilters() (dead pairs / bad ticks / illiquid DEX pools /
+ *   too-new tokens — see lib/pairFilters.ts). Coins that fail still show up
+ *   in the main table with their real score; they just don't spam alerts.
+ *
+ *   Every alert that *does* pass filtering still has to clear
+ *   alertCooldown.checkAndRecord() (per-symbol + global circuit breaker —
+ *   see lib/alertCooldown.ts) before it reaches addAlert(). This stops a
+ *   single flapping symbol, or a bad API snapshot, from flooding the feed.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -22,6 +33,8 @@ import { detect } from '@/lib/detection';
 import { fetchBirdeyeToken } from '@/lib/birdeye';
 import { fetchDexData } from '@/lib/dexscreener';
 import { recordSignalOutcome, saveScan } from '@/lib/db';
+import { applyPairFilters } from '@/lib/pairFilters';
+import { alertCooldown } from '@/lib/alertCooldown';
 import {
   CoinData, CFG, ScanSnapshot, isSolToken,
 } from '@/lib/whaleRadarState';
@@ -54,6 +67,8 @@ export interface UseMarketDataResult {
   scanHistory: ScanSnapshot[];
   setScanHistory: React.Dispatch<React.SetStateAction<ScanSnapshot[]>>;
   triggerScan: () => Promise<void>;
+  /** Symbols/global currently muted by the alert cooldown — for a status badge. */
+  getAlertLocks: () => ReturnType<typeof alertCooldown.getActiveLocks>;
 }
 
 export function useMarketData({
@@ -75,6 +90,16 @@ export function useMarketData({
   // Stable ref for addAlert — caller may pass a fresh closure each render.
   const addAlertRef = useRef<AddAlert>(addAlert);
   useEffect(() => { addAlertRef.current = addAlert; }, [addAlert]);
+
+  // Gate every alert through the cooldown/circuit-breaker before it reaches the UI sink.
+  const guardedAddAlert = useCallback<AddAlert>((level, tag, text, sizing) => {
+    const { allowed, reason } = alertCooldown.checkAndRecord(tag, level);
+    if (!allowed) {
+      console.debug(`[useMarketData] alert suppressed for ${tag}: ${reason}`);
+      return;
+    }
+    addAlertRef.current(level, tag, text, sizing);
+  }, []);
 
   const apiKeyRef = useRef(apiKey);
   useEffect(() => { apiKeyRef.current = apiKey; }, [apiKey]);
@@ -178,7 +203,7 @@ export function useMarketData({
     setPrevVolumes(newVols);
     setCoins(mapped);
 
-    // Snapshot history
+    // Snapshot history — unfiltered, the table/history should show everything scanned.
     const critCount = mapped.filter(c => c.threat === 'CRITICAL').length;
     const highCount = mapped.filter(c => c.threat === 'HIGH').length;
     setScanHistory(prev => {
@@ -193,8 +218,16 @@ export function useMarketData({
       return [snap, ...prev].slice(0, CFG.HISTORY_MAX);
     });
 
-    // Record CEO signal outcomes (only valid scores)
-    mapped
+    // ── Noise gate: only coins that pass pairFilters get to record signals / fire alerts.
+    // (freqtrade pairlist-filter pattern — see lib/pairFilters.ts for what's rejected and why)
+    const { passed: alertable, rejected } = applyPairFilters(mapped);
+    if (rejected.length) {
+      console.debug(`[useMarketData] ${rejected.length} coin(s) filtered from alerting this scan`,
+        rejected.slice(0, 5).map(r => `${r.coin.symbol}: ${r.reason}`));
+    }
+
+    // Record CEO signal outcomes (only valid scores, only alert-eligible coins)
+    alertable
       .filter(c => c.score >= 35)
       .slice(0, 20)
       .forEach(c => {
@@ -206,18 +239,18 @@ export function useMarketData({
         });
       });
 
-    // Generate alerts for critical/high
-    mapped.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
-      addAlertRef.current('critical', c.symbol,
+    // Generate alerts for critical/high — gated by cooldown (see guardedAddAlert above)
+    alertable.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
+      guardedAddAlert('critical', c.symbol,
         `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
     });
-    mapped.filter(c => c.threat === 'HIGH' && c.category).slice(0, 3).forEach(c => {
-      addAlertRef.current('high', c.symbol,
+    alertable.filter(c => c.threat === 'HIGH' && c.category).slice(0, 3).forEach(c => {
+      guardedAddAlert('high', c.symbol,
         `[${c.category}] SCORE=${c.score}/100 — ${c.reasons.join(' · ')}`);
     });
 
     return mapped;
-  }, [prevVolumes]);
+  }, [prevVolumes, guardedAddAlert]);
 
   // Stable refs so triggerScan never gets stale processData/enrichCoins
   const processDataRef = useRef(processData);
@@ -262,12 +295,12 @@ export function useMarketData({
       console.error('[useMarketData.triggerScan] failed', { error: (e as Error)?.message });
       setScanBadge('ERROR');
       setDataSource('fallback');
-      addAlertRef.current('medium', 'API',
+      guardedAddAlert('medium', 'API',
         'Scan failed: ' + (e instanceof Error ? e.message : 'Unknown'));
     } finally {
       setScanning(false);
     }
-  }, [scanning]);
+  }, [scanning, guardedAddAlert]);
 
   return useMemo(() => ({
     coins, setCoins,
@@ -275,5 +308,6 @@ export function useMarketData({
     prevVolumes, setPrevVolumes,
     scanHistory, setScanHistory,
     triggerScan,
+    getAlertLocks: () => alertCooldown.getActiveLocks(),
   }), [coins, scanning, scanBadge, dataSource, apiCallCount, lastScanTs, prevVolumes, scanHistory, triggerScan]);
 }
