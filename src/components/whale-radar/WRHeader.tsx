@@ -75,6 +75,7 @@ export function WRHeader({
           className="text-sm opacity-60 hover:opacity-100 transition-opacity p-1 bg-transparent border-none cursor-pointer"
           onClick={onToggleSound}
           title="Sound [M]"
+          aria-label={soundOn ? 'Mute sound' : 'Unmute sound'}
         >
           {soundOn ? '🔊' : '🔇'}
         </button>
@@ -82,6 +83,7 @@ export function WRHeader({
           className="text-sm opacity-60 hover:opacity-100 transition-opacity p-1 bg-transparent border-none cursor-pointer"
           onClick={onToggleKbd}
           title="Shortcuts [?]"
+          aria-label="Keyboard shortcuts"
         >
           ⌨
         </button>
@@ -89,6 +91,7 @@ export function WRHeader({
           className="text-sm opacity-60 hover:opacity-100 transition-opacity p-1 bg-transparent border-none cursor-pointer"
           onClick={onToggleSettings}
           title="Settings ⚙"
+          aria-label="Settings"
         >
           ⚙
         </button>

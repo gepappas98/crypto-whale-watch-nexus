@@ -144,7 +144,7 @@ export default function Orderflow() {
         {/* Orderbook ladder */}
         <section className="lg:col-span-5 border border-[hsl(var(--wr-border))] bg-[hsl(var(--wr-bg2))] rounded">
           <div className="px-3 py-2 border-b border-[hsl(var(--wr-border))] flex justify-between text-[11px] text-[hsl(var(--wr-green-dim))]">
-            <span>ORDERBOOK · top 20</span>
+            <h2 className="text-[11px] text-[hsl(var(--wr-green-dim))] m-0">ORDERBOOK · top 20</h2>
             <span>{symbol}</span>
           </div>
           <div className="grid grid-cols-2">
@@ -193,6 +193,7 @@ export default function Orderflow() {
 
         {/* Gauges + CVD + Liquidations */}
         <section className="lg:col-span-4 flex flex-col gap-4">
+          <h2 className="sr-only">Gauges & Order Flow</h2>
           {/* Imbalance gauge */}
           <div className="border border-[hsl(var(--wr-border))] bg-[hsl(var(--wr-bg2))] rounded p-3">
             <div className="flex justify-between text-[11px] text-[hsl(var(--wr-green-dim))] mb-2">
@@ -335,7 +336,7 @@ export default function Orderflow() {
         {/* Signal feed */}
         <section className="lg:col-span-3 border border-[hsl(var(--wr-border))] bg-[hsl(var(--wr-bg2))] rounded flex flex-col">
           <div className="px-3 py-2 border-b border-[hsl(var(--wr-border))] flex justify-between text-[11px] text-[hsl(var(--wr-green-dim))]">
-            <span>SIGNALS</span>
+            <h2 className="text-[11px] text-[hsl(var(--wr-green-dim))] m-0">SIGNALS</h2>
             <span>{s.signals.length}</span>
           </div>
           <div className="overflow-y-auto max-h-[600px] divide-y divide-[hsl(var(--wr-border))]">
