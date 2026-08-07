@@ -47,6 +47,16 @@ function loadRecords(): SignalRecord[] {
   } catch { return []; }
 }
 
+/**
+ * Public read-only access to the raw, per-fire records (ordered newest-first,
+ * matching internal storage order). Used by lib/backtestMetrics.ts to compute
+ * sequential/risk stats (drawdown, Sharpe) that a pre-aggregated eval table
+ * can't reconstruct.
+ */
+export function getAllSignalRecords(): SignalRecord[] {
+  return loadRecords();
+}
+
 function persistRecords(records: SignalRecord[]): void {
   const trimmed = records.slice(0, MAX_RECORDS);
   const payload = JSON.stringify(trimmed);
