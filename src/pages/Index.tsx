@@ -407,7 +407,6 @@ export default function WhaleRadarApp() {
     <div className="min-h-screen flex flex-col">
       {/* SEO: crawlable static content (visually hidden, indexable by search engines) */}
       <section className="sr-only" aria-hidden="false">
-        <h1>Whale Radar — Real-Time Crypto Whale Tracker &amp; Market Manipulation Detector</h1>
         <p>
           Whale Radar is a free, real-time cryptocurrency whale tracker and AI-powered
           market manipulation detector. We monitor large orders across Binance, Bybit,
