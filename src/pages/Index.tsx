@@ -208,7 +208,15 @@ export default function WhaleRadarApp() {
     prevVolumes, setPrevVolumes,
     scanHistory, setScanHistory,
     triggerScan,
+    getAlertLocks,
   } = useMarketData({ apiKey, getBirdKey, addAlert });
+
+  // ══ ALERT COOLDOWN STATUS (polled — module-level state, not reactive) ═════
+  const [alertLocks, setAlertLocks] = useState<ReturnType<typeof getAlertLocks>>([]);
+  useEffect(() => {
+    const t = setInterval(() => setAlertLocks(getAlertLocks()), 5000);
+    return () => clearInterval(t);
+  }, [getAlertLocks]);
 
   // Save persisted state on changes (depends on hook-owned scanHistory/prevVolumes).
   useEffect(() => {
@@ -407,6 +415,7 @@ export default function WhaleRadarApp() {
     <div className="min-h-screen flex flex-col">
       {/* SEO: crawlable static content (visually hidden, indexable by search engines) */}
       <section className="sr-only" aria-hidden="false">
+        <h1>Whale Radar — Real-Time Crypto Whale Tracker &amp; Market Manipulation Detector</h1>
         <p>
           Whale Radar is a free, real-time cryptocurrency whale tracker and AI-powered
           market manipulation detector. We monitor large orders across Binance, Bybit,
@@ -575,6 +584,7 @@ export default function WhaleRadarApp() {
           onToggleBybit={handleToggleBybit}
           whaleFeedEx={whaleFeedEx}
           onWhaleFeedExChange={setWhaleFeedEx}
+          alertLocks={alertLocks}
         />
       </div>
 
