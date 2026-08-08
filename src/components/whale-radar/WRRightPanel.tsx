@@ -261,6 +261,16 @@ export function WRRightPanel({
       <div className="flex-1 flex flex-col min-h-0">
         <div className="wr-panel-header">
           <span className="wr-panel-title">🚨 MANIPULATION ALERTS</span>
+          {alertLocks.length > 0 && (
+            <span
+              className="text-[7px] px-1 py-0.5 rounded border border-wr-amber/50 text-wr-amber ml-auto mr-1"
+              title={alertLocks
+                .map(l => (l.scope === 'global' ? `GLOBAL: ${l.reason}` : `${l.symbol}: ${l.reason}`))
+                .join('\n')}
+            >
+              ⏳ {alertLocks.some(l => l.scope === 'global') ? 'COOLDOWN' : `${alertLocks.length} MUTED`}
+            </span>
+          )}
           <button className="wr-btn red text-[7px] px-1.5 py-0.5" onClick={onClearAlerts}>CLR</button>
         </div>
 
