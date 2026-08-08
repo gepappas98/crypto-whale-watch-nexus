@@ -7,6 +7,11 @@ import { isHLConfigured } from '@/lib/hyperliquid';
 import {
   getNotifyConfig, setNotifyConfig, sendTestNotification, type NotifyLevel,
 } from '@/lib/notifyChannels';
+import { isDryRun, setDryRun } from '@/lib/nexus/bot';
+import { getMaxOpenTrades, setMaxOpenTrades } from '@/lib/nexus/openTradesLimit';
+import {
+  getRemotePairListUrl, setRemotePairListUrl, fetchRemotePairList,
+} from '@/lib/nexus/remotePairList';
 
 interface WRSettingsPanelProps {
   apiKey: string; onApiKeyChange: (v: string) => void;
@@ -50,6 +55,26 @@ export function WRSettingsPanel({
   const [testSent, setTestSent] = useState(false);
   const patchNotify = (patch: Parameters<typeof setNotifyConfig>[0]) => {
     setNotifyCfgState(setNotifyConfig(patch));
+  };
+
+  // ── Nexus Bot: dry-run, open-trade cap, remote pairlist (self-contained,
+  // same pattern as notifyCfg above — see lib/nexus/bot.ts / openTradesLimit.ts / remotePairList.ts) ──
+  const [dryRunOn, setDryRunOn] = useState(() => isDryRun());
+  const [maxOpen, setMaxOpen] = useState(() => getMaxOpenTrades());
+  const [remoteUrl, setRemoteUrlState] = useState(() => getRemotePairListUrl() ?? '');
+  const [remoteStatus, setRemoteStatus] = useState<string | null>(null);
+  const [remoteBusy, setRemoteBusy] = useState(false);
+
+  const refreshRemotePairList = async () => {
+    setRemoteBusy(true);
+    setRemoteStatus(null);
+    const result = await fetchRemotePairList({ forceRefresh: true });
+    setRemoteBusy(false);
+    if (result.error) {
+      setRemoteStatus(`⚠ ${result.error}${result.source === 'cache' ? ' — using cached list' : ''}`);
+    } else {
+      setRemoteStatus(`✓ ${result.pairs.length} pairs loaded from remote`);
+    }
   };
 
   return (
@@ -271,6 +296,50 @@ export function WRSettingsPanel({
             : 'Configure at least one channel to enable push alerts'}
         </Note>
         <Note cls="text-wr-amber">Stored in localStorage only — same as your other API keys.</Note>
+      </SettingsGroup>
+
+      <SettingsGroup label="🐋 NEXUS BOT">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[8px] text-wr-muted">Dry-run mode</span>
+          <button
+            className={`wr-btn text-[8px] px-2 ${dryRunOn ? 'text-wr-green border-wr-green' : ''}`}
+            onClick={() => { const next = !dryRunOn; setDryRunOn(next); setDryRun(next); }}
+          >
+            {dryRunOn ? '● ON — no real orders' : '○ OFF — live trading'}
+          </button>
+        </div>
+        <div className="flex items-center gap-1.5 mt-1.5">
+          <span className="text-[8px] text-wr-muted shrink-0">Max open trades</span>
+          <input
+            className="wr-input text-[8px] w-14"
+            type="number"
+            min={1}
+            value={maxOpen}
+            onChange={e => {
+              const n = Math.max(1, parseInt(e.target.value, 10) || 1);
+              setMaxOpen(n);
+              setMaxOpenTrades(n);
+            }}
+          />
+        </div>
+        <input
+          className="wr-input text-[8px] mt-1.5"
+          type="text"
+          placeholder="Remote pairlist JSON URL (optional)"
+          value={remoteUrl}
+          onChange={e => { setRemoteUrlState(e.target.value); setRemotePairListUrl(e.target.value || null); }}
+        />
+        <button
+          className="wr-btn text-[8px] mt-1"
+          disabled={!remoteUrl || remoteBusy}
+          onClick={refreshRemotePairList}
+        >
+          {remoteBusy ? '▶ FETCHING…' : '▶ REFRESH REMOTE LIST'}
+        </button>
+        {remoteStatus && (
+          <Note cls={remoteStatus.startsWith('✓') ? 'text-wr-green' : 'text-wr-amber'}>{remoteStatus}</Note>
+        )}
+        <Note>Dry-run and open-trade cap apply to Grid/Volume Maker executions across all Nexus pages.</Note>
       </SettingsGroup>
     </div>
   );
