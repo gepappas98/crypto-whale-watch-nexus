@@ -36,6 +36,7 @@ import { recordSignalOutcome, saveScan } from '@/lib/db';
 import { applyPairFilters } from '@/lib/pairFilters';
 import { alertCooldown } from '@/lib/alertCooldown';
 import { dispatchNotification } from '@/lib/notifyChannels';
+import { getSizingHint } from '@/lib/sizingHint';
 import {
   CoinData, CFG, ScanSnapshot, isSolToken,
 } from '@/lib/whaleRadarState';
@@ -247,13 +248,19 @@ export function useMarketData({
       });
 
     // Generate alerts for critical/high — gated by cooldown (see guardedAddAlert above)
+    // sizing = real, backtested expectancy for this signal category (see lib/sizingHint.ts) —
+    // the alert feed's `sizing` field existed but was never populated before this.
     alertable.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
+      const signal = getCeoSignalLabel(c.score, c.threat, c.category || '', c.vmcap);
       guardedAddAlert('critical', c.symbol,
-        `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`);
+        `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`,
+        getSizingHint(signal).label);
     });
     alertable.filter(c => c.threat === 'HIGH' && c.category).slice(0, 3).forEach(c => {
+      const signal = getCeoSignalLabel(c.score, c.threat, c.category || '', c.vmcap);
       guardedAddAlert('high', c.symbol,
-        `[${c.category}] SCORE=${c.score}/100 — ${c.reasons.join(' · ')}`);
+        `[${c.category}] SCORE=${c.score}/100 — ${c.reasons.join(' · ')}`,
+        getSizingHint(signal).label);
     });
 
     return mapped;
