@@ -37,6 +37,14 @@ export interface SignalRecord {
   filled_1h_at: number | null;
   filled_4h_at: number | null;
   filled_24h_at: number | null;
+  /** Optional raw feature snapshot at fire time — used by lib/mlScoring.ts.
+   *  Records saved before this field existed simply won't be ML-eligible. */
+  chg24?: number;
+  volSpike?: number;
+  supplyPct?: number | null;
+  mcap?: number;
+  dexHot?: boolean;
+  isSol?: boolean;
 }
 
 // ── Storage helpers ───────────────────────────────────────────────────────────
@@ -111,6 +119,12 @@ export function saveSignal(payload: SignalOutcomePayload): void {
     price_1h: null,  price_4h: null,  price_24h: null,
     outcome_1h: null, outcome_4h: null, outcome_24h: null,
     filled_1h_at: null, filled_4h_at: null, filled_24h_at: null,
+    chg24: payload.chg24,
+    volSpike: payload.volSpike,
+    supplyPct: payload.supplyPct,
+    mcap: payload.mcap,
+    dexHot: payload.dexHot,
+    isSol: payload.isSol,
   };
 
   // Prepend, trim to MAX_RECORDS
