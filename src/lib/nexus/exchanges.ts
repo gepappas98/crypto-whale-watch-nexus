@@ -5,7 +5,7 @@
  *  api.backpack.exchange, data-api.binance.vision).
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-export type Exchange = "hyperliquid" | "backpack" | "binance";
+export type Exchange = "hyperliquid" | "backpack" | "binance" | "okx";
 
 export interface HLAsset {
   symbol: string;
@@ -48,10 +48,23 @@ export interface BNTicker {
   timestamp: number;
 }
 
+export interface OKXTicker {
+  symbol: string;   // raw instId, e.g. "BTC-USDT" — matches BPTicker/BNTicker convention of keeping the exchange's native format
+  exchange: "okx";
+  lastPrice: number;
+  high24h: number;
+  low24h: number;
+  volume: number;
+  quoteVolume: number;
+  priceChangePercent: number;
+  timestamp: number;
+}
+
 export interface AggregateMarket {
   hyperliquid: HLAsset[];
   backpack: BPTicker[];
   binance: BNTicker[];
+  okx: OKXTicker[];
   timestamp: number;
   errors: Partial<Record<Exchange, string>>;
 }
@@ -195,10 +208,50 @@ export async function fetchBinance(): Promise<BNTicker[]> {
   });
 }
 
+// ── OKX (public v5 API, no key needed; CORS-enabled) ────────────────────────
+// Reuses the same pair-format-conversion logic as lib/exchanges/okx.ts (the
+// whale-feed WS adapter) — 'BTC' → 'BTC-USDT' — just via REST ticker snapshot
+// here instead of a WS trade stream, since arbitrage needs a mark price, not
+// individual trade ticks.
+const OKX_INST_IDS = new Set(["BTC-USDT", "ETH-USDT", "SOL-USDT", "AVAX-USDT", "LINK-USDT", "ARB-USDT", "OP-USDT", "SUI-USDT"]);
+
+export async function fetchOkx(): Promise<OKXTicker[]> {
+  return cachedFetch("okx", async () => {
+    const res = await withTimeout(fetch("https://www.okx.com/api/v5/market/tickers?instType=SPOT"));
+    if (!res.ok) throw new Error(`OKX HTTP ${res.status}`);
+    const json = (await res.json()) as {
+      code: string;
+      data: Array<{
+        instId: string; last: string; high24h: string; low24h: string;
+        vol24h: string; volCcy24h: string; open24h: string;
+      }>;
+    };
+    if (json.code !== "0") throw new Error(`OKX API error ${json.code}`);
+    return json.data
+      .filter((t) => OKX_INST_IDS.has(t.instId))
+      .map((t) => {
+        const last = parseFloat(t.last);
+        const open = parseFloat(t.open24h);
+        const changePct = open > 0 ? ((last - open) / open) * 100 : 0;
+        return {
+          symbol: t.instId,
+          exchange: "okx" as const,
+          lastPrice: last,
+          high24h: parseFloat(t.high24h),
+          low24h: parseFloat(t.low24h),
+          volume: parseFloat(t.vol24h),
+          quoteVolume: parseFloat(t.volCcy24h),
+          priceChangePercent: +changePct.toFixed(4),
+          timestamp: Date.now(),
+        };
+      });
+  });
+}
+
 // ── Aggregate ───────────────────────────────────────────────────────────────
 export async function fetchAllMarkets(): Promise<AggregateMarket> {
   const errors: AggregateMarket["errors"] = {};
-  const [hl, bp, bn] = await Promise.all([
+  const [hl, bp, bn, okx] = await Promise.all([
     fetchHyperliquid().catch((e) => {
       errors.hyperliquid = (e as Error).message;
       return [] as HLAsset[];
@@ -211,6 +264,10 @@ export async function fetchAllMarkets(): Promise<AggregateMarket> {
       errors.binance = (e as Error).message;
       return [] as BNTicker[];
     }),
+    fetchOkx().catch((e) => {
+      errors.okx = (e as Error).message;
+      return [] as OKXTicker[];
+    }),
   ]);
-  return { hyperliquid: hl, backpack: bp, binance: bn, timestamp: Date.now(), errors };
+  return { hyperliquid: hl, backpack: bp, binance: bn, okx, timestamp: Date.now(), errors };
 }
