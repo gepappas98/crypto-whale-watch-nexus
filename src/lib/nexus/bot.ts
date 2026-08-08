@@ -105,6 +105,16 @@ export async function executeArbitrageGuarded(
   opp: ArbitrageOpportunity
 ): Promise<{ ok: boolean; txHash?: string; error?: string }> {
   if (!bot) throw new Error("No trading bot connected");
+  // Reject opportunities that look like stale/bad ticks before even checking
+  // trade-history protections — see assessPlausibility() in arbitrage.ts.
+  // canTrade() only knows about past trades; it has no way to know THIS
+  // reading is noise, so that check has to happen here, separately.
+  if (!opp.plausible) {
+    throw new ProtectionBlockedError({
+      allowed: false,
+      reason: opp.plausibilityNote ?? "Opportunity flagged as implausible (likely stale/bad tick)",
+    });
+  }
   const gate = canTrade(opp.pair, "*");
   if (!gate.allowed) throw new ProtectionBlockedError(gate);
   return bot.executeArbitrage(opp);
