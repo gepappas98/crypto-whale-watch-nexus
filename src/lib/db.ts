@@ -282,30 +282,8 @@ export async function deleteTrackedToken(symbol: string): Promise<void> {
 
 // ══ ALERTS ════════════════════════════════════════════════════════════════════
 
-const ALERTS_LS_KEY = 'wr_v9_alerts';
-const ALERTS_LS_MAX = 200;
-
-function loadLocalAlerts(): AlertItem[] {
-  try {
-    const raw = localStorage.getItem(ALERTS_LS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
-
-function saveLocalAlerts(alerts: AlertItem[]): void {
-  try {
-    localStorage.setItem(ALERTS_LS_KEY, JSON.stringify(alerts.slice(0, ALERTS_LS_MAX)));
-  } catch { /* ignore */ }
-}
-
 export async function saveAlert(alert: AlertItem): Promise<void> {
   if (alert.level === 'info') return;
-
-  // Persist locally first — mirrors the portfolio/tracked-token pattern —
-  // so the alert survives even when the backend API is unreachable instead
-  // of being silently dropped.
-  saveLocalAlerts([alert, ...loadLocalAlerts()]);
-
   await api('/alerts', {
     method: 'POST',
     body: JSON.stringify({
@@ -323,19 +301,16 @@ export async function loadAlerts(): Promise<AlertItem[]> {
     id: number; level: string; tag: string; text: string;
     sizing: string | null; pinned: boolean; created_at: string;
   }>>('/alerts', { _silent: true });
-  if (rows) {
-    return rows.map(r => ({
-      ts: new Date(r.created_at).getTime(),
-      level: r.level as AlertItem['level'],
-      tag: r.tag,
-      text: r.text,
-      tc: r.level === 'critical' ? 'C' : r.level === 'high' ? 'H' : r.level === 'medium' ? 'M' : 'I',
-      sizing: r.sizing,
-      pinned: r.pinned,
-    }));
-  }
-  // Backend unreachable — fall back to whatever was persisted locally.
-  return loadLocalAlerts();
+  if (!rows) return [];
+  return rows.map(r => ({
+    ts: new Date(r.created_at).getTime(),
+    level: r.level as AlertItem['level'],
+    tag: r.tag,
+    text: r.text,
+    tc: r.level === 'critical' ? 'C' : r.level === 'high' ? 'H' : r.level === 'medium' ? 'M' : 'I',
+    sizing: r.sizing,
+    pinned: r.pinned,
+  }));
 }
 
 export async function toggleAlertPin(dbId: number): Promise<void> {
@@ -383,6 +358,15 @@ export interface SignalOutcomePayload {
   category: string | null;
   vmcap: number;
   entry_price: number;
+  /** Optional raw feature snapshot at fire time — local-only, used by lib/mlScoring.ts.
+   *  Not sent to the backend (backend schema is fixed); omit and everything still works
+   *  exactly as before, just without ML-eligibility for that record. */
+  chg24?: number;
+  volSpike?: number;
+  supplyPct?: number | null;
+  mcap?: number;
+  dexHot?: boolean;
+  isSol?: boolean;
 }
 
 export async function recordSignalOutcome(payload: SignalOutcomePayload): Promise<void> {
