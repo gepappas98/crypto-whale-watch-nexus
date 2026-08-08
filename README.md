@@ -18,6 +18,7 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 - [What's New](#-whats-new)
 - [Core Features](#-core-features)
 - [Nexus Suite](#-nexus-suite-nexus)
+- [Protection Engine](#-protection-engine)
 - [Trading Hub](#-trading-hub-trading-hub)
 - [Hyperliquid Module](#-hyperliquid-module)
 - [AI Council](#-ai-council)
@@ -36,6 +37,7 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 
 ## 🆕 What's New
 
+- **Protection engine for Nexus Bot** (`src/lib/nexus/protections.ts`, `botTradeStore.ts`) — four risk-control checks (cooldown, stoploss guard, max drawdown, low-profit-pairs) now gate every grid/volume-maker execution before it reaches the connected bot, with real closed-trade outcomes fed back into the ledger and an in-app banner (`ProtectionBanner`) showing active locks with a manual clear. See [Protection Engine](#-protection-engine) below.
 - **Fixed white-screen crash on Vercel/Lovable** — `src/integrations/supabase/client.ts` used to call `createClient()` unguarded at module import time; a missing/misnamed `VITE_SUPABASE_*` env var crashed the whole app before React could mount, and no `ErrorBoundary` could catch it (import-time errors aren't render errors). It now falls back to inert placeholder credentials and accepts either `VITE_SUPABASE_PUBLISHABLE_KEY` or `VITE_SUPABASE_ANON_KEY`, so a missing key just disables Supabase-backed features instead of blanking the whole app.
 - **Debug/startup diagnostics** (`src/lib/startupDiagnostics.ts`, `src/lib/debugOverlay.ts`) — installed before any other import in `main.tsx` specifically to surface bootstrap failures instead of a silent blank page.
 - **Chunk-recovery** (`src/lib/chunkRecovery.ts`) — auto-reloads the app if a lazy-loaded chunk fails to fetch (stale deploy after a new build goes live).
@@ -68,7 +70,22 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 - **Grid Studio** — grid-trading strategy builder.
 - **Volume Maker** — synthetic volume/market-making strategy tooling.
 - **Portfolio** — P&L and risk tracking.
-- **Nexus Bot** (`useNexusBot`, `src/lib/nexus/bot.ts`) — connects to a configurable automated trading bot backend and reports connection state in the UI.
+- **Nexus Bot** (`useNexusBot`, `src/lib/nexus/bot.ts`) — connects to a configurable automated trading bot backend and reports connection state in the UI. Grid and Volume Maker executions go through the [protection engine](#-protection-engine) rather than calling the bot directly.
+
+## 🛡️ Protection Engine
+
+Concept ported from freqtrade's `plugins/protections/*` and re-implemented from scratch in TypeScript against this app's own bot trade ledger — nothing here places trades, it only decides whether the bot is allowed to open new exposure right now.
+
+- **Bot trade ledger** (`src/lib/nexus/botTradeStore.ts`) — a `localStorage`-backed record of every trade the bot actually closed (grid session, volume-maker run). A trade is only ever recorded after a real close with a known PnL; nothing synthetic is logged.
+- **Four checks** (`src/lib/nexus/protections.ts`), each independently configurable:
+  - **Cooldown** — blocks new entries on a pair right after it closes.
+  - **Stoploss Guard** — too many stopped-out/error closes in a lookback window → lock.
+  - **Max Drawdown** — equity-curve drawdown across recent trades exceeds a threshold → lock all pairs.
+  - **Low Profit Pairs** — a pair's net PnL over a lookback window is negative → lock that pair.
+- **`canTrade(pair, side)`** — the single gate every guarded action calls; locks persist across reloads and expire on their own schedule.
+- **Guarded execution wrappers** in `bot.ts` (`executeArbitrageGuarded`, `createGridGuarded`, `startVolumeMakerGuarded`) replace the raw `TradingBot` calls in Grid Studio and Volume Maker; a blocked attempt throws `ProtectionBlockedError` with the human-readable reason, surfaced via the existing toast error handling.
+- **Real outcome reporting** — Grid Studio detects an `active → stopped/error` transition and reports `closeProfit = pnl / totalInvestment` (both real, bot-reported values); Volume Maker reports the fee/rebate margin (`(rebatesUsd - feesUsd) / totalVolumeUsd`) when a run stops. No fabricated numbers feed the ledger.
+- **`ProtectionBanner`** (`src/components/nexus/ProtectionBanner.tsx`) — renders nothing when there are no active locks; otherwise shows each locked scope, the reason, time remaining, and a manual "Clear" action. Mounted on Grid Studio, Volume Maker, and Portfolio.
 
 ## 🧠 Trading Hub (`/trading-hub/*`)
 
@@ -158,18 +175,20 @@ crypto-whale-watch-nexus-main/
 │   ├── assets/
 │   ├── components/
 │   │   ├── whale-radar/        # WR* — core dashboard UI
-│   │   ├── nexus/               # Nexus suite UI
+│   │   ├── nexus/               # Nexus suite UI + ProtectionBanner.tsx
 │   │   ├── hyperliquid/         # HL* — Hyperliquid module UI
 │   │   ├── trading/             # Trading Hub shared UI
 │   │   └── ui/                  # shadcn/ui primitives
 │   ├── hooks/                   # useMarketData, useWhaleStream/WebSocket,
 │   │                             # useHyperliquid, useHLManipulationScanner,
 │   │                             # useHLOpportunities, useOrderflowEngine,
-│   │                             # useNexusBot, useNexusMarkets, ...
+│   │                             # useNexusBot, useNexusMarkets, useProtections, ...
 │   ├── integrations/supabase/   # Generated Supabase client + DB types
 │   ├── lib/
 │   │   ├── council/              # AI council engine + persistence
-│   │   ├── nexus/                # Arbitrage engine, bot connector, exchanges
+│   │   ├── nexus/                # Arbitrage engine, bot connector + guarded execution,
+│   │   │                         # protections.ts (risk engine), botTradeStore.ts (ledger),
+│   │   │                         # exchanges
 │   │   ├── db.ts                 # Frontend persistence client (offline fallback)
 │   │   ├── safeInvoke.ts         # Guarded Supabase Edge Function calls
 │   │   ├── supabase.ts           # Lazy, override-friendly Supabase client
@@ -242,7 +261,7 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 
 - Full-featured wallet tracking and smart-money wallet scoring.
 - Multi-channel alerts (Telegram, Discord, email) beyond the in-app bell.
-- Automated strategy execution from Grid Studio / Volume Maker.
+- Protection engine: pairlist-style pre-filters (volatility/spread/market-cap) feeding the scanner, and Sortino/Calmar/SQN metrics alongside existing profit-factor/Sharpe/drawdown in signal + council scoring.
 - Expand AI Council with additional agent personas and longer-horizon memory scoring.
 
 ---
