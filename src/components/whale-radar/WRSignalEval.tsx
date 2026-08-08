@@ -312,6 +312,9 @@ export function WRSignalEval() {
                 <RiskStat label="EXPECTANCY" value={pct(portfolioRow.expectancy)} color={pctColor(portfolioRow.expectancy)} />
                 <RiskStat label="MAX DD" value={`-${portfolioRow.maxDrawdownPct}%`} color="text-wr-amber" />
                 <RiskStat label="SHARPE" value={portfolioRow.sharpe == null ? '—' : portfolioRow.sharpe.toFixed(2)} color={portfolioRow.sharpe != null && portfolioRow.sharpe > 0 ? 'text-wr-green' : 'text-wr-red'} />
+                <RiskStat label="SORTINO" value={portfolioRow.sortino == null ? '—' : portfolioRow.sortino.toFixed(2)} color={portfolioRow.sortino != null && portfolioRow.sortino > 0 ? 'text-wr-green' : 'text-wr-red'} />
+                <RiskStat label="CALMAR" value={portfolioRow.calmar == null ? '—' : portfolioRow.calmar.toFixed(2)} color={portfolioRow.calmar != null && portfolioRow.calmar > 0 ? 'text-wr-green' : 'text-wr-red'} />
+                <RiskStat label="SQN" value={portfolioRow.sqn == null ? '—' : portfolioRow.sqn.toFixed(2)} color={portfolioRow.sqn != null && portfolioRow.sqn > 0 ? 'text-wr-green' : 'text-wr-red'} />
               </div>
 
               {/* Per-signal breakdown */}
@@ -325,7 +328,9 @@ export function WRSignalEval() {
                       <th className="text-right py-1 px-1.5 text-[7px] text-wr-muted tracking-widest font-normal">PF</th>
                       <th className="text-right py-1 px-1.5 text-[7px] text-wr-muted tracking-widest font-normal">EXPECT</th>
                       <th className="text-right py-1 px-1.5 text-[7px] text-wr-muted tracking-widest font-normal">MAX DD</th>
-                      <th className="text-right py-1 pl-1.5 text-[7px] text-wr-muted tracking-widest font-normal">SHARPE</th>
+                      <th className="text-right py-1 px-1.5 text-[7px] text-wr-muted tracking-widest font-normal">SHARPE</th>
+                      <th className="text-right py-1 px-1.5 text-[7px] text-wr-muted tracking-widest font-normal">SORTINO</th>
+                      <th className="text-right py-1 pl-1.5 text-[7px] text-wr-muted tracking-widest font-normal">SQN</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -339,8 +344,14 @@ export function WRSignalEval() {
                         </td>
                         <td className={`text-right px-1.5 ${pctColor(row.expectancy)}`}>{pct(row.expectancy)}</td>
                         <td className="text-right px-1.5 text-wr-amber">-{row.maxDrawdownPct}%</td>
-                        <td className={`text-right pl-1.5 ${row.sharpe != null && row.sharpe > 0 ? 'text-wr-green' : 'text-wr-red'}`}>
+                        <td className={`text-right px-1.5 ${row.sharpe != null && row.sharpe > 0 ? 'text-wr-green' : 'text-wr-red'}`}>
                           {row.sharpe == null ? '—' : row.sharpe.toFixed(2)}
+                        </td>
+                        <td className={`text-right px-1.5 ${row.sortino != null && row.sortino > 0 ? 'text-wr-green' : 'text-wr-red'}`}>
+                          {row.sortino == null ? '—' : row.sortino.toFixed(2)}
+                        </td>
+                        <td className={`text-right pl-1.5 ${row.sqn != null && row.sqn > 0 ? 'text-wr-green' : 'text-wr-red'}`}>
+                          {row.sqn == null ? '—' : row.sqn.toFixed(2)}
                         </td>
                       </tr>
                     ))}
