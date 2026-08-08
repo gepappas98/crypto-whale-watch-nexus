@@ -186,10 +186,10 @@ export async function refreshMemoryPerformance(
     const perf = { ...e.performance, [bucket]: ret };
     updated.push({ ...e, performance: perf });
     if (e.performance?.[bucket] !== ret) {
-      supabase
-        .from('council_decisions')
-        .update({ performance: perf })
-        .eq('id', e.id)
+      // Persisted value is recomputed server-side from a server-fetched price;
+      // the local figure above is only used for immediate display.
+      supabase.functions
+        .invoke('council-persist', { body: { action: 'update_performance', id: e.id } })
         .then(({ error }) => { if (error) console.warn('[council] perf update:', error.message); });
     }
   }
