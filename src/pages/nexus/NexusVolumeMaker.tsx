@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useRef, useEffect, useState } from "react";
 import { Volume2, Play, Square, Plug } from "lucide-react";
 import { useNexusBot } from "@/hooks/useNexusBot";
 import { Card } from "@/components/ui/card";
@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { NexusEmptyState, StatCard, fmtNum } from "@/components/nexus/shared";
 import { ProtectionBanner } from "@/components/nexus/ProtectionBanner";
 import type { VolumeStats } from "@/lib/nexus/bot";
-import { startVolumeMakerGuarded } from "@/lib/nexus/bot";
+import { startVolumeMakerGuarded, reportBotTradeClosed } from "@/lib/nexus/bot";
 import { toast } from "@/hooks/use-toast";
 
 export default function NexusVolumeMaker() {
@@ -15,6 +15,9 @@ export default function NexusVolumeMaker() {
   const [mode, setMode] = useState("backpack_limit");
   const [signalSource, setSignalSource] = useState("backpack_rest");
   const [busy, setBusy] = useState(false);
+  // Real wall-clock start time of the current run, used only to give the
+  // reported ledger entry an honest duration — never fabricated.
+  const startedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!bot) return;
@@ -53,6 +56,7 @@ export default function NexusVolumeMaker() {
     try {
       const s = await startVolumeMakerGuarded({ mode, signalSource });
       setStats(s);
+      startedAtRef.current = Date.now();
       toast({ title: "Volume maker started", description: `${mode} · signal: ${signalSource}` });
     } catch (e) {
       toast({ title: "Start failed", description: (e as Error).message, variant: "destructive" });
@@ -67,6 +71,21 @@ export default function NexusVolumeMaker() {
     try {
       const s = await bot.stopVolumeMaker();
       setStats(s);
+      // Fee/rebate margin is the only real, non-fabricated profit concept
+      // available for this strategy — there's no per-position stop-loss,
+      // so isStopExit is always false here.
+      if (s.totalVolumeUsd > 0) {
+        reportBotTradeClosed({
+          strategy: "volume_maker",
+          pair: "*",
+          side: "*",
+          closeProfit: (s.rebatesUsd - s.feesUsd) / s.totalVolumeUsd,
+          isStopExit: false,
+          openedAt: startedAtRef.current ?? Date.now(),
+          closedAt: Date.now(),
+        });
+      }
+      startedAtRef.current = null;
     } finally {
       setBusy(false);
     }

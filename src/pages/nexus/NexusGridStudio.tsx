@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Grid3X3, Plus, Square, Trash2, Plug } from "lucide-react";
 import { useNexusBot } from "@/hooks/useNexusBot";
 import { Card } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { NexusEmptyState } from "@/components/nexus/shared";
 import { ProtectionBanner } from "@/components/nexus/ProtectionBanner";
 import type { GridConfig, GridStatus } from "@/lib/nexus/bot";
-import { createGridGuarded } from "@/lib/nexus/bot";
+import { createGridGuarded, reportBotTradeClosed } from "@/lib/nexus/bot";
 import { toast } from "@/hooks/use-toast";
 
 const MODES: GridConfig["mode"][] = ["normal", "martingale", "moving", "scalping", "capital_protection"];
@@ -29,7 +29,7 @@ export default function NexusGridStudio() {
   useEffect(() => {
     if (!bot) return;
     let alive = true;
-    const load = () => bot.listGrids().then((g) => alive && setGrids(g)).catch(() => {});
+    const load = () => bot.listGrids().then((g) => alive && applyGridUpdate(g)).catch(() => {});
     load();
     const t = setInterval(load, 5000);
     return () => {
@@ -37,6 +37,43 @@ export default function NexusGridStudio() {
       clearInterval(t);
     };
   }, [bot]);
+
+  // Track which grid ids we've already reported to the protection ledger so
+  // an active→stopped transition is only recorded once, and remember each
+  // grid's openedAt so the reported trade has a real duration.
+  const reportedRef = useRef<Set<string>>(new Set());
+  const openedAtRef = useRef<Map<string, number>>(new Map());
+
+  const applyGridUpdate = (updated: GridStatus[]) => {
+    setGrids((prev) => {
+      const prevById = new Map(prev.map((g) => [g.id, g]));
+      for (const g of updated) {
+        if (!openedAtRef.current.has(g.id)) {
+          openedAtRef.current.set(g.id, g.createdAt);
+        }
+        const before = prevById.get(g.id);
+        const justClosed =
+          before?.status === "active" && (g.status === "stopped" || g.status === "error");
+        if (justClosed && !reportedRef.current.has(g.id)) {
+          reportedRef.current.add(g.id);
+          // Real closeProfit derived from the bot's own reported pnl and the
+          // investment the user actually configured for this grid — not a
+          // fabricated number.
+          const closeProfit = g.totalInvestment > 0 ? g.pnl / g.totalInvestment : 0;
+          reportBotTradeClosed({
+            strategy: "grid",
+            pair: g.symbol,
+            side: "*",
+            closeProfit,
+            isStopExit: g.status === "error",
+            openedAt: openedAtRef.current.get(g.id) ?? g.createdAt,
+            closedAt: Date.now(),
+          });
+        }
+      }
+      return updated;
+    });
+  };
 
   if (!connected) {
     return (
@@ -84,7 +121,21 @@ export default function NexusGridStudio() {
   const stop = async (id: string) => {
     if (!bot) return;
     await bot.stopGrid(id);
-    setGrids((p) => p.map((g) => (g.id === id ? { ...g, status: "stopped" } : g)));
+    const g = grids.find((x) => x.id === id);
+    setGrids((p) => p.map((x) => (x.id === id ? { ...x, status: "stopped" } : x)));
+    if (g && !reportedRef.current.has(id)) {
+      reportedRef.current.add(id);
+      const closeProfit = g.totalInvestment > 0 ? g.pnl / g.totalInvestment : 0;
+      reportBotTradeClosed({
+        strategy: "grid",
+        pair: g.symbol,
+        side: "*",
+        closeProfit,
+        isStopExit: false,
+        openedAt: openedAtRef.current.get(id) ?? g.createdAt,
+        closedAt: Date.now(),
+      });
+    }
   };
 
   return (
