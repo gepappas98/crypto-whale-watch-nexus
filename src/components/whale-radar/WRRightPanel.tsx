@@ -4,6 +4,7 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { AlertItem, WhaleTrade, WalletEntry, fmtN } from '@/lib/whaleRadarState';
+import type { LockInfo } from '@/lib/alertCooldown';
 import { HLExplorer } from '@/components/hyperliquid/HLExplorer';
 
 const VROW_H = 28;       // virtual row height in px
@@ -23,12 +24,15 @@ interface WRRightPanelProps {
   onToggleBybit: () => void;
   whaleFeedEx: string;
   onWhaleFeedExChange: (ex: string) => void;
+  /** Active alert cooldown locks, polled by the parent. */
+  alertLocks?: LockInfo[];
 }
 
 export function WRRightPanel({
   whaleFeed, alerts, alertFilter, onAlertFilterChange,
   wallets, onAddWallet, onRemoveWallet, onTogglePin, onClearAlerts,
   bybitEnabled, onToggleBybit, whaleFeedEx, onWhaleFeedExChange,
+  alertLocks = [],
 }: WRRightPanelProps) {
   const [walletInput, setWalletInput] = useState('');
   const [walletLabel, setWalletLabel] = useState('');
