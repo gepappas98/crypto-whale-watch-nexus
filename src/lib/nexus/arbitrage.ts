@@ -59,14 +59,14 @@ export interface ArbitrageOpportunity {
 }
 
 const PAIRS = [
-  { symbol: "BTC", binance: "BTCUSDT", backpack: "BTC_USDC", hyperliquid: "BTC" },
-  { symbol: "ETH", binance: "ETHUSDT", backpack: "ETH_USDC", hyperliquid: "ETH" },
-  { symbol: "SOL", binance: "SOLUSDT", backpack: "SOL_USDC", hyperliquid: "SOL" },
-  { symbol: "AVAX", binance: "AVAXUSDT", backpack: "AVAX_USDC", hyperliquid: "AVAX" },
-  { symbol: "LINK", binance: "LINKUSDT", backpack: "LINK_USDC", hyperliquid: "LINK" },
-  { symbol: "ARB", binance: "ARBUSDT", backpack: "ARB_USDC", hyperliquid: "ARB" },
-  { symbol: "SUI", binance: "SUIUSDT", backpack: "SUI_USDC", hyperliquid: "SUI" },
-  { symbol: "OP",  binance: "OPUSDT",  backpack: "OP_USDC",  hyperliquid: "OP"  },
+  { symbol: "BTC", binance: "BTCUSDT", backpack: "BTC_USDC", hyperliquid: "BTC", okx: "BTC-USDT" },
+  { symbol: "ETH", binance: "ETHUSDT", backpack: "ETH_USDC", hyperliquid: "ETH", okx: "ETH-USDT" },
+  { symbol: "SOL", binance: "SOLUSDT", backpack: "SOL_USDC", hyperliquid: "SOL", okx: "SOL-USDT" },
+  { symbol: "AVAX", binance: "AVAXUSDT", backpack: "AVAX_USDC", hyperliquid: "AVAX", okx: "AVAX-USDT" },
+  { symbol: "LINK", binance: "LINKUSDT", backpack: "LINK_USDC", hyperliquid: "LINK", okx: "LINK-USDT" },
+  { symbol: "ARB", binance: "ARBUSDT", backpack: "ARB_USDC", hyperliquid: "ARB", okx: "ARB-USDT" },
+  { symbol: "SUI", binance: "SUIUSDT", backpack: "SUI_USDC", hyperliquid: "SUI", okx: "SUI-USDT" },
+  { symbol: "OP",  binance: "OPUSDT",  backpack: "OP_USDC",  hyperliquid: "OP",  okx: "OP-USDT"  },
 ];
 
 const MIN_SPREAD = 0.05; // %
@@ -87,71 +87,68 @@ export function getSpreadHistory(key: string): number[] {
   return history.get(key) ?? [];
 }
 
+/** One spread comparison between two exchange legs — the shared body every
+ *  leg combo used to duplicate by hand. Pushes an opportunity onto `out` if
+ *  the spread clears MIN_SPREAD, with plausibility-capped confidence. */
+function checkLeg(
+  out: ArbitrageOpportunity[],
+  symbol: string,
+  exA: Exchange, priceA: number,
+  exB: Exchange, priceB: number,
+  fundingRateDiff: number,
+  notionalUsd: number,
+  timestamp: number,
+): void {
+  const spread = (Math.abs(priceA - priceB) / Math.min(priceA, priceB)) * 100;
+  if (spread <= MIN_SPREAD) return;
+
+  const key = `${symbol}-${exA}-${exB}`;
+  const plaus = assessPlausibility(spread, getSpreadHistory(key));
+  const baseline = pushHistory(key, spread);
+  const rawConfidence = spread > 0.3 ? "high" : spread > 0.15 ? "medium" : "low";
+
+  out.push({
+    id: `${symbol}-${exA}-${exB}`,
+    pair: `${symbol}-USD`,
+    exchanges: [exA, exB],
+    spreadPercent: +spread.toFixed(4),
+    fundingRateDiff: +fundingRateDiff.toFixed(6),
+    historicalBaseline: +baseline.toFixed(4),
+    confidence: plaus.plausible ? rawConfidence : "low",
+    direction: priceA > priceB ? "short_long" : "long_short",
+    estimatedProfitUsd: +((spread / 100) * notionalUsd).toFixed(2),
+    prices: { [exA]: priceA, [exB]: priceB },
+    timestamp,
+    plausible: plaus.plausible,
+    plausibilityNote: plaus.reason,
+    baselineSamples: plaus.samples,
+  });
+}
+
 export function scanArbitrage(market: AggregateMarket, notionalUsd = 1000): ArbitrageOpportunity[] {
   const out: ArbitrageOpportunity[] = [];
   const hlMap = new Map(market.hyperliquid.map((a) => [a.symbol, a]));
   const bpMap = new Map(market.backpack.map((a) => [a.symbol, a]));
   const bnMap = new Map(market.binance.map((a) => [a.symbol, a]));
+  const okxMap = new Map(market.okx.map((a) => [a.symbol, a]));
 
   for (const pair of PAIRS) {
     const hl = hlMap.get(pair.hyperliquid);
     const bp = bpMap.get(pair.backpack);
     const bn = bnMap.get(pair.binance);
-    if (!hl) continue;
-    const hlPrice = hl.markPrice || hl.midPrice;
-    if (!hlPrice) continue;
+    const okx = okxMap.get(pair.okx);
 
-    // HL vs BP
-    if (bp && bp.lastPrice) {
-      const spread = (Math.abs(hlPrice - bp.lastPrice) / Math.min(hlPrice, bp.lastPrice)) * 100;
-      const baselineArr = getSpreadHistory(`${pair.symbol}-HL-BP`);
-      const plaus = assessPlausibility(spread, baselineArr);
-      const baseline = pushHistory(`${pair.symbol}-HL-BP`, spread);
-      if (spread > MIN_SPREAD) {
-        const rawConfidence = spread > 0.3 ? "high" : spread > 0.15 ? "medium" : "low";
-        out.push({
-          id: `${pair.symbol}-hl-bp`,
-          pair: `${pair.symbol}-USD`,
-          exchanges: ["hyperliquid", "backpack"],
-          spreadPercent: +spread.toFixed(4),
-          fundingRateDiff: +(Math.abs(hl.fundingRate) * 100).toFixed(6),
-          historicalBaseline: +baseline.toFixed(4),
-          confidence: plaus.plausible ? rawConfidence : "low",
-          direction: hlPrice > bp.lastPrice ? "short_long" : "long_short",
-          estimatedProfitUsd: +((spread / 100) * notionalUsd).toFixed(2),
-          prices: { hyperliquid: hlPrice, backpack: bp.lastPrice },
-          timestamp: market.timestamp,
-          plausible: plaus.plausible,
-          plausibilityNote: plaus.reason,
-          baselineSamples: plaus.samples,
-        });
-      }
+    const hlPrice = hl ? (hl.markPrice || hl.midPrice) : 0;
+    const fundingDiff = hl ? Math.abs(hl.fundingRate) * 100 : 0;
+
+    if (hlPrice) {
+      if (bp?.lastPrice)  checkLeg(out, pair.symbol, "hyperliquid", hlPrice, "backpack", bp.lastPrice, fundingDiff, notionalUsd, market.timestamp);
+      if (bn?.lastPrice)  checkLeg(out, pair.symbol, "hyperliquid", hlPrice, "binance",  bn.lastPrice, fundingDiff, notionalUsd, market.timestamp);
+      if (okx?.lastPrice) checkLeg(out, pair.symbol, "hyperliquid", hlPrice, "okx",      okx.lastPrice, fundingDiff, notionalUsd, market.timestamp);
     }
-    // HL vs BN
-    if (bn && bn.lastPrice) {
-      const spread = (Math.abs(hlPrice - bn.lastPrice) / Math.min(hlPrice, bn.lastPrice)) * 100;
-      const baselineArr = getSpreadHistory(`${pair.symbol}-HL-BN`);
-      const plaus = assessPlausibility(spread, baselineArr);
-      const baseline = pushHistory(`${pair.symbol}-HL-BN`, spread);
-      if (spread > MIN_SPREAD) {
-        const rawConfidence = spread > 0.3 ? "high" : spread > 0.15 ? "medium" : "low";
-        out.push({
-          id: `${pair.symbol}-hl-bn`,
-          pair: `${pair.symbol}-USD`,
-          exchanges: ["hyperliquid", "binance"],
-          spreadPercent: +spread.toFixed(4),
-          fundingRateDiff: +(Math.abs(hl.fundingRate) * 100).toFixed(6),
-          historicalBaseline: +baseline.toFixed(4),
-          confidence: plaus.plausible ? rawConfidence : "low",
-          direction: hlPrice > bn.lastPrice ? "short_long" : "long_short",
-          estimatedProfitUsd: +((spread / 100) * notionalUsd).toFixed(2),
-          prices: { hyperliquid: hlPrice, binance: bn.lastPrice },
-          timestamp: market.timestamp,
-          plausible: plaus.plausible,
-          plausibilityNote: plaus.reason,
-          baselineSamples: plaus.samples,
-        });
-      }
+    // Spot-vs-spot legs (no funding rate involved — CEX/CEX arb, not perp basis)
+    if (bn?.lastPrice && okx?.lastPrice) {
+      checkLeg(out, pair.symbol, "binance", bn.lastPrice, "okx", okx.lastPrice, 0, notionalUsd, market.timestamp);
     }
   }
   return out.sort((a, b) => b.spreadPercent - a.spreadPercent);
