@@ -1,0 +1,1 @@
+DELETE FROM public.council_decisions WHERE id = '1806b10c-693f-420e-93b0-b8ca94b10db4';
