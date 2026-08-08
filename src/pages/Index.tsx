@@ -16,6 +16,9 @@ import { WRCoinGeckoStatus } from '@/components/whale-radar/WRCoinGeckoStatus';
 import { WRMobileFilterSheet } from '@/components/whale-radar/WRMobileFilterSheet';
 import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
 import { useWhaleStream, type StreamSignal } from '@/hooks/useWhaleStream';
+import { useExchangeFeed } from '@/hooks/useExchangeFeed';
+import { okxAdapter } from '@/lib/exchanges/okx';
+import type { NormalizedTrade } from '@/lib/exchanges/types';
 import { DEFAULT_FILTERS, type WhaleFilters } from '@/components/whale-radar/WRAdvancedFilters';
 import {
   CoinData, AlertItem, WhaleTrade, TrackedToken, PortfolioEntry,
@@ -324,6 +327,23 @@ export default function WhaleRadarApp() {
     onWhaleTrade:    handleLegacyWhale,
     onTrackerPrice:  handleTrackerPrice,
   });
+
+  // ── OKX feed (new exchange, generic adapter-driven hook — see hooks/useExchangeFeed.ts) ──
+  // Independent of the legacy Binance/Bybit hook; feeds the same handleWhaleTrade sink.
+  // Genuinely additive — no legacy dupe-suppression needed since OKX isn't covered elsewhere.
+  const handleOkxTrade = useCallback((t: NormalizedTrade) => {
+    const cls = t.usdt >= 5e6 ? 'ws-mega' : t.usdt >= 1e6 ? 'ws-big' : 'ws-mid';
+    handleWhaleTrade({ ts: t.ts, sym: t.sym, side: t.side, price: t.price, qty: t.qty, usdt: t.usdt, cls, ex: t.ex });
+  }, [handleWhaleTrade]);
+
+  const { status: okxStatus } = useExchangeFeed({
+    adapter: okxAdapter,
+    pairs: subscribedPairs,
+    minUsd: whaleThr,
+    enabled: whaleFeedEx === 'all' || whaleFeedEx === 'okx',
+    onTrade: handleOkxTrade,
+  });
+  void okxStatus; // exposed for a future per-exchange status indicator
 
   // Composite status: stream takes precedence when active
   const wsStatus: WsStatus = streamStatus === 'live'
