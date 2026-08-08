@@ -83,8 +83,18 @@ function pushHistory(key: string, value: number): number {
   return arr.reduce((a, b) => a + b, 0) / arr.length;
 }
 
+export const MIN_SPREAD_PCT = MIN_SPREAD;
+
 export function getSpreadHistory(key: string): number[] {
   return history.get(key) ?? [];
+}
+
+/** Real rolling spread history for a given opportunity — same buffer
+ *  checkLeg() reads/writes internally, exposed so the UI can chart actual
+ *  samples instead of synthesizing fake ones. */
+export function getOpportunityHistory(opp: ArbitrageOpportunity): number[] {
+  const symbol = opp.pair.replace(/-USD$/, "");
+  return getSpreadHistory(`${symbol}-${opp.exchanges[0]}-${opp.exchanges[1]}`);
 }
 
 /** One spread comparison between two exchange legs — the shared body every
