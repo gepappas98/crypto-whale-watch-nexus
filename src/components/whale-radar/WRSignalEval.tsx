@@ -8,6 +8,11 @@ import { loadSignalEval } from '@/lib/db';
 import type { SignalEvalRow } from '@/lib/db';
 import { fillSignalPrices, getSignalStoreStats } from '@/lib/signalStore';
 import { computeRiskMetrics, computePortfolioMetrics, type Horizon, type RiskMetricsRow } from '@/lib/backtestMetrics';
+import {
+  trainModel, getModel, getTrainingEligibility, getFeatureImportance,
+  MIN_TRAINING_SAMPLES, type MlModel,
+} from '@/lib/mlScoring';
+import { getAllSignalRecords } from '@/lib/signalStore';
 
 const SIGNAL_ORDER = [
   'AGGRESSIVE LONG',
@@ -68,6 +73,59 @@ export function WRSignalEval() {
   const [riskHorizon, setRiskHorizon] = useState<Horizon>('4h');
   const riskRows = useMemo(() => computeRiskMetrics(riskHorizon), [riskHorizon, storeStats.total, lastFilled]);
   const portfolioRow = useMemo(() => computePortfolioMetrics(riskHorizon), [riskHorizon, storeStats.total, lastFilled]);
+
+  // ── ML confidence model (FreqAI-inspired — see lib/mlScoring.ts) ─────────────
+  const [model, setModel] = useState<MlModel | null>(() => getModel());
+  const [training, setTraining] = useState(false);
+  const eligibility = useMemo(() => getTrainingEligibility(), [storeStats.total, lastFilled]);
+  const featureImportance = useMemo(() => getFeatureImportance(), [model]);
+
+  // "If we'd only acted on predictions the model was confident about" comparison —
+  // recomputed with the current model against every ML-eligible, outcome-filled record.
+  const mlComparison = useMemo(() => {
+    if (!model) return null;
+    const records = getAllSignalRecords().filter(
+      r => r.outcome_4h !== null && r.chg24 !== undefined && r.volSpike !== undefined &&
+        r.mcap !== undefined && r.dexHot !== undefined && r.isSol !== undefined,
+    );
+    if (records.length === 0) return null;
+
+    // Recompute confidence inline (same math as predictConfidence) to avoid an import cycle risk.
+    const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
+    const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+    const scored = records.map(r => {
+      const x = [
+        clamp(r.score / 100, 0, 1),
+        clamp(r.vmcap / 200, 0, 3),
+        clamp((r.chg24 as number) / 100, -3, 3),
+        clamp(Math.log10(Math.max(r.volSpike as number, 0.01)), -2, 2),
+        r.supplyPct == null ? 0.5 : clamp(r.supplyPct / 100, 0, 1),
+        clamp(Math.log10(Math.max(r.mcap as number, 1)) / 12, 0, 1),
+        r.dexHot ? 1 : 0,
+        r.isSol ? 1 : 0,
+      ];
+      const z = x.reduce((s, xi, i) => s + xi * model.weights[i], model.bias);
+      return { outcome: r.outcome_4h as number, confidence: sigmoid(z) * 100 };
+    });
+
+    const baselineWin = +((scored.filter(s => s.outcome > 0).length / scored.length) * 100).toFixed(1);
+    const highConf = scored.filter(s => s.confidence >= 60);
+    const highConfWin = highConf.length > 0
+      ? +((highConf.filter(s => s.outcome > 0).length / highConf.length) * 100).toFixed(1)
+      : null;
+
+    return { total: scored.length, baselineWin, highConfCount: highConf.length, highConfWin };
+  }, [model]);
+
+  const handleTrain = useCallback(() => {
+    setTraining(true);
+    // Runs synchronously (a few hundred rows, <300 epochs) but a tick lets the button repaint first.
+    setTimeout(() => {
+      const m = trainModel();
+      setModel(m);
+      setTraining(false);
+    }, 30);
+  }, []);
 
   const refreshStats = useCallback(() => {
     setStoreStats(getSignalStoreStats());
@@ -299,6 +357,72 @@ export function WRSignalEval() {
           )}
         </div>
       )}
+
+      {/* ── ML Confidence Model (FreqAI-inspired) ───────────────────────────── */}
+      <div className="border-t border-wr-border pt-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="text-[8px] text-wr-purple tracking-widest">🧠 ML CONFIDENCE MODEL</div>
+          <button
+            className="wr-btn text-[8px] disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled={!eligibility.ready || training}
+            onClick={handleTrain}
+            title={eligibility.ready ? 'Retrain on all currently eligible records' : `Needs ${eligibility.needed} labeled samples (have ${eligibility.eligible})`}
+          >
+            {training ? '⏳ TRAINING...' : model ? '↻ RETRAIN' : '▶ TRAIN MODEL'}
+          </button>
+        </div>
+
+        {!eligibility.ready ? (
+          <div className="text-[9px] text-wr-muted py-1">
+            Not enough labeled data yet — {eligibility.eligible}/{MIN_TRAINING_SAMPLES} signals with a filled 4h outcome and feature snapshot.
+            Keep scanning; this fills in automatically as signals resolve.
+          </div>
+        ) : !model ? (
+          <div className="text-[9px] text-wr-muted py-1">
+            {eligibility.eligible} labeled samples ready. Train to get a data-driven confidence score alongside the rule-based detector.
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              <RiskStat label="TRAINED ON" value={`${model.samples}`} color="text-wr-white" />
+              <RiskStat label="TRAIN FIT" value={`${model.trainAccuracy}%`} color={model.trainAccuracy >= 55 ? 'text-wr-green' : 'text-wr-amber'} />
+              <RiskStat label="LAST TRAINED" value={new Date(model.trainedAt).toLocaleDateString()} color="text-wr-white" />
+            </div>
+
+            {mlComparison && mlComparison.highConfWin !== null && (
+              <div className="text-[9px] leading-relaxed bg-wr-bg3 border border-wr-border rounded px-2 py-1.5">
+                Baseline win rate across {mlComparison.total} labeled signals: <span className="text-wr-white font-bold">{mlComparison.baselineWin}%</span>.
+                Restricting to the {mlComparison.highConfCount} signals the model scored ≥60% confidence:{' '}
+                <span className={`font-bold ${mlComparison.highConfWin >= mlComparison.baselineWin ? 'text-wr-green' : 'text-wr-red'}`}>
+                  {mlComparison.highConfWin}%
+                </span>.
+                {mlComparison.highConfWin < mlComparison.baselineWin && ' (Model isn\'t adding value yet — needs more training data.)'}
+              </div>
+            )}
+
+            {featureImportance && (
+              <div className="flex flex-wrap gap-1.5">
+                {featureImportance.map(f => (
+                  <span
+                    key={f.name}
+                    className={`text-[7px] px-1.5 py-0.5 border rounded font-mono
+                      ${f.weight > 0 ? 'border-wr-green/40 text-wr-green' : 'border-wr-red/40 text-wr-red'}`}
+                    title="Learned logistic-regression weight — positive pushes confidence up, negative pushes it down"
+                  >
+                    {f.name} {f.weight > 0 ? '+' : ''}{f.weight}
+                  </span>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+        <div className="text-[7px] text-wr-muted leading-relaxed">
+          Trains a small logistic-regression model on your own recorded signals (score, vol/mcap, 24h change,
+          volume spike, supply %, market cap, DEX-hot flag, Solana flag → did it profit at 4h). This is a
+          supplementary confidence score, not a replacement for detection.ts — training accuracy is on the
+          training set itself (not held-out), so treat it as a sanity check, not a guarantee.
+        </div>
+      </div>
 
       {/* ── Legend ──────────────────────────────────────────────────────────── */}
       <div className="border-t border-wr-border pt-3 space-y-1 text-[8px] text-wr-muted leading-relaxed">
