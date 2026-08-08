@@ -152,6 +152,20 @@ export async function executeArbitrageGuarded(
       reason: opp.plausibilityNote ?? "Opportunity flagged as implausible (likely stale/bad tick)",
     });
   }
+  // Liquidity check on both legs — plausibility above only catches a spread
+  // that's an outlier vs its own history; a pair can have a small, perfectly
+  // "normal" spread while still being thin enough that slippage eats the
+  // captured edge. Same checkPairQuality() gate createGridGuarded uses.
+  // Legs on exchanges outside pairQuality's coverage (e.g. hyperliquid,
+  // a perp mark price with no comparable quote-volume field) pass through
+  // unchecked, same as createGridGuarded.
+  const symbol = opp.pair.replace(/-USD$/, "");
+  for (const ex of opp.exchanges) {
+    const nexusEx = asNexusExchange(ex);
+    if (!nexusEx) continue;
+    const quality = await checkPairQuality(symbol, nexusEx);
+    if (!quality.ok) throw new ProtectionBlockedError({ allowed: false, reason: quality.reason });
+  }
   const gate = canTrade(opp.pair, "*");
   if (!gate.allowed) throw new ProtectionBlockedError(gate);
 
