@@ -435,41 +435,88 @@ const formatLargeNumber = (num: number | null | undefined): string => {
   return `$${num.toLocaleString()}`;
 };
 
-// Route all market-data requests through our server-side edge function.
-// This eliminates browser CORS issues and adds server-side caching + retries.
-const EDGE_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/market-data`;
+// Route market-data requests through our server-side edge function when
+// configured (eliminates browser CORS issues, adds server-side caching).
+// FIX: previously this built the edge URL unconditionally — if
+// VITE_SUPABASE_URL wasn't set, EDGE_BASE became the literal string
+// "undefined/functions/v1/market-data", which the browser resolved as a
+// relative path against the app's own origin and got back index.html
+// (HTML, not JSON) → `.json()` crashed with the cryptic
+// "JSON.parse: unexpected character at line 1 column 1" error. Now: only
+// route through the edge function when a real Supabase URL is configured,
+// and always fall back to a direct fetch of the original API otherwise
+// (CoinGecko's public tier and Binance's public market-data endpoints both
+// allow direct browser CORS requests, so this still works with zero config).
+const RAW_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const EDGE_CONFIGURED = !!RAW_SUPABASE_URL && /^https?:\/\//.test(RAW_SUPABASE_URL);
+const EDGE_BASE = EDGE_CONFIGURED ? `${RAW_SUPABASE_URL}/functions/v1/market-data` : "";
 const EDGE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 
-const fetchWithFallback = async (url: string, signal: AbortSignal, timeoutMs: number): Promise<Response> => {
-  // Translate the original direct URL into an edge-function call.
-  let edgeUrl = "";
+/** Reads a Response as JSON, but verifies it actually looks like JSON
+ *  first — a misbehaving proxy/edge function/CDN can return an HTML error
+ *  page with a 200 status, which `.json()` would otherwise crash on with
+ *  an unhelpful "unexpected character at line 1 column 1" message. */
+async function safeJson(res: Response, label: string): Promise<unknown> {
+  const text = await res.text();
+  const trimmed = text.trimStart();
+  if (!trimmed || (trimmed[0] !== "{" && trimmed[0] !== "[")) {
+    console.error(`[CrystalBall] ${label} returned non-JSON (first 120 chars):`, trimmed.slice(0, 120));
+    throw new Error(`${label} returned an unexpected response — the data source may be misconfigured or down.`);
+  }
   try {
-    const u = new URL(url);
-    if (u.hostname.includes("coingecko")) {
-      const path = u.pathname.replace(/^\/api\/v3/, "");
-      edgeUrl = `${EDGE_BASE}?source=coingecko&path=${encodeURIComponent(path)}&qs=${encodeURIComponent(u.search.slice(1))}`;
-    } else if (u.hostname.includes("binance")) {
-      edgeUrl = `${EDGE_BASE}?source=binance&path=${encodeURIComponent(u.pathname)}&qs=${encodeURIComponent(u.search.slice(1))}`;
-    } else {
-      edgeUrl = url;
-    }
+    return JSON.parse(trimmed);
   } catch {
-    edgeUrl = url;
+    throw new Error(`${label} returned malformed data.`);
+  }
+}
+
+const fetchWithFallback = async (url: string, signal: AbortSignal, timeoutMs: number): Promise<Response> => {
+  const doFetch = async (target: string, headers: HeadersInit) => {
+    const ctrl = new AbortController();
+    const onAbort = () => ctrl.abort();
+    signal.addEventListener("abort", onAbort);
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      return await fetch(target, { signal: ctrl.signal, headers });
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    }
+  };
+
+  if (EDGE_CONFIGURED) {
+    let edgeUrl = "";
+    try {
+      const u = new URL(url);
+      if (u.hostname.includes("coingecko")) {
+        const path = u.pathname.replace(/^\/api\/v3/, "");
+        edgeUrl = `${EDGE_BASE}?source=coingecko&path=${encodeURIComponent(path)}&qs=${encodeURIComponent(u.search.slice(1))}`;
+      } else if (u.hostname.includes("binance")) {
+        edgeUrl = `${EDGE_BASE}?source=binance&path=${encodeURIComponent(u.pathname)}&qs=${encodeURIComponent(u.search.slice(1))}`;
+      }
+    } catch {
+      edgeUrl = "";
+    }
+
+    if (edgeUrl) {
+      try {
+        const res = await doFetch(edgeUrl, EDGE_KEY ? { apikey: EDGE_KEY, Authorization: `Bearer ${EDGE_KEY}` } : {});
+        // A 2xx from the edge function with a JSON content-type is trusted
+        // as-is; anything else (including a "successful" HTML fallback
+        // page) falls through to the direct-fetch path below instead of
+        // being returned to the caller as if it were good data.
+        const contentType = res.headers.get("content-type") || "";
+        if (res.ok && contentType.includes("json")) return res;
+      } catch {
+        // edge function unreachable — fall through to direct fetch
+      }
+    }
   }
 
-  const ctrl = new AbortController();
-  const onAbort = () => ctrl.abort();
-  signal.addEventListener("abort", onAbort);
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    return await fetch(edgeUrl, {
-      signal: ctrl.signal,
-      headers: EDGE_KEY ? { apikey: EDGE_KEY, Authorization: `Bearer ${EDGE_KEY}` } : {},
-    });
-  } finally {
-    clearTimeout(timer);
-    signal.removeEventListener("abort", onAbort);
-  }
+  // No edge function configured, or it failed/returned something odd —
+  // hit the original API directly. Both CoinGecko's public tier and
+  // Binance's public market-data endpoints allow this from a browser.
+  return doFetch(url, {});
 };
 
 // ==================== AI FORECAST WITH STOP-LOSS & PROBABILITY ====================
@@ -572,7 +619,7 @@ export default function WRCrystalBallPro() {
       const coinGeckoRes = await fetchWithFallback(coinGeckoUrl, signal, 15000);
       if (!coinGeckoRes.ok) throw new Error(coinGeckoRes.status === 429 ? "Rate limit exceeded. Wait 30s." : `CoinGecko error: ${coinGeckoRes.status}`);
 
-      const json = await coinGeckoRes.json();
+      const json = await safeJson(coinGeckoRes, "CoinGecko");
       if (!Array.isArray(json) || json.length === 0) throw new Error("No data from CoinGecko");
 
       const coin = json[0];
@@ -602,7 +649,16 @@ export default function WRCrystalBallPro() {
       let superTrendData = { trend: "neutral", value: currentPrice };
 
       if (klinesRes.ok) {
-        const klines = await klinesRes.json();
+        let klines: unknown = null;
+        try {
+          klines = await safeJson(klinesRes, "Binance klines");
+        } catch (e) {
+          // Klines are used for technical indicators only — the forecast
+          // still works off CoinGecko price data alone with the defaults
+          // above, so a bad/non-JSON klines response shouldn't crash the
+          // whole analysis, just skip the technical-indicator enrichment.
+          console.warn("[CrystalBall] klines fetch failed, using defaults:", (e as Error).message);
+        }
         if (Array.isArray(klines) && klines.length > 30) {
           const closes = klines.map((k: any) => parseFloat(k[4]));
           const highs = klines.map((k: any) => parseFloat(k[2]));
