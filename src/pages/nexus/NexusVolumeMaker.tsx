@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { NexusEmptyState, StatCard, fmtNum } from "@/components/nexus/shared";
 import { ProtectionBanner } from "@/components/nexus/ProtectionBanner";
+import { NexusBotStatusBar } from "@/components/nexus/NexusBotStatusBar";
 import type { VolumeStats } from "@/lib/nexus/bot";
 import { startVolumeMakerGuarded, reportBotTradeClosed } from "@/lib/nexus/bot";
 import { toast } from "@/hooks/use-toast";
@@ -102,6 +103,7 @@ export default function NexusVolumeMaker() {
           </p>
         </div>
       </header>
+      <NexusBotStatusBar />
       <ProtectionBanner />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

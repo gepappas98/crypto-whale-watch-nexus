@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NexusEmptyState } from "@/components/nexus/shared";
 import { ProtectionBanner } from "@/components/nexus/ProtectionBanner";
+import { NexusBotStatusBar } from "@/components/nexus/NexusBotStatusBar";
 import type { GridConfig, GridStatus } from "@/lib/nexus/bot";
 import { createGridGuarded, reportBotTradeClosed } from "@/lib/nexus/bot";
 import { toast } from "@/hooks/use-toast";
@@ -152,6 +153,7 @@ export default function NexusGridStudio() {
           <Plus className="w-4 h-4 mr-1" /> New Grid
         </Button>
       </header>
+      <NexusBotStatusBar />
       <ProtectionBanner />
 
       {showCreate && (

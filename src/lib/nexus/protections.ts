@@ -78,6 +78,43 @@ export const DEFAULT_PROTECTION_CONFIG: ProtectionConfig = {
   },
 };
 
+// ── Persisted, user/optimizer-adjustable config ───────────────────────────────
+// Defaults above stay the fallback; this layer lets the Settings UI or the
+// hyperopt-style optimizer (protectionOptimizer.ts) persist a tuned config
+// without editing source. canTrade() reads this by default.
+
+const CONFIG_STORE_KEY = "nexus_protection_config_v1";
+
+export function getProtectionConfig(): ProtectionConfig {
+  try {
+    const raw = localStorage.getItem(CONFIG_STORE_KEY);
+    if (!raw) return DEFAULT_PROTECTION_CONFIG;
+    const parsed = JSON.parse(raw) as Partial<ProtectionConfig>;
+    // Shallow-merge each section over defaults so a config saved before a
+    // new field was added doesn't end up missing it.
+    return {
+      cooldown: { ...DEFAULT_PROTECTION_CONFIG.cooldown, ...parsed.cooldown },
+      stoplossGuard: { ...DEFAULT_PROTECTION_CONFIG.stoplossGuard, ...parsed.stoplossGuard },
+      maxDrawdown: { ...DEFAULT_PROTECTION_CONFIG.maxDrawdown, ...parsed.maxDrawdown },
+      lowProfitPairs: { ...DEFAULT_PROTECTION_CONFIG.lowProfitPairs, ...parsed.lowProfitPairs },
+    };
+  } catch {
+    return DEFAULT_PROTECTION_CONFIG;
+  }
+}
+
+export function setProtectionConfig(cfg: ProtectionConfig): void {
+  try {
+    localStorage.setItem(CONFIG_STORE_KEY, JSON.stringify(cfg));
+  } catch (e) {
+    console.error("[Protections] failed to persist config:", e);
+  }
+}
+
+export function resetProtectionConfig(): void {
+  localStorage.removeItem(CONFIG_STORE_KEY);
+}
+
 // ── Lock persistence ─────────────────────────────────────────────────────────
 
 function loadLocks(): ProtectionLock[] {
@@ -244,7 +281,7 @@ export interface TradeGateResult {
 export function canTrade(
   pair: string,
   side: TradeSide,
-  config: ProtectionConfig = DEFAULT_PROTECTION_CONFIG
+  config: ProtectionConfig = getProtectionConfig()
 ): TradeGateResult {
   const now = Date.now();
 

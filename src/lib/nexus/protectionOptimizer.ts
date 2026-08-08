@@ -21,7 +21,7 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 import { getAllBotTrades, type BotTradeRecord } from "./botTradeStore";
-import { DEFAULT_PROTECTION_CONFIG, type ProtectionConfig } from "./protections";
+import { DEFAULT_PROTECTION_CONFIG, getProtectionConfig, type ProtectionConfig } from "./protections";
 
 export interface OptimizationCandidate {
   maxDrawdown: { maxAllowedDrawdown: number; lockMinutes: number };
@@ -154,7 +154,7 @@ export function optimizeProtectionThresholds(opts: {
  * doesn't model well). Returns null if there's no result to apply.
  */
 export function applyBestCandidate(
-  base: ProtectionConfig = DEFAULT_PROTECTION_CONFIG
+  base: ProtectionConfig = getProtectionConfig()
 ): ProtectionConfig | null {
   const { results, insufficientData } = optimizeProtectionThresholds();
   if (insufficientData || results.length === 0) return null;
