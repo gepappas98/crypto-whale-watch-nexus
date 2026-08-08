@@ -37,6 +37,7 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 
 ## 🆕 What's New
 
+- **Six more freqtrade-concept ports** (v9.1): `pairPerformance.ts` (PerformanceFilter — ranks tradeable symbols by historical signal outcome instead of just gating them), Sortino/Calmar/SQN added to `backtestMetrics.ts` next to Sharpe/profit-factor, `openTradesLimit.ts` (FullTradesFilter — blocks new grids once the concurrent-position cap is hit, checked before the risk-based protection gate), `protectionOptimizer.ts` (hyperopt-style local grid-search that suggests protection thresholds from real closed-trade history — never auto-applied), `remotePairList.ts` (RemotePairList — fetch a curated symbol list from an external JSON URL with cache/TTL fallback), and a **dry-run mode** for the Nexus Bot's guarded execution wrappers (`isDryRun()`/`setDryRun()` in `bot.ts`) that runs the full gate chain without placing real orders.
 - **Protection engine for Nexus Bot** (`src/lib/nexus/protections.ts`, `botTradeStore.ts`) — four risk-control checks (cooldown, stoploss guard, max drawdown, low-profit-pairs) now gate every grid/volume-maker execution before it reaches the connected bot, with real closed-trade outcomes fed back into the ledger and an in-app banner (`ProtectionBanner`) showing active locks with a manual clear. See [Protection Engine](#-protection-engine) below.
 - **Fixed white-screen crash on Vercel/Lovable** — `src/integrations/supabase/client.ts` used to call `createClient()` unguarded at module import time; a missing/misnamed `VITE_SUPABASE_*` env var crashed the whole app before React could mount, and no `ErrorBoundary` could catch it (import-time errors aren't render errors). It now falls back to inert placeholder credentials and accepts either `VITE_SUPABASE_PUBLISHABLE_KEY` or `VITE_SUPABASE_ANON_KEY`, so a missing key just disables Supabase-backed features instead of blanking the whole app.
 - **Debug/startup diagnostics** (`src/lib/startupDiagnostics.ts`, `src/lib/debugOverlay.ts`) — installed before any other import in `main.tsx` specifically to surface bootstrap failures instead of a silent blank page.
@@ -261,8 +262,16 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 
 - Full-featured wallet tracking and smart-money wallet scoring.
 - Multi-channel alerts (Telegram, Discord, email) beyond the in-app bell.
-- Protection engine: pairlist-style pre-filters (volatility/spread/market-cap) feeding the scanner, and Sortino/Calmar/SQN metrics alongside existing profit-factor/Sharpe/drawdown in signal + council scoring.
 - Expand AI Council with additional agent personas and longer-horizon memory scoring.
+
+✅ Done (were previously listed here as roadmap items):
+- Pairlist-style pre-filters already exist: `src/lib/pairFilters.ts` (whale-feed) and `src/lib/nexus/pairQuality.ts` (bot gate) — ports of freqtrade's RangeStabilityFilter/VolatilityFilter/SpreadFilter/AgeFilter.
+- Sortino/Calmar/SQN now computed in `src/lib/backtestMetrics.ts` alongside profit-factor/Sharpe/drawdown.
+- `src/lib/nexus/pairPerformance.ts` — PerformanceFilter-style ranking of pairs by historical signal performance.
+- `src/lib/nexus/openTradesLimit.ts` — FullTradesFilter-style gate that shrinks available trade slots when the bot's concurrent-position cap is reached.
+- `src/lib/nexus/protectionOptimizer.ts` — hyperopt-style local grid-search that suggests protection thresholds from the bot's own closed-trade history.
+- `src/lib/nexus/remotePairList.ts` — RemotePairList-style fetch of a curated/shared symbol list from an external JSON URL.
+- Dry-run mode for the Nexus Bot guarded-execution wrappers (`bot.ts`) — simulates protection gating without placing real orders.
 
 ---
 
