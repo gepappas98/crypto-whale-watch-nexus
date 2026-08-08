@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { RouteSeo } from "@/components/RouteSeo";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import Orderflow from "./pages/Orderflow.tsx";
@@ -44,6 +45,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <RouteSeo />
           <Routes>
             <Route path="/" element={<ErrorBoundary><Index /></ErrorBoundary>} />
             <Route path="/index" element={<Navigate to="/" replace />} />
