@@ -32,6 +32,9 @@ export interface RiskMetricsRow {
   expectancy: number | null;    // winRate*avgWin + lossRate*avgLoss, i.e. expected % per trade
   maxDrawdownPct: number;       // worst peak-to-trough decline of the cumulative equity curve
   sharpe: number | null;        // mean(returns) / stddev(returns) — per-trade, NOT annualized
+  sortino: number | null;       // mean(returns) / downside-deviation — like Sharpe but only penalizes losses
+  calmar: number | null;        // totalProfitPct / maxDrawdownPct — return per unit of worst drawdown
+  sqn: number | null;           // System Quality Number: sqrt(n) * mean(returns) / stddev(returns)
 }
 
 function outcomeKey(h: Horizon): 'outcome_1h' | 'outcome_4h' | 'outcome_24h' {
@@ -43,6 +46,20 @@ function stddev(vals: number[]): number {
   const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
   const variance = vals.reduce((s, v) => s + (v - mean) ** 2, 0) / (vals.length - 1);
   return Math.sqrt(variance);
+}
+
+/**
+ * Downside deviation: same as stddev() but only counts returns below the
+ * mean (or below 0 for the "target" variant) — Sortino's whole point is
+ * that upside volatility shouldn't be penalized the way downside is.
+ * Uses 0% as the minimum acceptable return (MAR), matching how freqtrade's
+ * hyperopt Sortino loss function treats it by default.
+ */
+function downsideDeviation(vals: number[], mar = 0): number {
+  const downside = vals.filter((v) => v < mar).map((v) => (v - mar) ** 2);
+  if (downside.length === 0) return 0;
+  const meanSq = downside.reduce((a, b) => a + b, 0) / vals.length; // divide by N, not just downside count
+  return Math.sqrt(meanSq);
 }
 
 /**
@@ -99,9 +116,24 @@ function computeGroupMetrics(group: string, records: SignalRecord[], horizon: Ho
   const sd = stddev(returns);
   const sharpe = trades >= 2 && sd > 0 ? +(avgProfitPct / sd).toFixed(2) : null;
 
+  // Sortino: like Sharpe but only downside volatility is "risk".
+  const downsideDev = downsideDeviation(returns);
+  const sortino = trades >= 2 && downsideDev > 0 ? +(avgProfitPct / downsideDev).toFixed(2) : null;
+
+  // Calmar: return earned per unit of worst drawdown suffered getting there.
+  // Freqtrade's Calmar ratio divides annualized return by max drawdown; we
+  // don't annualize (same non-annualized convention as `sharpe` above), so
+  // this is total return / max drawdown over the sample window as-is.
+  const calmar = dd > 0 ? +(totalProfitPct / dd).toFixed(2) : null;
+
+  // SQN (Van Tharp's System Quality Number): sqrt(n) * mean / stddev.
+  // Rewards both a good average return AND enough trades to trust it —
+  // a strategy with 3 great trades scores worse than one with 30 solid ones.
+  const sqn = trades >= 2 && sd > 0 ? +((Math.sqrt(trades) * avgProfitPct) / sd).toFixed(2) : null;
+
   return {
     group, trades, totalProfitPct, avgProfitPct, winRate,
-    profitFactor, expectancy, maxDrawdownPct: dd, sharpe,
+    profitFactor, expectancy, maxDrawdownPct: dd, sharpe, sortino, calmar, sqn,
   };
 }
 

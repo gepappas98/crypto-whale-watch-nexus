@@ -8,6 +8,7 @@ import type { ArbitrageOpportunity } from "./arbitrage";
 import { canTrade, type TradeGateResult } from "./protections";
 import { recordBotTrade, type BotStrategy } from "./botTradeStore";
 import { checkPairQuality } from "./pairQuality";
+import { checkOpenTradeSlot, type SlotCheckResult } from "./openTradesLimit";
 import type { Exchange } from "./exchanges";
 
 const NEXUS_TRACKED_EXCHANGES = new Set(["hyperliquid", "backpack", "binance", "okx"]);
@@ -94,6 +95,35 @@ export function isBotConnected(): boolean {
   return bot !== null;
 }
 
+/* ── Dry-run mode ─────────────────────────────────────────────────────────
+ * Freqtrade-style `dry_run` config flag: when enabled, every guarded
+ * execution below still runs the full protection/quality/capacity gate
+ * chain and reports what WOULD have happened, but never calls the real
+ * bot's execute/create methods — no order is placed, no exposure opens.
+ * Useful for testing new protection thresholds live against real market
+ * conditions before trusting them with real capital. Off by default. */
+
+const DRY_RUN_KEY = "nexus_dry_run_v1";
+
+export function isDryRun(): boolean {
+  try {
+    return localStorage.getItem(DRY_RUN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setDryRun(enabled: boolean): void {
+  try {
+    localStorage.setItem(DRY_RUN_KEY, enabled ? "1" : "0");
+  } catch (e) {
+    console.error("[Bot] failed to persist dry-run flag:", e);
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("nexus:bot:dryrun", { detail: { enabled } }));
+  }
+}
+
 /* ── Protection-gated execution ────────────────────────────────────────────
  * These wrap the raw TradingBot calls with canTrade() from protections.ts.
  * Use these from UI/hooks instead of calling the raw execute/create methods
@@ -110,7 +140,7 @@ export class ProtectionBlockedError extends Error {
 
 export async function executeArbitrageGuarded(
   opp: ArbitrageOpportunity
-): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+): Promise<{ ok: boolean; txHash?: string; error?: string; dryRun?: boolean }> {
   if (!bot) throw new Error("No trading bot connected");
   // Reject opportunities that look like stale/bad ticks before even checking
   // trade-history protections — see assessPlausibility() in arbitrage.ts.
@@ -124,6 +154,11 @@ export async function executeArbitrageGuarded(
   }
   const gate = canTrade(opp.pair, "*");
   if (!gate.allowed) throw new ProtectionBlockedError(gate);
+
+  if (isDryRun()) {
+    console.info(`[DryRun] Would execute arbitrage on ${opp.pair} — all gates passed, no order placed.`);
+    return { ok: true, dryRun: true };
+  }
   return bot.executeArbitrage(opp);
 }
 
@@ -138,8 +173,28 @@ export async function createGridGuarded(cfg: GridConfig): Promise<GridStatus> {
     const quality = await checkPairQuality(cfg.symbol, nexusEx);
     if (!quality.ok) throw new ProtectionBlockedError({ allowed: false, reason: quality.reason });
   }
+  // FullTradesFilter-style capacity gate — checked before the risk-based
+  // protection checks, since "no free slots" is a capacity fact, not a
+  // risk judgement, and there's no point evaluating cooldown/drawdown
+  // locks for a trade that can't open anyway.
+  const slot: SlotCheckResult = await checkOpenTradeSlot(bot);
+  if (!slot.hasFreeSlot) {
+    throw new ProtectionBlockedError({ allowed: false, reason: slot.reason });
+  }
   const gate = canTrade(cfg.symbol, "*");
   if (!gate.allowed) throw new ProtectionBlockedError(gate);
+
+  if (isDryRun()) {
+    console.info(`[DryRun] Would create grid on ${cfg.symbol} (${cfg.exchange}) — all gates passed, no order placed.`);
+    return {
+      ...cfg,
+      status: "active",
+      pnl: 0,
+      filledGrids: 0,
+      activeOrders: 0,
+      createdAt: Date.now(),
+    };
+  }
   return bot.createGrid(cfg);
 }
 
@@ -150,6 +205,11 @@ export async function startVolumeMakerGuarded(opts: {
   if (!bot) throw new Error("No trading bot connected");
   const gate = canTrade("*", "*");
   if (!gate.allowed) throw new ProtectionBlockedError(gate);
+
+  if (isDryRun()) {
+    console.info(`[DryRun] Would start volume maker (${opts.mode}) — all gates passed, no order placed.`);
+    return { active: true, mode: opts.mode, totalVolumeUsd: 0, feesUsd: 0, rebatesUsd: 0, trades: 0 };
+  }
   return bot.startVolumeMaker(opts);
 }
 
