@@ -155,6 +155,7 @@ export function WRRightPanel({
               { key: 'all', label: 'ALL' },
               { key: 'binance', label: 'BINANCE' },
               { key: 'bybit', label: 'BYBIT' },
+              { key: 'okx', label: 'OKX' },
             ].map(ex => (
               <button
                 key={ex.key}
@@ -214,8 +215,8 @@ export function WRRightPanel({
                   >
                     <span className="text-[8px] text-wr-muted">{new Date(w.ts).toLocaleTimeString()}</span>
                     <span className="text-[9px] text-wr-white">
-                      <span className={`text-[7px] mr-1 ${w.ex === 'bybit' ? 'text-wr-amber' : 'text-wr-green-dim'}`}>
-                        {w.ex === 'bybit' ? 'BBT' : 'BNC'}
+                      <span className={`text-[7px] mr-1 ${w.ex === 'bybit' ? 'text-wr-amber' : w.ex === 'okx' ? 'text-wr-cyan' : 'text-wr-green-dim'}`}>
+                        {w.ex === 'bybit' ? 'BBT' : w.ex === 'okx' ? 'OKX' : 'BNC'}
                       </span>
                       {w.sym} {w.side}
                     </span>
