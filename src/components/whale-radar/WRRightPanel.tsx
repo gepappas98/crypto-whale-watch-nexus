@@ -339,6 +339,11 @@ export function WRRightPanel({
                   >{a.tc}</span>
                   <strong>{a.tag}</strong>: {a.text}
                 </span>
+                {a.sizing && (
+                  <span className="block text-[7px] text-wr-purple/80 mt-0.5 pl-0.5" title="Based on this signal category's real recorded outcomes — see the Risk Metrics panel for the full breakdown">
+                    ⚖ {a.sizing}
+                  </span>
+                )}
               </div>
             ))
           )}
