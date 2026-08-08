@@ -7,6 +7,13 @@
 import type { ArbitrageOpportunity } from "./arbitrage";
 import { canTrade, type TradeGateResult } from "./protections";
 import { recordBotTrade, type BotStrategy } from "./botTradeStore";
+import { checkPairQuality } from "./pairQuality";
+import type { Exchange } from "./exchanges";
+
+const NEXUS_TRACKED_EXCHANGES = new Set(["hyperliquid", "backpack", "binance", "okx"]);
+function asNexusExchange(id: string): Exchange | null {
+  return NEXUS_TRACKED_EXCHANGES.has(id) ? (id as Exchange) : null;
+}
 
 export interface GridConfig {
   id: string;
@@ -122,6 +129,15 @@ export async function executeArbitrageGuarded(
 
 export async function createGridGuarded(cfg: GridConfig): Promise<GridStatus> {
   if (!bot) throw new Error("No trading bot connected");
+  // Liquidity/data-sanity check first — cfg.symbol can come from arbitrary user
+  // input, unlike executeArbitrageGuarded's opp.plausible which is already
+  // derived from a live scan. Exchanges we don't have ticker coverage for
+  // (see pairQuality.ts's TICKERED_EXCHANGES) pass through unchecked.
+  const nexusEx = asNexusExchange(cfg.exchange);
+  if (nexusEx) {
+    const quality = await checkPairQuality(cfg.symbol, nexusEx);
+    if (!quality.ok) throw new ProtectionBlockedError({ allowed: false, reason: quality.reason });
+  }
   const gate = canTrade(cfg.symbol, "*");
   if (!gate.allowed) throw new ProtectionBlockedError(gate);
   return bot.createGrid(cfg);
