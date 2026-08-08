@@ -3,6 +3,7 @@ import { Wallet, Plug, TrendingUp } from "lucide-react";
 import { useNexusBot } from "@/hooks/useNexusBot";
 import { Card } from "@/components/ui/card";
 import { NexusEmptyState, StatCard, fmtNum } from "@/components/nexus/shared";
+import { ProtectionBanner } from "@/components/nexus/ProtectionBanner";
 import type { PortfolioSummary } from "@/lib/nexus/bot";
 
 export default function NexusPortfolio() {
@@ -49,6 +50,7 @@ export default function NexusPortfolio() {
           <p className="text-xs text-muted-foreground">Live from connected bot</p>
         </div>
       </header>
+      <ProtectionBanner />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard label="Total AUM" value={"$" + fmtNum(data?.totalAumUsd ?? 0)} icon={<Wallet className="w-4 h-4" />} />

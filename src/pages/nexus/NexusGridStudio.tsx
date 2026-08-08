@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NexusEmptyState } from "@/components/nexus/shared";
+import { ProtectionBanner } from "@/components/nexus/ProtectionBanner";
 import type { GridConfig, GridStatus } from "@/lib/nexus/bot";
+import { createGridGuarded } from "@/lib/nexus/bot";
 import { toast } from "@/hooks/use-toast";
 
 const MODES: GridConfig["mode"][] = ["normal", "martingale", "moving", "scalping", "capital_protection"];
@@ -70,7 +72,7 @@ export default function NexusGridStudio() {
       feeRate: form.feeRate ?? 0.0005,
     };
     try {
-      const g = await bot.createGrid(cfg);
+      const g = await createGridGuarded(cfg);
       setGrids((prev) => [...prev, g]);
       setShowCreate(false);
       toast({ title: "Grid created", description: `${cfg.symbol} on ${cfg.exchange}` });
@@ -99,6 +101,7 @@ export default function NexusGridStudio() {
           <Plus className="w-4 h-4 mr-1" /> New Grid
         </Button>
       </header>
+      <ProtectionBanner />
 
       {showCreate && (
         <Card className="p-4">

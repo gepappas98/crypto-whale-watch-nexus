@@ -5,6 +5,8 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 import type { ArbitrageOpportunity } from "./arbitrage";
+import { canTrade, type TradeGateResult } from "./protections";
+import { recordBotTrade, type BotStrategy } from "./botTradeStore";
 
 export interface GridConfig {
   id: string;
@@ -83,4 +85,59 @@ export function getBot(): TradingBot | null {
 
 export function isBotConnected(): boolean {
   return bot !== null;
+}
+
+/* ── Protection-gated execution ────────────────────────────────────────────
+ * These wrap the raw TradingBot calls with canTrade() from protections.ts.
+ * Use these from UI/hooks instead of calling the raw execute/create methods
+ * whenever the action opens new exposure. Outcome recording (win/loss,
+ * stop-exit or not) stays the caller's job via recordBotTrade — this layer
+ * only decides whether the attempt is allowed to happen at all. */
+
+export class ProtectionBlockedError extends Error {
+  constructor(public readonly gate: TradeGateResult) {
+    super(gate.reason ?? "Blocked by protection engine");
+    this.name = "ProtectionBlockedError";
+  }
+}
+
+export async function executeArbitrageGuarded(
+  opp: ArbitrageOpportunity
+): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+  if (!bot) throw new Error("No trading bot connected");
+  const gate = canTrade(opp.pair, "*");
+  if (!gate.allowed) throw new ProtectionBlockedError(gate);
+  return bot.executeArbitrage(opp);
+}
+
+export async function createGridGuarded(cfg: GridConfig): Promise<GridStatus> {
+  if (!bot) throw new Error("No trading bot connected");
+  const gate = canTrade(cfg.symbol, "*");
+  if (!gate.allowed) throw new ProtectionBlockedError(gate);
+  return bot.createGrid(cfg);
+}
+
+export async function startVolumeMakerGuarded(opts: {
+  mode: string;
+  signalSource: string;
+}): Promise<VolumeStats> {
+  if (!bot) throw new Error("No trading bot connected");
+  const gate = canTrade("*", "*");
+  if (!gate.allowed) throw new ProtectionBlockedError(gate);
+  return bot.startVolumeMaker(opts);
+}
+
+/** Log a closed trade's real outcome so future canTrade() checks see it.
+ *  Call this once the bot confirms a fill/close with a known PnL — never
+ *  speculatively, and never before the trade has actually closed. */
+export function reportBotTradeClosed(input: {
+  strategy: BotStrategy;
+  pair: string;
+  side: "long" | "short" | "*";
+  closeProfit: number;
+  isStopExit: boolean;
+  openedAt: number;
+  closedAt: number;
+}): void {
+  recordBotTrade(input);
 }
