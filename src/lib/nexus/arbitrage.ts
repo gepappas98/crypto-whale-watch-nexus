@@ -6,6 +6,40 @@
 
 import type { AggregateMarket, Exchange } from "./exchanges";
 
+/* ── Spread plausibility filter ────────────────────────────────────────────
+ * freqtrade concept (VolatilityFilter / SpreadFilter, plugins/pairlist/*)
+ * re-implemented for this data shape: a raw cross-exchange spread with no
+ * sanity check is just as likely to be a stale/bad tick on one feed as a
+ * real dislocation — especially right after a WS reconnect. Two checks:
+ *   1. MIN_SAMPLES — don't call anything "high confidence" until the
+ *      rolling baseline has enough history to mean something (freqtrade
+ *      won't trust a volatility reading with too short a lookback either).
+ *   2. Outlier check — a spread many multiples of its own baseline average
+ *      is far more likely to be a data glitch than a genuine opportunity;
+ *      cap confidence instead of silently trusting it.
+ * Nothing here is copied from freqtrade's source — only the "don't trust a
+ * single implausible reading" pattern is re-implemented. */
+const MIN_BASELINE_SAMPLES = 5;
+const OUTLIER_MULTIPLE = 6; // spread > 6x its own rolling baseline → likely noise, not signal
+
+export interface SpreadPlausibility {
+  plausible: boolean;
+  samples: number;
+  reason?: string;
+}
+
+function assessPlausibility(spread: number, baselineArr: number[]): SpreadPlausibility {
+  const samples = baselineArr.length;
+  if (samples < MIN_BASELINE_SAMPLES) {
+    return { plausible: true, samples, reason: `only ${samples}/${MIN_BASELINE_SAMPLES} baseline samples — confidence capped` };
+  }
+  const avg = baselineArr.reduce((a, b) => a + b, 0) / samples;
+  if (avg > 0 && spread > avg * OUTLIER_MULTIPLE) {
+    return { plausible: false, samples, reason: `${spread.toFixed(3)}% is ${(spread / avg).toFixed(1)}x its own baseline avg (${avg.toFixed(3)}%) — likely a stale/bad tick` };
+  }
+  return { plausible: true, samples };
+}
+
 export interface ArbitrageOpportunity {
   id: string;
   pair: string;
@@ -18,6 +52,10 @@ export interface ArbitrageOpportunity {
   estimatedProfitUsd: number;
   prices: Partial<Record<Exchange, number>>;
   timestamp: number;
+  /** false = this reading looks like a stale/bad tick rather than a real dislocation — see assessPlausibility(). */
+  plausible: boolean;
+  plausibilityNote?: string;
+  baselineSamples: number;
 }
 
 const PAIRS = [
@@ -66,8 +104,11 @@ export function scanArbitrage(market: AggregateMarket, notionalUsd = 1000): Arbi
     // HL vs BP
     if (bp && bp.lastPrice) {
       const spread = (Math.abs(hlPrice - bp.lastPrice) / Math.min(hlPrice, bp.lastPrice)) * 100;
+      const baselineArr = getSpreadHistory(`${pair.symbol}-HL-BP`);
+      const plaus = assessPlausibility(spread, baselineArr);
       const baseline = pushHistory(`${pair.symbol}-HL-BP`, spread);
       if (spread > MIN_SPREAD) {
+        const rawConfidence = spread > 0.3 ? "high" : spread > 0.15 ? "medium" : "low";
         out.push({
           id: `${pair.symbol}-hl-bp`,
           pair: `${pair.symbol}-USD`,
@@ -75,19 +116,25 @@ export function scanArbitrage(market: AggregateMarket, notionalUsd = 1000): Arbi
           spreadPercent: +spread.toFixed(4),
           fundingRateDiff: +(Math.abs(hl.fundingRate) * 100).toFixed(6),
           historicalBaseline: +baseline.toFixed(4),
-          confidence: spread > 0.3 ? "high" : spread > 0.15 ? "medium" : "low",
+          confidence: plaus.plausible ? rawConfidence : "low",
           direction: hlPrice > bp.lastPrice ? "short_long" : "long_short",
           estimatedProfitUsd: +((spread / 100) * notionalUsd).toFixed(2),
           prices: { hyperliquid: hlPrice, backpack: bp.lastPrice },
           timestamp: market.timestamp,
+          plausible: plaus.plausible,
+          plausibilityNote: plaus.reason,
+          baselineSamples: plaus.samples,
         });
       }
     }
     // HL vs BN
     if (bn && bn.lastPrice) {
       const spread = (Math.abs(hlPrice - bn.lastPrice) / Math.min(hlPrice, bn.lastPrice)) * 100;
+      const baselineArr = getSpreadHistory(`${pair.symbol}-HL-BN`);
+      const plaus = assessPlausibility(spread, baselineArr);
       const baseline = pushHistory(`${pair.symbol}-HL-BN`, spread);
       if (spread > MIN_SPREAD) {
+        const rawConfidence = spread > 0.3 ? "high" : spread > 0.15 ? "medium" : "low";
         out.push({
           id: `${pair.symbol}-hl-bn`,
           pair: `${pair.symbol}-USD`,
@@ -95,11 +142,14 @@ export function scanArbitrage(market: AggregateMarket, notionalUsd = 1000): Arbi
           spreadPercent: +spread.toFixed(4),
           fundingRateDiff: +(Math.abs(hl.fundingRate) * 100).toFixed(6),
           historicalBaseline: +baseline.toFixed(4),
-          confidence: spread > 0.3 ? "high" : spread > 0.15 ? "medium" : "low",
+          confidence: plaus.plausible ? rawConfidence : "low",
           direction: hlPrice > bn.lastPrice ? "short_long" : "long_short",
           estimatedProfitUsd: +((spread / 100) * notionalUsd).toFixed(2),
           prices: { hyperliquid: hlPrice, binance: bn.lastPrice },
           timestamp: market.timestamp,
+          plausible: plaus.plausible,
+          plausibilityNote: plaus.reason,
+          baselineSamples: plaus.samples,
         });
       }
     }
