@@ -241,6 +241,8 @@ export function useMarketData({
           symbol: c.symbol, coin_id: c.id, signal,
           score: c.score, category: c.category,
           vmcap: c.vmcap, entry_price: c.price,
+          chg24: c.change, volSpike: c.volSpike, supplyPct: c.supplyPct,
+          mcap: c.mcap, dexHot: c.dexHot, isSol: c.isSol,
         });
       });
 
