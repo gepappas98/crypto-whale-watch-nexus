@@ -25,9 +25,14 @@ function record(level: Diag['level'], message: string) {
 
 function checkEnv() {
   const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+  // client.ts accepts either the publishable key or the anon key, so accept
+  // both here to avoid a false "missing" error when only ANON_KEY is set.
+  const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
   if (!url) record('error', 'VITE_SUPABASE_URL is missing');
-  if (!key) record('error', 'VITE_SUPABASE_PUBLISHABLE_KEY is missing');
+  if (!key) {
+    record('error', 'VITE_SUPABASE_PUBLISHABLE_KEY (or VITE_SUPABASE_ANON_KEY) is missing');
+  }
   if (url && import.meta.env.PROD && /localhost|127\.0\.0\.1/i.test(url)) {
     record('error', `Production build is pointing API at ${url}`);
   }
