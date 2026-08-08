@@ -111,27 +111,30 @@ export async function saveCouncilDecision(
   reflection: string | null,
 ): Promise<string | null> {
   try {
-    const { data, error } = await supabase
-      .from('council_decisions')
-      .insert({
-        symbol: decision.symbol,
-        token_id: ctx.tokenId ?? null,
-        depth,
-        final_verdict: decision.finalVerdict,
-        conviction: decision.conviction,
-        decision: JSON.parse(JSON.stringify(decision)),
-        context: JSON.parse(JSON.stringify(ctx)),
-        transcript: JSON.parse(JSON.stringify(transcript)),
-        price_at: ctx.price,
-        reflection,
-      })
-      .select('id')
-      .single();
+    // Writes go through the council-persist edge function (service role).
+    // Direct client INSERTs are blocked by RLS so decisions can't be forged.
+    const { data, error } = await supabase.functions.invoke('council-persist', {
+      body: {
+        action: 'save',
+        payload: {
+          symbol: decision.symbol,
+          token_id: ctx.tokenId ?? null,
+          depth,
+          final_verdict: decision.finalVerdict,
+          conviction: decision.conviction,
+          decision: JSON.parse(JSON.stringify(decision)),
+          context: JSON.parse(JSON.stringify(ctx)),
+          transcript: JSON.parse(JSON.stringify(transcript)),
+          price_at: ctx.price,
+          reflection,
+        },
+      },
+    });
     if (error) {
       console.warn('[council] save failed:', error.message);
       return null;
     }
-    return data?.id ?? null;
+    return (data as { id?: string } | null)?.id ?? null;
   } catch (e) {
     console.warn('[council] save threw:', e);
     return null;
