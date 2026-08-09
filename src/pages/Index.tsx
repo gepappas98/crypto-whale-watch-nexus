@@ -18,6 +18,7 @@ import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
 import { useWhaleStream, type StreamSignal } from '@/hooks/useWhaleStream';
 import { useExchangeFeed } from '@/hooks/useExchangeFeed';
 import { okxAdapter } from '@/lib/exchanges/okx';
+import { krakenAdapter } from '@/lib/exchanges/kraken';
 import type { NormalizedTrade } from '@/lib/exchanges/types';
 import { DEFAULT_FILTERS, type WhaleFilters } from '@/components/whale-radar/WRAdvancedFilters';
 import {
@@ -212,6 +213,7 @@ export default function WhaleRadarApp() {
     scanHistory, setScanHistory,
     triggerScan,
     getAlertLocks,
+    lastFiltered,
   } = useMarketData({ apiKey, getBirdKey, addAlert });
 
   // ══ ALERT COOLDOWN STATUS (polled — module-level state, not reactive) ═════
@@ -344,6 +346,23 @@ export default function WhaleRadarApp() {
     onTrade: handleOkxTrade,
   });
   void okxStatus; // exposed for a future per-exchange status indicator
+
+  // ── Kraken feed — same pattern as OKX above, second exchange proving out
+  // the generic adapter (see hooks/useExchangeFeed.ts). Was fully implemented
+  // in lib/exchanges/kraken.ts but never actually instantiated anywhere.
+  const handleKrakenTrade = useCallback((t: NormalizedTrade) => {
+    const cls = t.usdt >= 5e6 ? 'ws-mega' : t.usdt >= 1e6 ? 'ws-big' : 'ws-mid';
+    handleWhaleTrade({ ts: t.ts, sym: t.sym, side: t.side, price: t.price, qty: t.qty, usdt: t.usdt, cls, ex: t.ex });
+  }, [handleWhaleTrade]);
+
+  const { status: krakenStatus } = useExchangeFeed({
+    adapter: krakenAdapter,
+    pairs: subscribedPairs,
+    minUsd: whaleThr,
+    enabled: whaleFeedEx === 'all' || whaleFeedEx === 'kraken',
+    onTrade: handleKrakenTrade,
+  });
+  void krakenStatus;
 
   // Composite status: stream takes precedence when active
   const wsStatus: WsStatus = streamStatus === 'live'
@@ -605,6 +624,7 @@ export default function WhaleRadarApp() {
           whaleFeedEx={whaleFeedEx}
           onWhaleFeedExChange={setWhaleFeedEx}
           alertLocks={alertLocks}
+          lastFiltered={lastFiltered}
         />
       </div>
 
