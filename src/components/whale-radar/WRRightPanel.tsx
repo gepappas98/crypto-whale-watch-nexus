@@ -28,6 +28,8 @@ interface WRRightPanelProps {
   onWhaleFeedExChange: (ex: string) => void;
   /** Active per-symbol / global alert-cooldown locks — see lib/alertCooldown.ts. Optional so this stays a non-breaking add. */
   alertLocks?: LockInfo[];
+  /** Coins pairFilters.ts kept out of alerting on the most recent scan, with why — see lib/pairFilters.ts. */
+  lastFiltered?: { symbol: string; reason: string }[];
 }
 
 export function WRRightPanel({
@@ -35,6 +37,7 @@ export function WRRightPanel({
   wallets, onAddWallet, onRemoveWallet, onTogglePin, onClearAlerts,
   bybitEnabled, onToggleBybit, whaleFeedEx, onWhaleFeedExChange,
   alertLocks = [],
+  lastFiltered = [],
 }: WRRightPanelProps) {
   const [walletInput, setWalletInput] = useState('');
   const [walletLabel, setWalletLabel] = useState('');
@@ -156,6 +159,7 @@ export function WRRightPanel({
               { key: 'binance', label: 'BINANCE' },
               { key: 'bybit', label: 'BYBIT' },
               { key: 'okx', label: 'OKX' },
+              { key: 'kraken', label: 'KRAKEN' },
             ].map(ex => (
               <button
                 key={ex.key}
@@ -215,8 +219,8 @@ export function WRRightPanel({
                   >
                     <span className="text-[8px] text-wr-muted">{new Date(w.ts).toLocaleTimeString()}</span>
                     <span className="text-[9px] text-wr-white">
-                      <span className={`text-[7px] mr-1 ${w.ex === 'bybit' ? 'text-wr-amber' : w.ex === 'okx' ? 'text-wr-cyan' : 'text-wr-green-dim'}`}>
-                        {w.ex === 'bybit' ? 'BBT' : w.ex === 'okx' ? 'OKX' : 'BNC'}
+                      <span className={`text-[7px] mr-1 ${w.ex === 'bybit' ? 'text-wr-amber' : w.ex === 'okx' ? 'text-wr-cyan' : w.ex === 'kraken' ? 'text-wr-purple' : 'text-wr-green-dim'}`}>
+                        {w.ex === 'bybit' ? 'BBT' : w.ex === 'okx' ? 'OKX' : w.ex === 'kraken' ? 'KRK' : 'BNC'}
                       </span>
                       {w.sym} {w.side}
                     </span>
@@ -277,6 +281,14 @@ export function WRRightPanel({
         <div className="wr-panel-header">
           <span className="wr-panel-title">🚨 MANIPULATION ALERTS</span>
           <div className="flex items-center gap-1.5">
+            {lastFiltered.length > 0 && (
+              <span
+                title={lastFiltered.slice(0, 10).map(f => `${f.symbol}: ${f.reason}`).join('\n') + (lastFiltered.length > 10 ? `\n…+${lastFiltered.length - 10} more` : '')}
+                className="text-[7px] px-1.5 py-0.5 border border-wr-border text-wr-muted font-mono tracking-widest cursor-help"
+              >
+                🔍 {lastFiltered.length} FILTERED
+              </span>
+            )}
             {alertLocks.length > 0 && (
               <span
                 title={lockTooltip}
