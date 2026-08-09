@@ -18,6 +18,7 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 import type { CoinData } from './whaleRadarState';
+import { computeSymbolPerformance, type SymbolPerformance } from './nexus/pairPerformance';
 
 export interface FilterResult {
   pass: boolean;
@@ -37,6 +38,12 @@ export interface PairFilterConfig {
   minAgeDays: number;
   /** Absolute floor for volume/mcap ratio — below this, "volume spike" is just rounding noise. */
   minVmcap: number;
+  /** PerformanceFilter analog — min filled signal fires on this symbol before its track
+   *  record is trusted enough to suppress alerts on it. Below this, unknown ≠ bad. */
+  minPerfSamples: number;
+  /** PerformanceFilter analog — a symbol's confidence-discounted avg 4h outcome below this
+   *  (with enough samples) means "this symbol's alerts have historically lost money". */
+  minPerfScore: number;
 }
 
 export const DEFAULT_PAIR_FILTER_CONFIG: PairFilterConfig = {
@@ -45,6 +52,8 @@ export const DEFAULT_PAIR_FILTER_CONFIG: PairFilterConfig = {
   minDexLiquidityUsd: 2_000,
   minAgeDays: 1,
   minVmcap: 5,
+  minPerfSamples: 5,
+  minPerfScore: -1.5,
 };
 
 // ── Individual filters (freqtrade plugin pattern: one concern each) ──────────
@@ -78,12 +87,38 @@ const ageFilter = (cfg: PairFilterConfig): PairFilter => (coin) => {
   return { pass: true };
 };
 
-export function buildDefaultFilters(cfg: PairFilterConfig = DEFAULT_PAIR_FILTER_CONFIG): PairFilter[] {
+/** PerformanceFilter analog (freqtrade plugins/pairlist/PerformanceFilter.py)
+ *  — reuses lib/nexus/pairPerformance.ts's confidence-discounted per-symbol
+ *  score instead of re-deriving it, since it already aggregates the same
+ *  signalStore.ts ledger this app already keeps. Computed ONCE per filter
+ *  build (not per coin) — see buildDefaultFilters() — so a scan of N coins
+ *  costs one signalStore pass, not N. A symbol with too few filled outcomes
+ *  passes through unfiltered: no track record isn't the same as a bad one. */
+const performanceFilter = (cfg: PairFilterConfig, perf: SymbolPerformance[]): PairFilter => {
+  const bySymbol = new Map(perf.map((p) => [p.symbol, p]));
+  return (coin) => {
+    const p = bySymbol.get(coin.symbol);
+    if (!p || p.withOutcome < cfg.minPerfSamples) return { pass: true };
+    if (p.score < cfg.minPerfScore) {
+      return {
+        pass: false,
+        reason: `${coin.symbol} has a poor track record (${p.avgOutcomePct}% avg outcome over ${p.withOutcome} fires) — alerting suppressed`,
+      };
+    }
+    return { pass: true };
+  };
+};
+
+export function buildDefaultFilters(
+  cfg: PairFilterConfig = DEFAULT_PAIR_FILTER_CONFIG,
+  perf: SymbolPerformance[] = computeSymbolPerformance(),
+): PairFilter[] {
   return [
     rangeStabilityFilter(cfg),
     volatilityFilter(cfg),
     dexLiquidityFilter(cfg),
     ageFilter(cfg),
+    performanceFilter(cfg, perf),
   ];
 }
 
