@@ -15,9 +15,12 @@ let _dbOnline = true;
 let _backendAvailable: boolean | null = null;
 let _offlineToastShown = false;
 
-// Read bearer token from Vite env. Set VITE_API_TOKEN in your .env.local or
-// Railway frontend environment variables. Must match API_AUTH_TOKEN on the server.
-const API_TOKEN = (import.meta as any).env?.VITE_API_TOKEN as string | undefined;
+// SECURITY: the server's shared API_AUTH_TOKEN must NEVER be shipped to the
+// browser. Anything in a VITE_-prefixed variable is embedded in the public JS
+// bundle and readable by every visitor. The client therefore sends no bearer
+// token at all; protected /api/* routes must be reached from a server-side
+// proxy (or edge function) that holds the secret, and the browser degrades to
+// localStorage-only persistence when those routes reject it.
 
 // ── Backend availability check ────────────────────────────────────────────────
 // Call once on app mount. If the backend is unreachable, silently marks it
@@ -88,9 +91,7 @@ async function api<T = unknown>(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const authHeaders: Record<string, string> = API_TOKEN
-        ? { 'Content-Type': 'application/json', Authorization: `Bearer ${API_TOKEN}` }
-        : { 'Content-Type': 'application/json' };
+      const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
       const res = await fetch(BASE + path, {
         headers: authHeaders,
         ...options,
