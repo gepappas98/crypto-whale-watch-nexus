@@ -127,3 +127,19 @@ export function clearRemotePairListCache(): void {
     // no-op
   }
 }
+
+/**
+ * Synchronous, no-network read of whatever's currently cached for the
+ * configured URL — for callers that can't await a fetch (e.g. a filter
+ * chain evaluated per-coin, per-scan). Returns [] if no URL is configured
+ * or nothing's been fetched yet; callers should treat an empty result as
+ * "no whitelist configured", not "whitelist of nothing", so this only
+ * makes sense combined with getRemotePairListUrl() — see
+ * lib/pairFilters.ts's remoteWhitelistFilter for the actual gate.
+ */
+export function getCachedRemotePairList(): string[] {
+  const url = getRemotePairListUrl();
+  if (!url) return [];
+  const cache = loadCache();
+  return cache && cache.url === url ? cache.pairs : [];
+}
