@@ -19,6 +19,7 @@
 
 import type { CoinData } from './whaleRadarState';
 import { computeSymbolPerformance, type SymbolPerformance } from './nexus/pairPerformance';
+import { getRemotePairListUrl, getCachedRemotePairList } from './nexus/remotePairList';
 
 export interface FilterResult {
   pass: boolean;
@@ -109,6 +110,28 @@ const performanceFilter = (cfg: PairFilterConfig, perf: SymbolPerformance[]): Pa
   };
 };
 
+/** RemotePairList analog (freqtrade plugins/pairlist/RemotePairList.py) —
+ *  opt-in symbol whitelist gate. This was previously "configure a URL in
+ *  Settings, see a fetched count, and nothing else happens" — the fetched
+ *  list was never actually consulted anywhere. This closes that gap: if a
+ *  URL is configured AND the cache has content, only symbols on that list
+ *  make it through. No URL configured, or cache still empty (first load,
+ *  before any fetch has completed) → passes everything, same as freqtrade's
+ *  RemotePairList falling through when its remote is unreachable and no
+ *  cache exists yet. Reads the sync cache (see remotePairList.ts) rather
+ *  than fetching — keeping the actual network call out of the filter's
+ *  hot path is why useMarketData.ts refreshes the cache separately. */
+const remoteWhitelistFilter: PairFilter = (coin) => {
+  const url = getRemotePairListUrl();
+  if (!url) return { pass: true }; // feature not enabled
+  const list = getCachedRemotePairList();
+  if (list.length === 0) return { pass: true }; // configured but nothing fetched yet — don't block everything on that
+  if (!list.includes(coin.symbol.toUpperCase())) {
+    return { pass: false, reason: `${coin.symbol} not on the configured remote pairlist (${list.length} symbols)` };
+  }
+  return { pass: true };
+};
+
 export function buildDefaultFilters(
   cfg: PairFilterConfig = DEFAULT_PAIR_FILTER_CONFIG,
   perf: SymbolPerformance[] = computeSymbolPerformance(),
@@ -119,6 +142,7 @@ export function buildDefaultFilters(
     dexLiquidityFilter(cfg),
     ageFilter(cfg),
     performanceFilter(cfg, perf),
+    remoteWhitelistFilter,
   ];
 }
 
