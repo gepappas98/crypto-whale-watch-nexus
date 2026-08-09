@@ -145,7 +145,7 @@ A companion Express + TypeScript API in `server/` (deployed separately, e.g. Rai
 | `/api/whale-events` | Whale event log |
 | `/api/signal-outcomes` | Signal outcome backfill (`npm run fill-prices`) |
 
-All non-public routes require a shared bearer token (`API_AUTH_TOKEN` on the server, `VITE_API_TOKEN` on the client — they must match). Postgres schema lives in `server/schema.sql` (`npm run db:migrate`).
+All non-public routes require a shared bearer token (`API_AUTH_TOKEN`, server-side only). This token must never be exposed to the browser — call protected routes from a server-side proxy/edge function that holds the secret. The browser sends no bearer token and falls back to localStorage persistence. Postgres schema lives in `server/schema.sql` (`npm run db:migrate`).
 
 ---
 
@@ -243,8 +243,7 @@ npm run test           # or: npm run test:watch
 |---|---|---|
 | `VITE_SUPABASE_URL` | Optional | Supabase project URL. Missing → Supabase features disabled, rest of app still works. |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` or `VITE_SUPABASE_ANON_KEY` | Optional | Supabase anon/publishable key (either name works). |
-| `API_AUTH_TOKEN` | Only if self-hosting `server/` | Bearer token required by protected `/api/*` routes. |
-| `VITE_API_TOKEN` | Only if self-hosting `server/` | Must exactly match `API_AUTH_TOKEN`. |
+| `API_AUTH_TOKEN` | Only if self-hosting `server/` | Bearer token required by protected `/api/*` routes. **Server-side only — never expose it as a `VITE_` variable.** |
 
 In **Lovable**, set these under Project Settings → Environment Variables (not `.env.local`). In **Vercel**, set them under Project Settings → Environment Variables and trigger a redeploy. Supabase URL/key can also be overridden at runtime per-browser from the in-app Settings panel — no rebuild required.
 
