@@ -37,6 +37,7 @@ import { applyPairFilters } from '@/lib/pairFilters';
 import { alertCooldown } from '@/lib/alertCooldown';
 import { dispatchNotification } from '@/lib/notifyChannels';
 import { getSizingHint } from '@/lib/sizingHint';
+import { getRemotePairListUrl, fetchRemotePairList } from '@/lib/nexus/remotePairList';
 import {
   CoinData, CFG, ScanSnapshot, isSolToken,
 } from '@/lib/whaleRadarState';
@@ -71,6 +72,9 @@ export interface UseMarketDataResult {
   triggerScan: () => Promise<void>;
   /** Symbols/global currently muted by the alert cooldown — for a status badge. */
   getAlertLocks: () => ReturnType<typeof alertCooldown.getActiveLocks>;
+  /** Coins pairFilters.ts kept out of alerting on the most recent scan, with why —
+   *  previously only logged to console.debug; exposed here so the UI can show it. */
+  lastFiltered: { symbol: string; reason: string }[];
 }
 
 export function useMarketData({
@@ -81,6 +85,7 @@ export function useMarketData({
   initialScanHistory = [],
 }: UseMarketDataOptions): UseMarketDataResult {
   const [coins,        setCoins]        = useState<CoinData[]>([]);
+  const [lastFiltered, setLastFiltered] = useState<{ symbol: string; reason: string }[]>([]);
   const [scanning,     setScanning]     = useState(false);
   const [scanBadge,    setScanBadge]    = useState('IDLE');
   const [dataSource,   setDataSource]   = useState<DataSource>('live');
@@ -227,9 +232,19 @@ export function useMarketData({
     // ── Noise gate: only coins that pass pairFilters get to record signals / fire alerts.
     // (freqtrade pairlist-filter pattern — see lib/pairFilters.ts for what's rejected and why)
     const { passed: alertable, rejected } = applyPairFilters(mapped);
+    setLastFiltered(rejected.map(r => ({ symbol: r.coin.symbol, reason: r.reason })));
     if (rejected.length) {
       console.debug(`[useMarketData] ${rejected.length} coin(s) filtered from alerting this scan`,
         rejected.slice(0, 5).map(r => `${r.coin.symbol}: ${r.reason}`));
+    }
+
+    // Keep the remote pairlist cache warm if configured — fire-and-forget,
+    // respects its own internal TTL (see lib/nexus/remotePairList.ts), so
+    // this is a no-op most scans. Without this, remoteWhitelistFilter in
+    // pairFilters.ts would only ever see fresh data after a manual click
+    // on Settings' "REFRESH REMOTE LIST" button.
+    if (getRemotePairListUrl()) {
+      fetchRemotePairList().catch(() => {});
     }
 
     // Record CEO signal outcomes (only valid scores, only alert-eligible coins)
@@ -323,5 +338,6 @@ export function useMarketData({
     scanHistory, setScanHistory,
     triggerScan,
     getAlertLocks: () => alertCooldown.getActiveLocks(),
-  }), [coins, scanning, scanBadge, dataSource, apiCallCount, lastScanTs, prevVolumes, scanHistory, triggerScan]);
+    lastFiltered,
+  }), [coins, scanning, scanBadge, dataSource, apiCallCount, lastScanTs, prevVolumes, scanHistory, triggerScan, lastFiltered]);
 }
