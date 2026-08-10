@@ -1,6 +1,6 @@
-# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.2
+# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.3
 
-![Version](https://img.shields.io/badge/version-9.2-blue)
+![Version](https://img.shields.io/badge/version-9.3-blue)
 ![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite)
@@ -19,6 +19,7 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 - [Core Features](#-core-features)
 - [Nexus Suite](#-nexus-suite-nexus)
 - [Protection Engine](#-protection-engine)
+- [Connecting a Trading Bot](#-connecting-a-trading-bot)
 - [Trading Hub](#-trading-hub-trading-hub)
 - [Hyperliquid Module](#-hyperliquid-module)
 - [AI Council](#-ai-council)
@@ -37,6 +38,7 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 
 ## 🆕 What's New
 
+- **A real trading-bot execution bridge** (v9.3) — `registerBot()` previously had no shipped implementation to plug in. `src/lib/nexus/restBridgeBot.ts` now provides one: browser → `nexus-bot-proxy` Edge Function (holds the real server token as a Supabase secret, never client-side) → Express `server/routes/nexusBot.ts` (its own independent dry-run + Postgres-backed cooldown gate, never just trusting the client) → `server/services/ccxtExecutor.ts` (real order placement via [ccxt](https://github.com/ccxt/ccxt) across Binance/OKX/Hyperliquid). Arbitrage execution and grid open/close place real orders end-to-end; grid *maintenance* and Volume Maker's trading loop are explicitly scoped out for now rather than faked — see [Connecting a Trading Bot](#-connecting-a-trading-bot) for exactly what's real today. Also new: `src/lib/nexus/nexusManifest.ts`, a machine-readable manifest of every guarded action and its live gate thresholds, meant to be handed to an LLM-driven caller as context before it acts.
 - **Whale-radar side gets its own round of freqtrade concept ports** (v9.2), separate from the earlier Nexus Bot batch: `src/lib/alertCooldown.ts` (StoplossGuard/MaxDrawdownProtection — per-symbol + global circuit breaker on the alert feed itself, not just bot trades), `src/lib/notifyChannels.ts` (Discord webhook + Telegram bot push for alerts that clear the cooldown gate, configurable severity floor), `src/lib/mlScoring.ts` (FreqAI-lite — a from-scratch logistic-regression model trained on this app's own recorded signal outcomes, surfaced in `WRSignalEval`'s "🧠 ML Confidence Model" section with a train/retrain button and honest baseline-vs-high-confidence win-rate comparison), `src/lib/sizingHint.ts` (Edge-Positioning-lite — turns each signal category's real backtested expectancy into a short sizing note shown right on the live alert, not just in the eval panel), and a small multi-exchange abstraction (`src/lib/exchanges/{types,binance,bybit,okx,kraken,registry}.ts` + `src/hooks/useExchangeFeed.ts`) that added OKX and Kraken as live whale-feed sources alongside Binance/Bybit.
 - **Three "logic existed but never reached the UI" gaps closed**: `src/lib/nexus/remotePairList.ts` previously fetched and displayed a curated symbol list in Settings but never actually used it to filter anything — it now gates the whale-radar scan for real via a new `remoteWhitelistFilter` in `pairFilters.ts`. The Kraken exchange adapter was fully written but never instantiated anywhere — it's now a live feed source next to OKX. And `pairFilters.ts`'s rejection reasons (why a coin didn't fire an alert) used to go straight to `console.debug` — they're now exposed through the hook and shown as a "🔍 N FILTERED" badge (hover for the reasons) next to the alert feed header.
 - **Known remaining gap, called out rather than hidden**: `src/lib/nexus/pairPerformance.ts`'s `rankByPerformance()` export has no consumer yet (nothing re-sorts a symbol list by it), and `mlScoring.ts`'s `predictConfidence()` isn't surfaced per-coin in the live scanner table — only in `WRSignalEval`'s aggregate comparison. Tracked in [Roadmap](#-roadmap).
@@ -76,7 +78,7 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 - **Grid Studio** — grid-trading strategy builder.
 - **Volume Maker** — synthetic volume/market-making strategy tooling.
 - **Portfolio** — P&L and risk tracking.
-- **Nexus Bot** (`useNexusBot`, `src/lib/nexus/bot.ts`) — connects to a configurable automated trading bot backend and reports connection state in the UI. Grid and Volume Maker executions go through the [protection engine](#-protection-engine) rather than calling the bot directly.
+- **Nexus Bot** (`useNexusBot`, `src/lib/nexus/bot.ts`) — connects a real execution backend via `RestBridgeBot` (see [Connecting a Trading Bot](#-connecting-a-trading-bot)) and reports connection state in the UI. Grid and Volume Maker executions go through the [protection engine](#-protection-engine) rather than calling the bot directly.
 
 ## 🛡️ Protection Engine
 
@@ -92,6 +94,41 @@ Concept ported from freqtrade's `plugins/protections/*` and re-implemented from 
 - **Guarded execution wrappers** in `bot.ts` (`executeArbitrageGuarded`, `createGridGuarded`, `startVolumeMakerGuarded`) replace the raw `TradingBot` calls in Grid Studio and Volume Maker; a blocked attempt throws `ProtectionBlockedError` with the human-readable reason, surfaced via the existing toast error handling.
 - **Real outcome reporting** — Grid Studio detects an `active → stopped/error` transition and reports `closeProfit = pnl / totalInvestment` (both real, bot-reported values); Volume Maker reports the fee/rebate margin (`(rebatesUsd - feesUsd) / totalVolumeUsd`) when a run stops. No fabricated numbers feed the ledger.
 - **`ProtectionBanner`** (`src/components/nexus/ProtectionBanner.tsx`) — renders nothing when there are no active locks; otherwise shows each locked scope, the reason, time remaining, and a manual "Clear" action. Mounted on Grid Studio, Volume Maker, and Portfolio.
+
+## 🔌 Connecting a Trading Bot
+
+`registerBot()` (`src/lib/nexus/bot.ts`) accepts anything implementing the `TradingBot` interface — the app ships one real implementation, `RestBridgeBot`, rather than hardcoding a specific exchange or bot product into the frontend.
+
+**Why the browser can't execute trades directly:** real exchange API keys must never reach client JS — authenticated exchange endpoints generally block browser CORS anyway, and shipping a secret to every visitor's tab is a straightforward compromise. Execution has to happen server-side.
+
+**Architecture:**
+
+```
+Browser (RestBridgeBot)
+  → supabase.functions.invoke('nexus-bot-proxy')   — browser only ever holds the public anon key
+    → Edge Function (supabase/functions/nexus-bot-proxy)
+        holds API_AUTH_TOKEN as a Supabase secret, never in client code
+      → Express server  POST/GET/DELETE /api/nexus-bot/*  (server/routes/nexusBot.ts)
+          re-checks dry-run + a Postgres-backed cooldown independently —
+          never trusts that the browser's own gate already passed
+        → server/services/ccxtExecutor.ts — real order placement via ccxt
+            (binance, okx, hyperliquid; backpack once ccxt supports it)
+```
+
+This mirrors the same "browser → edge function → real secret held server-side" pattern already used for `coingecko-proxy`, `hyperliquid-cache`, and `whale-stream` — nothing new architecturally, just applied to order execution instead of market data.
+
+**Setup:**
+1. `npm install` inside `server/` (adds `ccxt`).
+2. `psql $DATABASE_URL -f server/migrations/002_nexus_bot.sql`.
+3. In `server/.env` (never committed): exchange credentials per exchange you want live (`BINANCE_API_KEY`/`BINANCE_API_SECRET`, `OKX_API_KEY`/`OKX_API_SECRET`/`OKX_API_PASSPHRASE`, ...). Only configured exchanges are usable — others fail with a clear error, not a silent no-op.
+4. `supabase secrets set NEXUS_BOT_API_URL=https://your-express-server.example.com API_AUTH_TOKEN=<same value as server/.env>`, then `supabase functions deploy nexus-bot-proxy`.
+5. In the app, Settings → 🐋 NEXUS BOT → **CONNECT BOT**.
+
+**Dry-run is on by default, in two independent places.** The client-side toggle in Settings only affects the browser's own gate chain; the server enforces its own `NEXUS_DRY_RUN` flag regardless of what the client sends, and only turns off when **both** `NEXUS_DRY_RUN=false` **and** `NEXUS_LIVE_TRADING_CONFIRM=I_UNDERSTAND_THE_RISK` are set — a deliberately exact phrase, not a plain boolean, so it can't flip on from a stray typo.
+
+**Scope, stated plainly:** arbitrage execution and grid open/close place real orders end-to-end. Grid *maintenance* (re-placing an order once a level fills) is a documented `TODO` in `server/services/nexusBotWorker.ts` — it needs per-exchange `fetchOrder` status handling, which isn't implemented yet. Volume Maker only tracks start/stop state; `VolumeMakerOpts` has no symbol/pair field in the current interface, so there's nothing concrete to trade until that's extended — no fake trading loop stands in for it.
+
+**For AI agents:** `src/lib/nexus/nexusManifest.ts` exports `getManifest()` — a structured, machine-readable description of every guarded action, its exact gate thresholds (read live from `protections.ts`/`openTradesLimit.ts`, not hardcoded text), and its input/output shape. Hand this to an LLM-driven caller as context before it acts, the same way a human would read this section first.
 
 ## 🧠 Trading Hub (`/trading-hub/*`)
 
@@ -271,8 +308,14 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 
 - Full-featured wallet tracking and smart-money wallet scoring.
 - Expand AI Council with additional agent personas and longer-horizon memory scoring.
-- `src/lib/nexus/pairPerformance.ts`'s `rankByPerformance()` has no consumer yet — nothing currently re-sorts a symbol list by historical performance, even though the ranking function exists and is tested via `getSymbolPerformance()` (which `pairFilters.ts` does use).
-- `src/lib/mlScoring.ts`'s `predictConfidence()` is only surfaced in `WRSignalEval`'s aggregate baseline-vs-high-confidence comparison — there's no per-coin ML confidence badge in the live scanner table yet.
+- Grid *maintenance* (re-placing an order once a level fills) — `server/services/nexusBotWorker.ts` has the polling loop wired up but the actual per-exchange `fetchOrder`/re-place logic is a documented `TODO`, not implemented.
+- Volume Maker's real trading loop — blocked on extending `VolumeMakerOpts` (`bot.ts`) with a symbol/pair field; there's nothing concrete to trade against yet.
+- A Freqtrade REST API bridge as a second, complementary bot — closing the loop from whale-radar's own detected signals (score + ML confidence + sizing hint) into a real freqtrade `forceentry` call, with freqtrade's own stoploss/ROI as a second layer of protection alongside Nexus's own. Currently only `RestBridgeBot` (ccxt-based) is implemented.
+- An MCP server wrapping `src/lib/nexus/nexusManifest.ts` + the `/api/nexus-bot/*` routes, so an MCP-compatible AI client (Claude Desktop, Claude Code, ...) can drive Nexus directly rather than only reading the manifest for context.
+
+✅ Done (were previously listed here as roadmap items):
+- `src/lib/nexus/pairPerformance.ts`'s `rankByPerformance()` now orders the watchlist bar (`WRTracker.tsx`) by historical performance.
+- `src/lib/mlScoring.ts`'s `predictConfidence()` is now a live per-coin "🧠N%" badge in the scanner table (`WRScanner.tsx`), alongside a win-rate badge from `getSymbolPerformance()`.
 
 ✅ Done (were previously listed here as roadmap items):
 - Pairlist-style pre-filters already exist: `src/lib/pairFilters.ts` (whale-feed) and `src/lib/nexus/pairQuality.ts` (bot gate) — ports of freqtrade's RangeStabilityFilter/VolatilityFilter/SpreadFilter/AgeFilter/PerformanceFilter/RemotePairList, the last two reusing `pairPerformance.ts` and `remotePairList.ts` directly rather than re-deriving the logic.
@@ -293,9 +336,3 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 ## ⚠️ Disclaimer
 
 Educational and informational purposes only. Not financial or trading advice. Do your own research before making any trading decisions.
-
-## 🤖 For AI Bots & Autonomous Agents
-This repository is optimized for autonomous agents and LLM ingestion.
-- **llms.txt**: Refer to `/llms.txt` for high-level repository context.
-- **Data Schemas**: Check `src/lib/db.ts` for structured data models.
-- **Integration Layer**: Check `src/lib/hyperliquid.ts` for API and DEX interaction logic.
