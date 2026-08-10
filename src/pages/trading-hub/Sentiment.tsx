@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertCircle, ExternalLink } from "lucide-react";
+import { SymbolQuickSelect } from "@/components/trading/SymbolQuickSelect";
 
 function pctColor(s: string) {
   return s === "Bullish" || s === "Positive" ? "text-emerald-500" :
@@ -37,13 +38,18 @@ export default function Sentiment() {
     staleTime: REFRESH.sentiment, refetchInterval: REFRESH.sentiment,
   });
 
+  const selectSymbol = (s: string) => { setSymbol(s); setInput(s); };
+
   return (
     <div className="space-y-4 max-w-7xl mx-auto">
-      <Card className="p-4 flex flex-wrap items-center gap-2">
+      <Card className="p-4 flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
         <Input className="w-48" value={input} onChange={(e) => setInput(e.target.value.toUpperCase())}
           onKeyDown={(e) => e.key === "Enter" && setSymbol(input.trim())} />
         <Button onClick={() => setSymbol(input.trim())}>Analyze</Button>
         <span className="text-xs text-muted-foreground ml-auto">Symbol: {symbol}</span>
+        </div>
+        <SymbolQuickSelect value={symbol} onSelect={selectSymbol} />
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
