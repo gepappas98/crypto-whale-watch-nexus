@@ -30,6 +30,8 @@ import { HLManipulationScanner } from '@/components/hyperliquid/HLManipulationSc
 import { useHLOpportunities } from '@/hooks/useHLOpportunities';
 import type { HLOppSignal } from '@/hooks/useHLOpportunities';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { getModel, predictConfidence } from '@/lib/mlScoring';
+import { computeSymbolPerformance, type SymbolPerformance } from '@/lib/nexus/pairPerformance';
 
 // ── HL opportunity badge config (per opportunityType) ────────────────────────
 const HL_OPP_META: Record<string, { label: string; cls: string; title: string }> = {
@@ -301,6 +303,17 @@ export function WRScanner({
     return filtered.slice(start, end);
   }, [filtered, currentPage]);
 
+  // ── ML confidence + symbol performance — computed once per scan, not per row ──
+  // predictConfidence() itself is cheap (a dot product), but getModel()/
+  // computeSymbolPerformance() each read + aggregate localStorage; memoizing
+  // on `coins` (which changes once per scan) keeps a page of 20 rows from
+  // re-doing that work 20 times per render.
+  const mlModel = useMemo(() => getModel(), [coins]);
+  const perfBySymbol = useMemo(() => {
+    const perf = computeSymbolPerformance();
+    return new Map(perf.map((p) => [p.symbol, p]));
+  }, [coins]);
+
 
 
   const badgeCls =
@@ -481,6 +494,18 @@ export function WRScanner({
                 const catCls = c.category ? `wr-cat-${c.category.toLowerCase()}` : '';
                 const aiRow = aiRows[c.symbol];
 
+                // ML confidence + track record — see mlModel/perfBySymbol memos above.
+                // Both are optional/best-effort: null model (not trained yet) or no
+                // performance history just means the badge doesn't render for that coin.
+                const mlConf = mlModel
+                  ? predictConfidence({
+                      score: c.score, vmcap: c.vmcap, chg24: c.change, volSpike: c.volSpike,
+                      supplyPct: c.supplyPct, mcap: c.mcap, dexHot: c.dexHot, isSol: c.isSol,
+                    })
+                  : null;
+                const perf: SymbolPerformance | undefined = perfBySymbol.get(c.symbol);
+                const showPerf = perf && perf.withOutcome >= 3; // lower floor than pairFilters.ts's 5-sample suppression gate — showing a number is lower-stakes than suppressing an alert on it
+
                 // Safe HL opportunity lookup
                 let hlOpp: HLOppSignal | undefined = undefined;
                 let hlMeta: (typeof HL_OPP_META)[string] | null = null;
@@ -517,6 +542,30 @@ export function WRScanner({
                         <span className="text-wr-green font-semibold">{c.symbol}</span>
                         {c.isSol && <span className="text-wr-sol text-[8px]">◎</span>}
                         {c.dexHot && <span className="wr-badge bg-wr-blue/10 text-wr-blue border border-wr-blue/30">DEX</span>}
+                        {mlConf != null && (
+                          <span
+                            className={`wr-badge border ${
+                              mlConf >= 60
+                                ? 'bg-wr-purple/10 text-wr-purple border-wr-purple/30'
+                                : 'bg-wr-muted/10 text-wr-muted border-wr-muted/20'
+                            }`}
+                            title="ML confidence — see WRSignalEval's 'ML Confidence Model' panel for how this is trained and what it means"
+                          >
+                            🧠{mlConf.toFixed(0)}%
+                          </span>
+                        )}
+                        {showPerf && perf && (
+                          <span
+                            className={`wr-badge border ${
+                              perf.score >= 0
+                                ? 'bg-wr-green/10 text-wr-green border-wr-green/30'
+                                : 'bg-wr-red/10 text-wr-red border-wr-red/30'
+                            }`}
+                            title={`${perf.withOutcome} past signals on this symbol, ${perf.winRate ?? '—'}% win rate, ${perf.avgOutcomePct ?? '—'}% avg outcome`}
+                          >
+                            {perf.winRate ?? 0}%WR
+                          </span>
+                        )}
                         {hlOpp && hlMeta && (() => {
                           const _opp  = hlOpp!;
                           const _meta = hlMeta!;
