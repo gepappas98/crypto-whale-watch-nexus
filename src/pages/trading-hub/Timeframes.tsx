@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertCircle } from "lucide-react";
+import { SymbolQuickSelect } from "@/components/trading/SymbolQuickSelect";
 
 function fmt(n?: number, d = 2) { return n == null || isNaN(n) ? "—" : n.toFixed(d); }
 
@@ -26,13 +27,18 @@ export default function Timeframes() {
     refetchInterval: REFRESH.multiTimeframe,
   });
 
+  const selectSymbol = (s: string) => { setSymbol(s); setInput(s); };
+
   return (
     <div className="space-y-4 max-w-7xl mx-auto">
-      <Card className="p-4 flex items-center gap-2">
+      <Card className="p-4 flex flex-col gap-2">
+        <div className="flex items-center gap-2">
         <Input className="w-48" value={input} onChange={(e) => setInput(e.target.value.toUpperCase())}
           onKeyDown={(e) => e.key === "Enter" && setSymbol(input.trim())} />
         <Button onClick={() => setSymbol(input.trim())}>Analyze</Button>
         {q.data && <span className="text-xs text-muted-foreground ml-auto">Updated {new Date(q.data.timestamp).toLocaleTimeString()}</span>}
+        </div>
+        <SymbolQuickSelect value={symbol} onSelect={selectSymbol} />
       </Card>
 
       {q.isError && (
