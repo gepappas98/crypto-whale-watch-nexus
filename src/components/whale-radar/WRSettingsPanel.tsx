@@ -7,7 +7,8 @@ import { isHLConfigured } from '@/lib/hyperliquid';
 import {
   getNotifyConfig, setNotifyConfig, sendTestNotification, type NotifyLevel,
 } from '@/lib/notifyChannels';
-import { isDryRun, setDryRun } from '@/lib/nexus/bot';
+import { isDryRun, setDryRun, isBotConnected, registerBot, unregisterBot } from '@/lib/nexus/bot';
+import { RestBridgeBot } from '@/lib/nexus/restBridgeBot';
 import { getMaxOpenTrades, setMaxOpenTrades } from '@/lib/nexus/openTradesLimit';
 import {
   getRemotePairListUrl, setRemotePairListUrl, fetchRemotePairList,
@@ -60,6 +61,7 @@ export function WRSettingsPanel({
   // ── Nexus Bot: dry-run, open-trade cap, remote pairlist (self-contained,
   // same pattern as notifyCfg above — see lib/nexus/bot.ts / openTradesLimit.ts / remotePairList.ts) ──
   const [dryRunOn, setDryRunOn] = useState(() => isDryRun());
+  const [botConnected, setBotConnected] = useState(() => isBotConnected());
   const [maxOpen, setMaxOpen] = useState(() => getMaxOpenTrades());
   const [remoteUrl, setRemoteUrlState] = useState(() => getRemotePairListUrl() ?? '');
   const [remoteStatus, setRemoteStatus] = useState<string | null>(null);
@@ -300,6 +302,23 @@ export function WRSettingsPanel({
 
       <SettingsGroup label="🐋 NEXUS BOT">
         <div className="flex items-center justify-between gap-2">
+          <span className="text-[8px] text-wr-muted">Execution bridge</span>
+          <button
+            className={`wr-btn text-[8px] px-2 ${botConnected ? 'text-wr-green border-wr-green' : ''}`}
+            onClick={() => {
+              if (botConnected) { unregisterBot(); setBotConnected(false); }
+              else { registerBot(new RestBridgeBot()); setBotConnected(true); }
+            }}
+          >
+            {botConnected ? '● CONNECTED (RestBridgeBot)' : '○ CONNECT BOT'}
+          </button>
+        </div>
+        <Note cls="text-wr-muted">
+          {botConnected
+            ? 'Routes through supabase/functions/nexus-bot-proxy → your Express server → ccxt. Configure NEXUS_BOT_API_URL + API_AUTH_TOKEN as Supabase secrets first.'
+            : 'No bot connected — grid/arbitrage/volume-maker actions will throw until you connect one.'}
+        </Note>
+        <div className="flex items-center justify-between gap-2 mt-1.5">
           <span className="text-[8px] text-wr-muted">Dry-run mode</span>
           <button
             className={`wr-btn text-[8px] px-2 ${dryRunOn ? 'text-wr-green border-wr-green' : ''}`}
@@ -308,6 +327,9 @@ export function WRSettingsPanel({
             {dryRunOn ? '● ON — no real orders' : '○ OFF — live trading'}
           </button>
         </div>
+        <Note cls="text-wr-amber">
+          Client-side only — the server enforces its own separate NEXUS_DRY_RUN flag independently and does not trust this toggle.
+        </Note>
         <div className="flex items-center gap-1.5 mt-1.5">
           <span className="text-[8px] text-wr-muted shrink-0">Max open trades</span>
           <input
