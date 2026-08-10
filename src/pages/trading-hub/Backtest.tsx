@@ -14,6 +14,7 @@ import {
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { AlertCircle } from "lucide-react";
 import type { BacktestResult } from "@/types/trading";
+import { SymbolQuickSelect } from "@/components/trading/SymbolQuickSelect";
 
 const STRATS = [
   { v: "rsi", l: "RSI" }, { v: "bollinger", l: "Bollinger" }, { v: "macd", l: "MACD" },
@@ -83,6 +84,7 @@ export default function Backtest() {
             {compare.isPending ? "Comparing…" : "Compare All Strategies"}
           </Button>
         </div>
+        <SymbolQuickSelect value={symbol} onSelect={setSymbol} className="mt-3" />
       </Card>
 
       {(run.isError || compare.isError) && (
