@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { tradingApi, REFRESH } from "@/lib/trading-api";
 import { Card } from "@/components/ui/card";
@@ -7,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { AlertCircle, RefreshCw } from "lucide-react";
+import { SymbolQuickSelect } from "@/components/trading/SymbolQuickSelect";
 import {
   ResponsiveContainer, BarChart, Bar, RadialBarChart, RadialBar, PolarAngleAxis, Cell,
 } from "recharts";
@@ -27,10 +29,21 @@ function sigColor(s: string) {
 }
 
 export default function Technical() {
-  const [symbol, setSymbol] = useState("BTC-USD");
-  const [input, setInput] = useState("BTC-USD");
+  // Screener.tsx and TechnicalContextBadge.tsx both already link here with
+  // ?s=SYMBOL expecting this page to pick it up — it never did, so every
+  // "Analyze" click for a non-BTC symbol silently landed back on BTC-USD.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialSymbol = (searchParams.get("s") || "BTC-USD").toUpperCase();
+  const [symbol, setSymbol] = useState(initialSymbol);
+  const [input, setInput] = useState(initialSymbol);
   const [tf, setTf] = useState("1D");
   const [auto, setAuto] = useState(true);
+
+  const selectSymbol = (s: string) => {
+    setSymbol(s);
+    setInput(s);
+    setSearchParams({ s });
+  };
 
   const q = useQuery({
     queryKey: ["technical", symbol, tf],
@@ -48,11 +61,11 @@ export default function Technical() {
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value.toUpperCase())}
-            onKeyDown={(e) => e.key === "Enter" && setSymbol(input.trim())}
+            onKeyDown={(e) => e.key === "Enter" && selectSymbol(input.trim())}
             placeholder="Symbol (e.g. BTC-USD, AAPL)"
             className="w-48"
           />
-          <Button onClick={() => setSymbol(input.trim())}>Analyze</Button>
+          <Button onClick={() => selectSymbol(input.trim())}>Analyze</Button>
           <div className="flex gap-1 ml-2">
             {TFS.map((t) => (
               <Button key={t} size="sm" variant={tf === t ? "default" : "outline"} onClick={() => setTf(t)}>
@@ -70,6 +83,7 @@ export default function Technical() {
             </Button>
           </div>
         </div>
+        <SymbolQuickSelect value={symbol} onSelect={selectSymbol} className="mt-3" />
         {data && (
           <div className="mt-3 text-xs text-muted-foreground">
             {symbol} · {tf} · Price <span className="text-foreground font-semibold">${fmt(data.price)}</span> · Updated {new Date(data.timestamp).toLocaleTimeString()}
