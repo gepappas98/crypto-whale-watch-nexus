@@ -293,3 +293,9 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 ## ⚠️ Disclaimer
 
 Educational and informational purposes only. Not financial or trading advice. Do your own research before making any trading decisions.
+
+## 🤖 For AI Bots & Autonomous Agents
+This repository is optimized for autonomous agents and LLM ingestion.
+- **llms.txt**: Refer to `/llms.txt` for high-level repository context.
+- **Data Schemas**: Check `src/lib/db.ts` for structured data models.
+- **Integration Layer**: Check `src/lib/hyperliquid.ts` for API and DEX interaction logic.
