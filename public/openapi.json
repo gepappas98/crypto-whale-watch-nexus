@@ -1,0 +1,20 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Crypto Whale Watch Nexus API",
+    "version": "1.0.0",
+    "description": "API endpoints for accessing real-time crypto whale transaction data."
+  },
+  "paths": {
+    "/api/whales": {
+      "get": {
+        "summary": "Get latest whale transactions",
+        "responses": {
+          "200": {
+            "description": "A list of tracked whale transactions"
+          }
+        }
+      }
+    }
+  }
+}

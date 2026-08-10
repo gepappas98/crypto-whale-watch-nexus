@@ -1,0 +1,16 @@
+# Crypto Whale Watch Nexus
+
+> Crypto Whale Watch Nexus is a real-time cryptocurrency analytics platform designed to track, detect, and analyze large whale transactions across multiple blockchains and DEXs (including Hyperliquid).
+
+## Core Capabilities
+- Real-time Crypto Whale Transaction Tracking
+- Hyperliquid L1 Analytics & Orderbook/Trade Data
+- On-chain market intelligence and alerts
+
+## Key Files & Code structure
+- `src/lib/hyperliquid.ts`: Integration logic with Hyperliquid API / RPC
+- `src/lib/db.ts`: Database integration and schemas for storing whale transactions
+
+## API & Documentation
+- Website URL: https://crypto-whale-watch-nexus.lovable.app/
+- Repository: https://github.com/gepappas98/crypto-whale-watch-nexus
