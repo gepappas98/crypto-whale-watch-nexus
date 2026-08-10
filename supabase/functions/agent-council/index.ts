@@ -20,6 +20,35 @@ const BASE_URLS: Record<string, string> = {
   groq: 'https://api.groq.com/openai/v1',
 };
 
+// SSRF guard: only these hosts may ever be contacted for OpenAI-compatible calls.
+// A client-supplied baseUrl is accepted only if it is https and its host is listed.
+const ALLOWED_LLM_HOSTS = new Set([
+  'api.openai.com',
+  'openrouter.ai',
+  'api.groq.com',
+  'api.anthropic.com',
+  'api.mistral.ai',
+  'api.deepseek.com',
+  'api.together.xyz',
+  'api.x.ai',
+]);
+
+/** Returns a safe base URL for the provider, ignoring any disallowed custom baseUrl. */
+function resolveBaseUrl(provider: string, baseUrl?: string): string {
+  const fallback = BASE_URLS[provider] || BASE_URLS.openai;
+  if (!baseUrl) return fallback;
+  let u: URL;
+  try {
+    u = new URL(baseUrl);
+  } catch {
+    return fallback;
+  }
+  if (u.protocol !== 'https:') return fallback;
+  if (!ALLOWED_LLM_HOSTS.has(u.hostname.toLowerCase())) return fallback;
+  return `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+}
+
+
 const DEPTH_AGENTS: Record<string, AgentId[]> = {
   quick: ['bull', 'bear', 'pm'],
   standard: ['bull', 'bear', 'risk', 'trader', 'pm'],
@@ -154,7 +183,7 @@ async function streamAgent(
   }
 
   if (provider !== 'lovable') {
-    const base = llm.baseUrl?.replace(/\/$/, '') || BASE_URLS[provider] || BASE_URLS.openai;
+    const base = resolveBaseUrl(provider, llm.baseUrl);
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${llm.apiKey}` },
