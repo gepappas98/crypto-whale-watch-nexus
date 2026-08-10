@@ -1,6 +1,6 @@
-# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9
+# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.2
 
-![Version](https://img.shields.io/badge/version-9.0-blue)
+![Version](https://img.shields.io/badge/version-9.2-blue)
 ![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite)
@@ -37,6 +37,9 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 
 ## 🆕 What's New
 
+- **Whale-radar side gets its own round of freqtrade concept ports** (v9.2), separate from the earlier Nexus Bot batch: `src/lib/alertCooldown.ts` (StoplossGuard/MaxDrawdownProtection — per-symbol + global circuit breaker on the alert feed itself, not just bot trades), `src/lib/notifyChannels.ts` (Discord webhook + Telegram bot push for alerts that clear the cooldown gate, configurable severity floor), `src/lib/mlScoring.ts` (FreqAI-lite — a from-scratch logistic-regression model trained on this app's own recorded signal outcomes, surfaced in `WRSignalEval`'s "🧠 ML Confidence Model" section with a train/retrain button and honest baseline-vs-high-confidence win-rate comparison), `src/lib/sizingHint.ts` (Edge-Positioning-lite — turns each signal category's real backtested expectancy into a short sizing note shown right on the live alert, not just in the eval panel), and a small multi-exchange abstraction (`src/lib/exchanges/{types,binance,bybit,okx,kraken,registry}.ts` + `src/hooks/useExchangeFeed.ts`) that added OKX and Kraken as live whale-feed sources alongside Binance/Bybit.
+- **Three "logic existed but never reached the UI" gaps closed**: `src/lib/nexus/remotePairList.ts` previously fetched and displayed a curated symbol list in Settings but never actually used it to filter anything — it now gates the whale-radar scan for real via a new `remoteWhitelistFilter` in `pairFilters.ts`. The Kraken exchange adapter was fully written but never instantiated anywhere — it's now a live feed source next to OKX. And `pairFilters.ts`'s rejection reasons (why a coin didn't fire an alert) used to go straight to `console.debug` — they're now exposed through the hook and shown as a "🔍 N FILTERED" badge (hover for the reasons) next to the alert feed header.
+- **Known remaining gap, called out rather than hidden**: `src/lib/nexus/pairPerformance.ts`'s `rankByPerformance()` export has no consumer yet (nothing re-sorts a symbol list by it), and `mlScoring.ts`'s `predictConfidence()` isn't surfaced per-coin in the live scanner table — only in `WRSignalEval`'s aggregate comparison. Tracked in [Roadmap](#-roadmap).
 - **Six more freqtrade-concept ports** (v9.1): `pairPerformance.ts` (PerformanceFilter — ranks tradeable symbols by historical signal outcome instead of just gating them), Sortino/Calmar/SQN added to `backtestMetrics.ts` next to Sharpe/profit-factor (now shown in `WRSignalEval`'s risk table), `openTradesLimit.ts` (FullTradesFilter — blocks new grids once the concurrent-position cap is hit, checked before the risk-based protection gate), `protectionOptimizer.ts` (hyperopt-style local grid-search that suggests protection thresholds from real closed-trade history — never auto-applied), `remotePairList.ts` (RemotePairList — fetch a curated symbol list from an external JSON URL with cache/TTL fallback), and a **dry-run mode** for the Nexus Bot's guarded execution wrappers (`isDryRun()`/`setDryRun()` in `bot.ts`) that runs the full gate chain without placing real orders.
 - **UI for all of the above**: `NexusBotStatusBar` (dry-run badge + live open-trade-slot count, mounted on Grid Studio/Volume Maker/Portfolio), `ProtectionOptimizerPanel` (shows the optimizer's top suggestion with an explicit Apply/Dismiss — mounted on Portfolio), and a new **🐋 NEXUS BOT** group in the Settings panel (dry-run toggle, max open trades, remote pairlist URL + manual refresh). Protection thresholds are now persisted (`getProtectionConfig`/`setProtectionConfig` in `protections.ts`) so the optimizer's "Apply" button has something durable to write to instead of the hardcoded default.
 - **Protection engine for Nexus Bot** (`src/lib/nexus/protections.ts`, `botTradeStore.ts`) — four risk-control checks (cooldown, stoploss guard, max drawdown, low-profit-pairs) now gate every grid/volume-maker execution before it reaches the connected bot, with real closed-trade outcomes fed back into the ledger and an in-app banner (`ProtectionBanner`) showing active locks with a manual clear. See [Protection Engine](#-protection-engine) below.
@@ -53,11 +56,12 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 ## 📊 Core Features
 
 - **Live market ticker** — real-time prices/volumes across tracked assets.
-- **Whale transaction scanner** (`WRScanner`, `useWhaleStream`, `useWhaleWebSocket`) — streams large trades from Binance and Bybit WebSockets, with an HTTP-seed fallback and exponential backoff + jitter reconnect if the socket drops.
+- **Whale transaction scanner** (`WRScanner`, `useWhaleStream`, `useWhaleWebSocket`, `useExchangeFeed`) — streams large trades from Binance and Bybit WebSockets (hardened, hand-tuned reconnect/circuit-breaker logic), plus OKX and Kraken via a generic adapter-driven hook (`src/lib/exchanges/`) — with an HTTP-seed fallback and exponential backoff + jitter reconnect if a socket drops.
 - **Advanced filters** (`WRAdvancedFilters`) — filter the whale feed by exchange, size, side, symbol, etc.
+- **Alert quality & delivery** (`src/lib/pairFilters.ts`, `alertCooldown.ts`, `notifyChannels.ts`, `sizingHint.ts`) — freqtrade-pattern pre-filters (dead pairs, implausible ticks, illiquid DEX pools, poor-track-record symbols, remote whitelist) keep noise out before an alert ever fires; a StoplossGuard/MaxDrawdown-style cooldown throttles what's left; alerts that clear both gates optionally push to Discord/Telegram and carry a real backtested-expectancy sizing note.
 - **Stats bar, tracker & portfolio** (`WRStatsBar`, `WRTracker`) — running session stats and a watchlist/portfolio with local persistence.
 - **Alerts** (`WRAlertBell`) — configurable alert conditions with in-app notification bell.
-- **Signal evaluation** (`WRSignalEval`, `src/lib/signalStore.ts`) — stores emitted signals and fills in their realized outcome price later for backtesting signal quality.
+- **Signal evaluation** (`WRSignalEval`, `src/lib/signalStore.ts`, `backtestMetrics.ts`, `mlScoring.ts`) — stores emitted signals, fills in realized outcome prices, and reports win-rate/profit-factor/Sharpe/Sortino/Calmar/SQN plus an optional FreqAI-lite confidence model trained on that same history.
 - **Onboarding & keyboard shortcuts** (`WROnboarding`, `WRKeyboardHelp`) — first-run walkthrough and a shortcuts cheat-sheet.
 - **Mobile filter sheet & responsive layout** (`WRMobileFilterSheet`, `use-mobile`) — full mobile-first UI, not just a scaled-down desktop view.
 - **CoinGecko status indicator** (`WRCoinGeckoStatus`) — shows live/degraded/rate-limited state of the price-data source.
@@ -145,7 +149,7 @@ A companion Express + TypeScript API in `server/` (deployed separately, e.g. Rai
 | `/api/whale-events` | Whale event log |
 | `/api/signal-outcomes` | Signal outcome backfill (`npm run fill-prices`) |
 
-All non-public routes require a shared bearer token (`API_AUTH_TOKEN`, server-side only). This token must never be exposed to the browser — call protected routes from a server-side proxy/edge function that holds the secret. The browser sends no bearer token and falls back to localStorage persistence. Postgres schema lives in `server/schema.sql` (`npm run db:migrate`).
+All non-public routes require a shared bearer token (`API_AUTH_TOKEN` on the server, `VITE_API_TOKEN` on the client — they must match). Postgres schema lives in `server/schema.sql` (`npm run db:migrate`).
 
 ---
 
@@ -181,16 +185,20 @@ crypto-whale-watch-nexus-main/
 │   │   ├── hyperliquid/         # HL* — Hyperliquid module UI
 │   │   ├── trading/             # Trading Hub shared UI
 │   │   └── ui/                  # shadcn/ui primitives
-│   ├── hooks/                   # useMarketData, useWhaleStream/WebSocket,
+│   ├── hooks/                   # useMarketData, useWhaleStream/WebSocket, useExchangeFeed,
 │   │                             # useHyperliquid, useHLManipulationScanner,
 │   │                             # useHLOpportunities, useOrderflowEngine,
 │   │                             # useNexusBot, useNexusMarkets, useProtections, ...
 │   ├── integrations/supabase/   # Generated Supabase client + DB types
 │   ├── lib/
+│   │   ├── exchanges/            # OKX/Kraken/Binance/Bybit adapters (whale-feed WS) + registry
 │   │   ├── council/              # AI council engine + persistence
 │   │   ├── nexus/                # Arbitrage engine, bot connector + guarded execution,
 │   │   │                         # protections.ts (risk engine), botTradeStore.ts (ledger),
-│   │   │                         # exchanges
+│   │   │                         # pairPerformance.ts, openTradesLimit.ts, protectionOptimizer.ts,
+│   │   │                         # remotePairList.ts, pairQuality.ts, exchanges.ts (aggregate market data)
+│   │   ├── pairFilters.ts, alertCooldown.ts, notifyChannels.ts, sizingHint.ts, mlScoring.ts,
+│   │   │                         # backtestMetrics.ts, signalStore.ts — whale-radar alert pipeline
 │   │   ├── db.ts                 # Frontend persistence client (offline fallback)
 │   │   ├── safeInvoke.ts         # Guarded Supabase Edge Function calls
 │   │   ├── supabase.ts           # Lazy, override-friendly Supabase client
@@ -243,7 +251,8 @@ npm run test           # or: npm run test:watch
 |---|---|---|
 | `VITE_SUPABASE_URL` | Optional | Supabase project URL. Missing → Supabase features disabled, rest of app still works. |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` or `VITE_SUPABASE_ANON_KEY` | Optional | Supabase anon/publishable key (either name works). |
-| `API_AUTH_TOKEN` | Only if self-hosting `server/` | Bearer token required by protected `/api/*` routes. **Server-side only — never expose it as a `VITE_` variable.** |
+| `API_AUTH_TOKEN` | Only if self-hosting `server/` | Bearer token required by protected `/api/*` routes. |
+| `VITE_API_TOKEN` | Only if self-hosting `server/` | Must exactly match `API_AUTH_TOKEN`. |
 
 In **Lovable**, set these under Project Settings → Environment Variables (not `.env.local`). In **Vercel**, set them under Project Settings → Environment Variables and trigger a redeploy. Supabase URL/key can also be overridden at runtime per-browser from the in-app Settings panel — no rebuild required.
 
@@ -261,17 +270,23 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 ## 🗺️ Roadmap
 
 - Full-featured wallet tracking and smart-money wallet scoring.
-- Multi-channel alerts (Telegram, Discord, email) beyond the in-app bell.
 - Expand AI Council with additional agent personas and longer-horizon memory scoring.
+- `src/lib/nexus/pairPerformance.ts`'s `rankByPerformance()` has no consumer yet — nothing currently re-sorts a symbol list by historical performance, even though the ranking function exists and is tested via `getSymbolPerformance()` (which `pairFilters.ts` does use).
+- `src/lib/mlScoring.ts`'s `predictConfidence()` is only surfaced in `WRSignalEval`'s aggregate baseline-vs-high-confidence comparison — there's no per-coin ML confidence badge in the live scanner table yet.
 
 ✅ Done (were previously listed here as roadmap items):
-- Pairlist-style pre-filters already exist: `src/lib/pairFilters.ts` (whale-feed) and `src/lib/nexus/pairQuality.ts` (bot gate) — ports of freqtrade's RangeStabilityFilter/VolatilityFilter/SpreadFilter/AgeFilter.
+- Pairlist-style pre-filters already exist: `src/lib/pairFilters.ts` (whale-feed) and `src/lib/nexus/pairQuality.ts` (bot gate) — ports of freqtrade's RangeStabilityFilter/VolatilityFilter/SpreadFilter/AgeFilter/PerformanceFilter/RemotePairList, the last two reusing `pairPerformance.ts` and `remotePairList.ts` directly rather than re-deriving the logic.
 - Sortino/Calmar/SQN now computed in `src/lib/backtestMetrics.ts` alongside profit-factor/Sharpe/drawdown.
 - `src/lib/nexus/pairPerformance.ts` — PerformanceFilter-style ranking of pairs by historical signal performance.
 - `src/lib/nexus/openTradesLimit.ts` — FullTradesFilter-style gate that shrinks available trade slots when the bot's concurrent-position cap is reached.
 - `src/lib/nexus/protectionOptimizer.ts` — hyperopt-style local grid-search that suggests protection thresholds from the bot's own closed-trade history.
-- `src/lib/nexus/remotePairList.ts` — RemotePairList-style fetch of a curated/shared symbol list from an external JSON URL.
+- `src/lib/nexus/remotePairList.ts` — RemotePairList-style fetch of a curated/shared symbol list from an external JSON URL, now actually gating the whale-radar scan (`remoteWhitelistFilter`) rather than just displaying a fetched count.
 - Dry-run mode for the Nexus Bot guarded-execution wrappers (`bot.ts`) — simulates protection gating without placing real orders.
+- Multi-channel alerts (Telegram, Discord) beyond the in-app bell — `src/lib/notifyChannels.ts`, configurable per-channel severity floor, wired into `WRSettingsPanel`.
+- `src/lib/alertCooldown.ts` — StoplossGuard/MaxDrawdownProtection-style per-symbol and global circuit breaker on the whale-radar alert feed itself (separate from the Nexus Bot's own `protections.ts`).
+- `src/lib/mlScoring.ts` — FreqAI-lite adaptive confidence scoring trained on this app's own recorded outcomes.
+- `src/lib/sizingHint.ts` — Edge-Positioning-lite expectancy-based sizing hints, shown on live alerts.
+- OKX and Kraken added as live whale-feed exchange sources (`src/lib/exchanges/`), both wired into the exchange filter tabs.
 
 ---
 
