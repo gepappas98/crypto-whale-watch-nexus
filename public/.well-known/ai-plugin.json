@@ -1,0 +1,15 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "Crypto Whale Watch Nexus",
+  "name_for_model": "crypto_whale_watch",
+  "description_for_human": "Real-time crypto whale tracking and Hyperliquid analytics.",
+  "description_for_model": "Plugin for querying real-time crypto whale transaction data and market intelligence.",
+  "auth": { "type": "none" },
+  "api": {
+    "type": "openapi",
+    "url": "https://crypto-whale-watch-nexus.lovable.app/openapi.json"
+  },
+  "logo_url": "https://crypto-whale-watch-nexus.lovable.app/og-image.png",
+  "contact_email": "support@lovable.app",
+  "legal_info_url": "https://crypto-whale-watch-nexus.lovable.app/"
+}
