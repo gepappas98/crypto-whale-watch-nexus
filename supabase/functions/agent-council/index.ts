@@ -183,7 +183,7 @@ async function streamAgent(
   }
 
   if (provider !== 'lovable') {
-    const base = llm.baseUrl?.replace(/\/$/, '') || BASE_URLS[provider] || BASE_URLS.openai;
+    const base = resolveBaseUrl(provider, llm.baseUrl);
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${llm.apiKey}` },
