@@ -1,7 +1,8 @@
 /* ══ WHALE RADAR v9 — SETTINGS PANEL ═════════════════════════════════════════
  *  v9.1: Added Hyperliquid Scanner settings group.
  * ═══════════════════════════════════════════════════════════════════════════ */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { toast } from '@/hooks/use-toast';
 import { fmtN } from '@/lib/whaleRadarState';
 import { isHLConfigured } from '@/lib/hyperliquid';
 import {
@@ -9,6 +10,7 @@ import {
 } from '@/lib/notifyChannels';
 import { isDryRun, setDryRun, isBotConnected, registerBot, unregisterBot } from '@/lib/nexus/bot';
 import { RestBridgeBot } from '@/lib/nexus/restBridgeBot';
+import { getStrategyTraderStatus, getStrategyTraderLocks, clearStrategyTraderLock, type StrategyTraderStatus } from '@/lib/nexus/strategyTraderBridge';
 import { getMaxOpenTrades, setMaxOpenTrades } from '@/lib/nexus/openTradesLimit';
 import {
   getRemotePairListUrl, setRemotePairListUrl, fetchRemotePairList,
@@ -62,6 +64,35 @@ export function WRSettingsPanel({
   // same pattern as notifyCfg above — see lib/nexus/bot.ts / openTradesLimit.ts / remotePairList.ts) ──
   const [dryRunOn, setDryRunOn] = useState(() => isDryRun());
   const [botConnected, setBotConnected] = useState(() => isBotConnected());
+  const [stStatus, setStStatus] = useState<StrategyTraderStatus | null>(null);
+  const [stChecking, setStChecking] = useState(false);
+
+  const checkStrategyTrader = () => {
+    setStChecking(true);
+    getStrategyTraderStatus()
+      .then((s) => {
+        setStStatus(s);
+        if (s.configured && s.reachable) refreshLocks();
+      })
+      .catch((err) => setStStatus({ configured: false, reachable: false, error: (err as Error).message }))
+      .finally(() => setStChecking(false));
+  };
+  useEffect(() => { checkStrategyTrader(); }, []);
+
+  const [stLocks, setStLocks] = useState<Array<{ id: number; pair: string; lock_end_time: string; reason: string }>>([]);
+  const [stLocksBusy, setStLocksBusy] = useState<number | null>(null); // lock id currently being cleared, if any
+  const refreshLocks = () => {
+    getStrategyTraderLocks()
+      .then((r) => setStLocks(r.locks ?? []))
+      .catch(() => setStLocks([])); // locks are supplementary info — a failed fetch shouldn't block the rest of the panel
+  };
+  const handleClearLock = (id: number) => {
+    setStLocksBusy(id);
+    clearStrategyTraderLock(id)
+      .then(refreshLocks)
+      .catch((err) => toast({ title: 'Could not clear lock', description: (err as Error).message, variant: 'destructive' }))
+      .finally(() => setStLocksBusy(null));
+  };
   const [maxOpen, setMaxOpen] = useState(() => getMaxOpenTrades());
   const [remoteUrl, setRemoteUrlState] = useState(() => getRemotePairListUrl() ?? '');
   const [remoteStatus, setRemoteStatus] = useState<string | null>(null);
@@ -315,7 +346,7 @@ export function WRSettingsPanel({
         </div>
         <Note cls="text-wr-muted">
           {botConnected
-            ? 'Routes through supabase/functions/nexus-bot-proxy → your Express server → ccxt. Configure NEXUS_BOT_API_URL + API_AUTH_TOKEN as Supabase secrets first.'
+            ? 'Routes through supabase/functions/nexus-bot-proxy → your Express server → ccxt.'
             : 'No bot connected — grid/arbitrage/volume-maker actions will throw until you connect one.'}
         </Note>
         <div className="flex items-center justify-between gap-2 mt-1.5">
@@ -327,9 +358,7 @@ export function WRSettingsPanel({
             {dryRunOn ? '● ON — no real orders' : '○ OFF — live trading'}
           </button>
         </div>
-        <Note cls="text-wr-amber">
-          Client-side only — the server enforces its own separate NEXUS_DRY_RUN flag independently and does not trust this toggle.
-        </Note>
+        <Note cls="text-wr-amber">Client-side only — the server enforces its own separate NEXUS_DRY_RUN flag independently.</Note>
         <div className="flex items-center gap-1.5 mt-1.5">
           <span className="text-[8px] text-wr-muted shrink-0">Max open trades</span>
           <input
@@ -362,6 +391,67 @@ export function WRSettingsPanel({
           <Note cls={remoteStatus.startsWith('✓') ? 'text-wr-green' : 'text-wr-amber'}>{remoteStatus}</Note>
         )}
         <Note>Dry-run and open-trade cap apply to Grid/Volume Maker executions across all Nexus pages.</Note>
+      </SettingsGroup>
+
+      <SettingsGroup label="🎯 STRATEGY TRADER (freqtrade)">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[8px] text-wr-muted">Bridge status</span>
+          <button className="wr-btn text-[8px] px-2" onClick={checkStrategyTrader} disabled={stChecking}>
+            {stChecking ? '▶ CHECKING…' : '↻ RECHECK'}
+          </button>
+        </div>
+        {!stStatus ? (
+          <Note cls="text-wr-muted">Checking…</Note>
+        ) : !stStatus.configured ? (
+          <Note cls="text-wr-muted">
+            Not configured — set FREQTRADE_API_URL/USERNAME/PASSWORD on the Express server and NEXUS_BOT_API_URL/API_AUTH_TOKEN as Supabase secrets.
+          </Note>
+        ) : !stStatus.reachable ? (
+          <Note cls="text-wr-amber">Configured but unreachable{stStatus.error ? `: ${stStatus.error}` : ''} — is freqtrade's api_server running?</Note>
+        ) : (
+          <>
+            <Note cls="text-wr-green">
+              ✓ Connected · freqtrade dry-run: {stStatus.freqtradeDryRun ? 'ON' : 'OFF'} · max trades {stStatus.maxOpenTrades} · {stStatus.stakeCurrency}
+            </Note>
+            {stStatus.profit && (
+              <Note cls="text-wr-muted">
+                Win rate {(stStatus.profit.winrate * 100).toFixed(1)}% · closed P/L {stStatus.profit.profit_closed_percent.toFixed(2)}%
+              </Note>
+            )}
+            <div className="mt-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[8px] text-wr-muted">freqtrade's own pair locks</span>
+                <button className="wr-btn text-[7px] px-1.5" onClick={refreshLocks}>↻</button>
+              </div>
+              {stLocks.length === 0 ? (
+                <Note cls="text-wr-muted">No active locks.</Note>
+              ) : (
+                <div className="mt-1 space-y-1">
+                  {stLocks.map((lock) => (
+                    <div key={lock.id} className="flex items-center justify-between gap-1.5 text-[8px] bg-wr-bg2 border border-wr-border px-1.5 py-1 rounded">
+                      <div className="min-w-0">
+                        <div className="text-wr-white truncate">{lock.pair}</div>
+                        <div className="text-wr-muted truncate" title={lock.reason}>
+                          {lock.reason} · until {new Date(lock.lock_end_time).toLocaleTimeString()}
+                        </div>
+                      </div>
+                      <button
+                        className="wr-btn text-[7px] px-1.5 shrink-0"
+                        disabled={stLocksBusy === lock.id}
+                        onClick={() => handleClearLock(lock.id)}
+                      >
+                        {stLocksBusy === lock.id ? '…' : 'CLEAR'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+        <Note cls="text-wr-muted">
+          Manually forward a CRITICAL alert via the 🎯 button in the alert feed — never sent automatically. Server enforces a 50% ML-confidence floor and its own cooldown lock, independent of freqtrade's own protections.
+        </Note>
       </SettingsGroup>
     </div>
   );
