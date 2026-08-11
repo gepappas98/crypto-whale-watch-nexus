@@ -23,21 +23,29 @@
             "in": "query",
             "description": "Number of transactions to return (default 10)",
             "required": false,
-            "schema": { "type": "integer", "default": 10 }
+            "schema": {
+              "type": "integer",
+              "default": 10
+            }
           },
           {
             "name": "min_usd",
             "in": "query",
             "description": "Minimum transaction value in USD",
             "required": false,
-            "schema": { "type": "integer", "default": 100000 }
+            "schema": {
+              "type": "integer",
+              "default": 100000
+            }
           },
           {
             "name": "asset",
             "in": "query",
             "description": "Filter by asset or trading symbol, e.g. BTC or BTCUSDT",
             "required": false,
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -53,11 +61,21 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "tx_hash": { "type": "string" },
-                          "asset": { "type": "string" },
-                          "amount_usd": { "type": "number" },
-                          "transaction_type": { "type": "string" },
-                          "timestamp": { "type": "string" }
+                          "tx_hash": {
+                            "type": "string"
+                          },
+                          "asset": {
+                            "type": "string"
+                          },
+                          "amount_usd": {
+                            "type": "number"
+                          },
+                          "transaction_type": {
+                            "type": "string"
+                          },
+                          "timestamp": {
+                            "type": "string"
+                          }
                         }
                       }
                     }
@@ -87,13 +105,27 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "asset": { "type": "string" },
-                          "trades": { "type": "integer" },
-                          "total_usd": { "type": "number" },
-                          "buy_usd": { "type": "number" },
-                          "sell_usd": { "type": "number" },
-                          "max_trade_usd": { "type": "number" },
-                          "last_seen": { "type": "string" }
+                          "asset": {
+                            "type": "string"
+                          },
+                          "trades": {
+                            "type": "integer"
+                          },
+                          "total_usd": {
+                            "type": "number"
+                          },
+                          "buy_usd": {
+                            "type": "number"
+                          },
+                          "sell_usd": {
+                            "type": "number"
+                          },
+                          "max_trade_usd": {
+                            "type": "number"
+                          },
+                          "last_seen": {
+                            "type": "string"
+                          }
                         }
                       }
                     }
@@ -116,7 +148,10 @@
             "in": "query",
             "description": "Number of alerts to return (default 100, max 500)",
             "required": false,
-            "schema": { "type": "integer", "default": 100 }
+            "schema": {
+              "type": "integer",
+              "default": 100
+            }
           }
         ],
         "responses": {
@@ -132,12 +167,24 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "id": { "type": "integer" },
-                          "level": { "type": "string" },
-                          "tag": { "type": "string" },
-                          "text": { "type": "string" },
-                          "pinned": { "type": "boolean" },
-                          "timestamp": { "type": "string" }
+                          "id": {
+                            "type": "integer"
+                          },
+                          "level": {
+                            "type": "string"
+                          },
+                          "tag": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "pinned": {
+                            "type": "boolean"
+                          },
+                          "timestamp": {
+                            "type": "string"
+                          }
                         }
                       }
                     }
@@ -162,47 +209,38 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": { "type": "boolean" },
-                    "source": { "type": "string" },
-                    "ts": { "type": "string" },
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "ts": {
+                      "type": "string"
+                    },
                     "data": {
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
-                          "symbol": { "type": "string" },
-                          "score": { "type": "number" },
-                          "threat": { "type": "string" },
-                          "price": { "type": "number" },
-                          "change_24h": { "type": "number" }
+                          "symbol": {
+                            "type": "string"
+                          },
+                          "score": {
+                            "type": "number"
+                          },
+                          "threat": {
+                            "type": "string"
+                          },
+                          "price": {
+                            "type": "number"
+                          },
+                          "change_24h": {
+                            "type": "number"
+                          }
                         }
                       }
                     }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/hyperliquid/status": {
-      "get": {
-        "summary": "Get Hyperliquid L1 status and market data",
-        "description": "Cached Hyperliquid L1 analytics including market metadata and mid prices.",
-        "operationId": "getHyperliquidStatus",
-        "responses": {
-          "200": {
-            "description": "Hyperliquid status payload",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": { "type": "boolean" },
-                    "cached": { "type": "boolean" },
-                    "ts": { "type": "string" },
-                    "data": { "type": "object", "additionalProperties": true }
                   }
                 }
               }
