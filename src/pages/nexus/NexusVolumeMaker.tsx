@@ -15,6 +15,8 @@ export default function NexusVolumeMaker() {
   const [stats, setStats] = useState<VolumeStats | null>(null);
   const [mode, setMode] = useState("backpack_limit");
   const [signalSource, setSignalSource] = useState("backpack_rest");
+  const [exchange, setExchange] = useState("binance");
+  const [symbol, setSymbol] = useState("BTC");
   const [busy, setBusy] = useState(false);
   // Real wall-clock start time of the current run, used only to give the
   // reported ledger entry an honest duration — never fabricated.
@@ -55,10 +57,10 @@ export default function NexusVolumeMaker() {
     if (!bot) return;
     setBusy(true);
     try {
-      const s = await startVolumeMakerGuarded({ mode, signalSource });
+      const s = await startVolumeMakerGuarded({ mode, signalSource, exchange, symbol });
       setStats(s);
       startedAtRef.current = Date.now();
-      toast({ title: "Volume maker started", description: `${mode} · signal: ${signalSource}` });
+      toast({ title: "Volume maker started", description: `${exchange}/${symbol} · ${mode} · signal: ${signalSource}` });
     } catch (e) {
       toast({ title: "Start failed", description: (e as Error).message, variant: "destructive" });
     } finally {
@@ -115,7 +117,7 @@ export default function NexusVolumeMaker() {
 
       <Card className="p-4">
         <h3 className="font-semibold text-sm mb-3">Strategy Configuration</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Mode</label>
             <select
@@ -139,6 +141,30 @@ export default function NexusVolumeMaker() {
               <option value="backpack_rest">Backpack REST</option>
               <option value="hyperliquid_ws">Hyperliquid WebSocket</option>
             </select>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Exchange</label>
+            <select
+              className="w-full rounded border border-input bg-background px-3 py-2 text-sm"
+              value={exchange}
+              onChange={(e) => setExchange(e.target.value)}
+              disabled={stats?.active}
+            >
+              <option value="binance">Binance</option>
+              <option value="okx">OKX</option>
+              <option value="hyperliquid">Hyperliquid</option>
+              <option value="backpack">Backpack</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Symbol</label>
+            <input
+              className="w-full rounded border border-input bg-background px-3 py-2 text-sm"
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+              disabled={stats?.active}
+              placeholder="BTC"
+            />
           </div>
         </div>
         {stats?.active ? (
