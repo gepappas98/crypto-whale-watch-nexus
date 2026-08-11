@@ -130,6 +130,8 @@ This mirrors the same "browser → edge function → real secret held server-sid
 
 **For AI agents:** `src/lib/nexus/nexusManifest.ts` exports `getManifest()` — a structured, machine-readable description of every guarded action, its exact gate thresholds (read live from `protections.ts`/`openTradesLimit.ts`, not hardcoded text), and its input/output shape. Hand this to an LLM-driven caller as context before it acts, the same way a human would read this section first.
 
+**Or let an AI agent drive it directly:** `mcp-nexus-bot/` is an MCP server wrapping the same `/api/nexus-bot/*` routes — point Claude Desktop, Claude Code, or any other MCP client at it and it gets `nexus_scan_arbitrage`, `nexus_create_grid`, `nexus_execute_arbitrage`, and read-only status tools, all going through the exact same server-side gates as the browser. See [`mcp-nexus-bot/README.md`](mcp-nexus-bot/README.md) for setup.
+
 ## 🧠 Trading Hub (`/trading-hub/*`)
 
 Dashboard, Screener, Technical Analysis, Patterns, Sentiment, Backtest, and Timeframes (1m–1W) pages under a shared layout (`TradingHubLayout`), with a technical-context badge component shared across views.
@@ -311,11 +313,11 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 - Grid *maintenance* (re-placing an order once a level fills) — `server/services/nexusBotWorker.ts` has the polling loop wired up but the actual per-exchange `fetchOrder`/re-place logic is a documented `TODO`, not implemented.
 - Volume Maker's real trading loop — blocked on extending `VolumeMakerOpts` (`bot.ts`) with a symbol/pair field; there's nothing concrete to trade against yet.
 - A Freqtrade REST API bridge as a second, complementary bot — closing the loop from whale-radar's own detected signals (score + ML confidence + sizing hint) into a real freqtrade `forceentry` call, with freqtrade's own stoploss/ROI as a second layer of protection alongside Nexus's own. Currently only `RestBridgeBot` (ccxt-based) is implemented.
-- An MCP server wrapping `src/lib/nexus/nexusManifest.ts` + the `/api/nexus-bot/*` routes, so an MCP-compatible AI client (Claude Desktop, Claude Code, ...) can drive Nexus directly rather than only reading the manifest for context.
 
 ✅ Done (were previously listed here as roadmap items):
 - `src/lib/nexus/pairPerformance.ts`'s `rankByPerformance()` now orders the watchlist bar (`WRTracker.tsx`) by historical performance.
 - `src/lib/mlScoring.ts`'s `predictConfidence()` is now a live per-coin "🧠N%" badge in the scanner table (`WRScanner.tsx`), alongside a win-rate badge from `getSymbolPerformance()`.
+- `mcp-nexus-bot/` — an MCP server wrapping `/api/nexus-bot/*`, so an MCP-compatible AI client (Claude Desktop, Claude Code, ...) can drive Nexus directly with the same server-side gates the browser bridge goes through. See its own [README](mcp-nexus-bot/README.md).
 
 ✅ Done (were previously listed here as roadmap items):
 - Pairlist-style pre-filters already exist: `src/lib/pairFilters.ts` (whale-feed) and `src/lib/nexus/pairQuality.ts` (bot gate) — ports of freqtrade's RangeStabilityFilter/VolatilityFilter/SpreadFilter/AgeFilter/PerformanceFilter/RemotePairList, the last two reusing `pairPerformance.ts` and `remotePairList.ts` directly rather than re-deriving the logic.
