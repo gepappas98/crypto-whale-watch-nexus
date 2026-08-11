@@ -22,6 +22,7 @@ const corsHeaders = {
 };
 
 const ALLOWED_PATHS = [
+  /^\/arbitrage\/scan$/,
   /^\/arbitrage\/execute$/,
   /^\/grids$/,
   /^\/grids\/[A-Za-z0-9_-]+$/,
