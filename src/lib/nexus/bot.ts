@@ -52,6 +52,10 @@ export interface VolumeStats {
   feesUsd: number;
   rebatesUsd: number;
   trades: number;
+  /** What the worker is actually trading — undefined only for bot
+   *  implementations that predate this (kept optional for compatibility). */
+  exchange?: string;
+  symbol?: string;
 }
 
 export interface TradingBot {
@@ -64,7 +68,7 @@ export interface TradingBot {
   createGrid(cfg: GridConfig): Promise<GridStatus>;
   stopGrid(id: string): Promise<void>;
   // Volume maker
-  startVolumeMaker(opts: { mode: string; signalSource: string }): Promise<VolumeStats>;
+  startVolumeMaker(opts: { mode: string; signalSource: string; exchange: string; symbol: string }): Promise<VolumeStats>;
   stopVolumeMaker(): Promise<VolumeStats>;
   getVolumeStats(): Promise<VolumeStats>;
   // Portfolio
@@ -215,14 +219,25 @@ export async function createGridGuarded(cfg: GridConfig): Promise<GridStatus> {
 export async function startVolumeMakerGuarded(opts: {
   mode: string;
   signalSource: string;
+  exchange: string;
+  symbol: string;
 }): Promise<VolumeStats> {
   if (!bot) throw new Error("No trading bot connected");
+  // Same liquidity/data-sanity gate as createGridGuarded — now that
+  // VolumeMakerOpts carries a concrete exchange/symbol, there's something
+  // to check it against. Exchanges outside pairQuality's coverage pass
+  // through unchecked, same as grids.
+  const nexusEx = asNexusExchange(opts.exchange);
+  if (nexusEx) {
+    const quality = await checkPairQuality(opts.symbol, nexusEx);
+    if (!quality.ok) throw new ProtectionBlockedError({ allowed: false, reason: quality.reason });
+  }
   const gate = canTrade("*", "*");
   if (!gate.allowed) throw new ProtectionBlockedError(gate);
 
   if (isDryRun()) {
-    console.info(`[DryRun] Would start volume maker (${opts.mode}) — all gates passed, no order placed.`);
-    return { active: true, mode: opts.mode, totalVolumeUsd: 0, feesUsd: 0, rebatesUsd: 0, trades: 0 };
+    console.info(`[DryRun] Would start volume maker (${opts.mode} on ${opts.exchange}/${opts.symbol}) — all gates passed, no order placed.`);
+    return { active: true, mode: opts.mode, totalVolumeUsd: 0, feesUsd: 0, rebatesUsd: 0, trades: 0, exchange: opts.exchange, symbol: opts.symbol };
   }
   return bot.startVolumeMaker(opts);
 }
