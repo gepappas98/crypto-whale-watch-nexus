@@ -11,6 +11,7 @@ import { portfolioRouter }      from './routes/portfolio';
 import { trackedRouter }        from './routes/tracked';
 import { alertsRouter }         from './routes/alerts';
 import { whaleEventsRouter }    from './routes/whaleEvents';
+import { whalesRouter }         from './routes/whales';
 import { signalOutcomesRouter, fillOutcomePrices } from './routes/signalOutcomes';
 import { nexusBotRouter } from './routes/nexusBot';
 import { startNexusBotWorker } from './services/nexusBotWorker';
@@ -38,7 +39,16 @@ app.use(express.json({ limit: '2mb' }));
 // Without API_AUTH_TOKEN set, the server refuses to start protected routes —
 // fail-closed by design so a misconfigured deploy never silently exposes data.
 const API_AUTH_TOKEN = process.env.API_AUTH_TOKEN || '';
-const PUBLIC_PATHS = new Set(['/api/health', '/api/scan']);
+// Public, agent-facing read endpoints (OpenAI Custom GPT Actions, LLM crawlers).
+const PUBLIC_PATHS = new Set([
+  '/api/health',
+  '/api/health/db',
+  '/api/scan',
+  '/api/whales',
+  '/api/whales/',
+  '/api/whales/summary',
+  '/api/alerts',
+]);
 
 if (!API_AUTH_TOKEN) {
   console.warn('[AUTH] ⚠ API_AUTH_TOKEN not set — all protected routes will return 503');
