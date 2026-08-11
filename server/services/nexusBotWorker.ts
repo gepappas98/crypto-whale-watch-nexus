@@ -1,56 +1,129 @@
 /* ══ NEXUS BOT — background worker ═══════════════════════════════════════════
- *  routes/nexusBot.ts's POST /grids places the INITIAL set of limit orders;
- *  a real grid bot also needs to notice when a level fills and re-place the
- *  opposite order there (buy fills → place a sell one step up, and vice
- *  versa) — that can't happen inside a single request/response, so it lives
- *  here as a polling loop instead.
+ *  routes/nexusBot.ts's POST /grids and /volume-maker/start put the INITIAL
+ *  state in place; the actual ongoing behavior — noticing a grid level
+ *  filled and re-placing it, ticking the volume maker — can't happen inside
+ *  a single request/response, so it lives here as a polling loop instead.
  *
- *  SCOPE HONESTY: this covers grid maintenance only. The volume-maker's
- *  actual trading loop is NOT implemented — VolumeMakerOpts (bot.ts) has no
- *  symbol/pair field, so there's nothing concrete to trade yet. Wiring that
- *  up for real needs that interface extended first; faking a loop that
- *  "trades" without a symbol would just be theater. Track via the
- *  `active`/`mode` fields already recorded — a future worker tick can pick
- *  it up once the interface says what to trade.
+ *  Respects the same server-side dry-run flag as everything else: when
+ *  dry-run is on, this tick loop still runs (so status/logging behavior is
+ *  observable) but skips every real exchange call — see the dryRun checks
+ *  in each branch below.
  * ═══════════════════════════════════════════════════════════════════════════ */
 import { query } from '../db';
-import { isServerDryRun } from './nexusBotGates';
+import { isServerDryRun, recordTrade } from './nexusBotGates';
+import { checkAndMaintainGrid, executeVolumeMakerTick } from './ccxtExecutor';
 
 const POLL_MS = Number(process.env.NEXUS_GRID_POLL_MS || 30_000);
 let timer: ReturnType<typeof setInterval> | null = null;
 
+// ── Grid maintenance ──────────────────────────────────────────────────────────
+
 async function maintainOneGrid(grid: {
   id: string; exchange: string; symbol: string; order_ids: string[];
   upper_price: string; lower_price: string; grid_count: number; total_investment: string;
+  filled_count: number;
 }): Promise<void> {
-  // Real per-order fill checking needs ccxt's fetchOrder/fetchOpenOrders per
-  // exchange, which have inconsistent status field shapes across exchanges.
-  // This is deliberately left as the next concrete step rather than
-  // papering over it — see the TODO below for exactly what to fill in.
-  //
-  // TODO: for each id in grid.order_ids not already known-filled:
-  //   const order = await ex.fetchOrder(id, pair);
-  //   if (order.status === 'closed') {
-  //     // filled — place the opposite order one grid-step away, record the
-  //     // fill via recordTrade({kind:'grid_open', ...}), update order_ids.
-  //   }
-  void grid; // present so this function's real signature is already correct when the TODO above is filled in
+  const result = await checkAndMaintainGrid({
+    exchange: grid.exchange, symbol: grid.symbol, orderIds: grid.order_ids,
+    upperPrice: Number(grid.upper_price), lowerPrice: Number(grid.lower_price),
+    gridCount: grid.grid_count, totalInvestment: Number(grid.total_investment),
+  });
+
+  if (result.errors.length) {
+    console.error(`[nexusBotWorker] grid ${grid.id} maintenance errors:`, result.errors.join('; '));
+  }
+  if (result.filledOrderIds.length === 0) return; // nothing changed this tick
+
+  const stillOpen = grid.order_ids.filter((id) => !result.filledOrderIds.includes(id));
+  const newIds = result.newOrders.map((o) => o.newId);
+  const updatedOrderIds = [...stillOpen, ...newIds];
+  const newFilledCount = grid.filled_count + result.filledOrderIds.length;
+
+  try {
+    await query(
+      `UPDATE nexus_bot_grids SET order_ids = $1, filled_count = $2 WHERE id = $3`,
+      [JSON.stringify(updatedOrderIds), newFilledCount, grid.id],
+    );
+  } catch (err) {
+    console.error(`[nexusBotWorker] failed to persist grid ${grid.id} maintenance update`, (err as Error).message);
+  }
+
+  for (const filledId of result.filledOrderIds) {
+    const replacement = result.newOrders.find((o) => o.oldId === filledId);
+    await recordTrade({
+      kind: 'grid_open', pair: grid.symbol, exchange: grid.exchange, dryRun: false, status: 'closed',
+      meta: { gridId: grid.id, event: 'level_filled', filledOrderId: filledId, replacement },
+    });
+  }
 }
 
-async function tick(): Promise<void> {
+async function gridTick(): Promise<void> {
+  if (isServerDryRun()) return; // nothing real to poll — dry-run grids never got real order ids
+
   try {
     const grids = await query<{
       id: string; exchange: string; symbol: string; order_ids: string[];
       upper_price: string; lower_price: string; grid_count: number; total_investment: string;
-    }>(`SELECT id, exchange, symbol, order_ids, upper_price, lower_price, grid_count, total_investment
+      filled_count: number;
+    }>(`SELECT id, exchange, symbol, order_ids, upper_price, lower_price, grid_count, total_investment, filled_count
         FROM nexus_bot_grids WHERE status = 'active'`);
 
     for (const grid of grids) {
       await maintainOneGrid(grid);
     }
   } catch (err) {
-    console.error('[nexusBotWorker] tick failed', (err as Error).message);
+    console.error('[nexusBotWorker] grid tick failed', (err as Error).message);
   }
+}
+
+// ── Volume maker ──────────────────────────────────────────────────────────────
+
+async function volumeMakerTick(): Promise<void> {
+  try {
+    const [row] = await query<{ active: boolean; exchange: string | null; symbol: string | null }>(
+      `SELECT active, exchange, symbol FROM nexus_bot_volume_maker WHERE id = 1`,
+    );
+    if (!row?.active) return;
+    if (!row.exchange || !row.symbol) {
+      console.error('[nexusBotWorker] volume maker is active but has no exchange/symbol configured — skipping tick');
+      return;
+    }
+
+    if (isServerDryRun()) {
+      // Still advance the counters so the UI shows *something* moving in
+      // dry-run, clearly framed as simulated — never silent, never fake-real.
+      await query(
+        `UPDATE nexus_bot_volume_maker SET trades = trades + 1, updated_at = now() WHERE id = 1`,
+      );
+      return;
+    }
+
+    const result = await executeVolumeMakerTick(row.exchange, row.symbol);
+    if (!result.ok) {
+      console.error(`[nexusBotWorker] volume maker tick failed on ${row.exchange}/${row.symbol}: ${result.error}`);
+      return;
+    }
+
+    await query(
+      `UPDATE nexus_bot_volume_maker
+       SET total_volume_usd = total_volume_usd + $1, fees_usd = fees_usd + $2, trades = trades + 1, updated_at = now()
+       WHERE id = 1`,
+      [result.volumeUsd, result.feeUsd],
+    );
+    await recordTrade({
+      kind: 'volume_maker', pair: row.symbol, exchange: row.exchange, dryRun: false, status: 'closed',
+      amountUsd: result.volumeUsd, meta: { event: 'tick', feeUsd: result.feeUsd },
+    });
+  } catch (err) {
+    console.error('[nexusBotWorker] volume maker tick failed', (err as Error).message);
+  }
+}
+
+// ── Driver ──────────────────────────────────────────────────────────────────
+
+async function tick(): Promise<void> {
+  await gridTick();
+  await volumeMakerTick();
 }
 
 export function startNexusBotWorker(): void {

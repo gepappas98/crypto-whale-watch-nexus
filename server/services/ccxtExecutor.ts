@@ -248,3 +248,102 @@ export async function scanServerArbitrage(): Promise<ServerArbitrageOpportunity[
   }
   return out.sort((a, b) => b.spreadPercent - a.spreadPercent);
 }
+
+// ── Grid maintenance: detect fills, re-place the opposite order ─────────────
+// Classic grid-bot behavior: a filled BUY means price dropped to that level,
+// so place a SELL one grid-step up to capture the bounce back; a filled SELL
+// means place a BUY one step down. This is what turns "placed N orders once"
+// into an actual running grid instead of a one-shot order dump.
+
+export interface GridMaintenanceResult {
+  filledOrderIds: string[];
+  newOrders: Array<{ oldId: string; newId: string; side: 'buy' | 'sell'; price: number }>;
+  errors: string[];
+}
+
+export async function checkAndMaintainGrid(grid: {
+  exchange: string; symbol: string; orderIds: string[];
+  upperPrice: number; lowerPrice: number; gridCount: number; totalInvestment: number;
+}): Promise<GridMaintenanceResult> {
+  const result: GridMaintenanceResult = { filledOrderIds: [], newOrders: [], errors: [] };
+  const realOrderIds = grid.orderIds.filter((id) => !id.startsWith('dryrun-'));
+  if (realOrderIds.length === 0) return result; // dry-run grid — nothing real to poll
+
+  const pair = pairFor(grid.symbol);
+  const step = (grid.upperPrice - grid.lowerPrice) / Math.max(1, grid.gridCount);
+  const investmentPerLevel = grid.totalInvestment / Math.max(1, grid.gridCount);
+  const ex = getExchange(grid.exchange);
+
+  for (const orderId of realOrderIds) {
+    let order;
+    try {
+      order = await ex.fetchOrder(orderId, pair);
+    } catch (err) {
+      result.errors.push(`fetchOrder ${orderId}: ${(err as Error).message}`);
+      continue;
+    }
+    if (order.status !== 'closed' || !order.filled) continue; // not filled yet — nothing to do this tick
+
+    result.filledOrderIds.push(orderId);
+    const filledPrice = order.price ?? 0;
+    const filledSide = order.side as 'buy' | 'sell' | undefined;
+    if (!filledSide || filledPrice <= 0) {
+      result.errors.push(`${orderId} filled but has no usable side/price — cannot re-place`);
+      continue;
+    }
+
+    const newSide: 'buy' | 'sell' = filledSide === 'buy' ? 'sell' : 'buy';
+    const newPrice = newSide === 'sell' ? filledPrice + step : filledPrice - step;
+    if (newPrice <= 0) continue; // fell below the bottom of the grid — nothing sensible to re-place
+
+    try {
+      const amountBase = investmentPerLevel / newPrice;
+      const newOrder = await ex.createOrder(pair, 'limit', newSide, amountBase, newPrice);
+      result.newOrders.push({ oldId: orderId, newId: String(newOrder.id), side: newSide, price: newPrice });
+    } catch (err) {
+      result.errors.push(`re-place after fill of ${orderId}: ${(err as Error).message}`);
+    }
+  }
+
+  return result;
+}
+
+// ── Volume Maker: a conservative "ping-pong" tick ────────────────────────────
+// Deliberately NOT a sophisticated market-maker (no order-book-aware
+// quoting, no inventory management beyond immediately flattening). It's a
+// small, honest reference loop: alternate tiny market buy/sell pairs on one
+// symbol to generate real, on-exchange volume — real enough to accrue real
+// fees/rebates, small enough that a config mistake doesn't do much damage.
+// Position stays roughly flat since each tick round-trips buy-then-sell.
+
+const TICK_USD = Number(process.env.NEXUS_VOLUME_MAKER_TICK_USD || 10);
+
+export interface VolumeMakerTickResult {
+  ok: boolean;
+  volumeUsd: number;
+  feeUsd: number;
+  error?: string;
+}
+
+export async function executeVolumeMakerTick(exchange: string, symbol: string): Promise<VolumeMakerTickResult> {
+  const pair = pairFor(symbol);
+  try {
+    const ex = getExchange(exchange);
+    const ticker = await ex.fetchTicker(pair);
+    const price = ticker.last;
+    if (!price) return { ok: false, volumeUsd: 0, feeUsd: 0, error: `no last price for ${pair}` };
+
+    const amountBase = TICK_USD / price;
+    const buy = await ex.createOrder(pair, 'market', 'buy', amountBase);
+    const sell = await ex.createOrder(pair, 'market', 'sell', amountBase);
+
+    const feeUsd = [buy, sell].reduce((sum, o) => {
+      const fee = (o as { fee?: { cost?: number } }).fee;
+      return sum + (fee?.cost ?? 0);
+    }, 0);
+
+    return { ok: true, volumeUsd: TICK_USD * 2, feeUsd };
+  } catch (err) {
+    return { ok: false, volumeUsd: 0, feeUsd: 0, error: (err as Error).message };
+  }
+}
