@@ -1,6 +1,6 @@
-# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.3
+# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.4
 
-![Version](https://img.shields.io/badge/version-9.3-blue)
+![Version](https://img.shields.io/badge/version-9.4-blue)
 ![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite)
@@ -38,6 +38,7 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 
 ## 🆕 What's New
 
+- **Strategy Trader — a second, complementary bot** (v9.4): `server/services/freqtradeClient.ts` bridges to a running freqtrade instance's REST API (`/api/v1/forceentry` etc.), closing the loop from whale-radar's own detection (score + ML confidence + sizing hint) into a real freqtrade position with freqtrade's own stoploss/ROI/protections as a second, independent layer on top of Nexus's own. Same secret-handling pattern as the ccxt bridge — routes through `nexus-bot-proxy`, never a client-held token. A CRITICAL alert's new 🎯 button forwards it manually (never automatically); the server enforces its own cooldown lock and a hard 50%-ML-confidence floor before anything reaches freqtrade. Also new: `mcp-nexus-bot/`, an MCP server wrapping the same `/api/nexus-bot/*` routes so Claude Desktop, Claude Code, or any MCP client can drive Nexus directly — `nexus_scan_arbitrage`, `nexus_create_grid`, `nexus_execute_arbitrage`, and read-only status tools, all through the exact same server-side gates as the browser.
 - **A real trading-bot execution bridge** (v9.3) — `registerBot()` previously had no shipped implementation to plug in. `src/lib/nexus/restBridgeBot.ts` now provides one: browser → `nexus-bot-proxy` Edge Function (holds the real server token as a Supabase secret, never client-side) → Express `server/routes/nexusBot.ts` (its own independent dry-run + Postgres-backed cooldown gate, never just trusting the client) → `server/services/ccxtExecutor.ts` (real order placement via [ccxt](https://github.com/ccxt/ccxt) across Binance/OKX/Hyperliquid). Arbitrage execution and grid open/close place real orders end-to-end; grid *maintenance* and Volume Maker's trading loop are explicitly scoped out for now rather than faked — see [Connecting a Trading Bot](#-connecting-a-trading-bot) for exactly what's real today. Also new: `src/lib/nexus/nexusManifest.ts`, a machine-readable manifest of every guarded action and its live gate thresholds, meant to be handed to an LLM-driven caller as context before it acts.
 - **Whale-radar side gets its own round of freqtrade concept ports** (v9.2), separate from the earlier Nexus Bot batch: `src/lib/alertCooldown.ts` (StoplossGuard/MaxDrawdownProtection — per-symbol + global circuit breaker on the alert feed itself, not just bot trades), `src/lib/notifyChannels.ts` (Discord webhook + Telegram bot push for alerts that clear the cooldown gate, configurable severity floor), `src/lib/mlScoring.ts` (FreqAI-lite — a from-scratch logistic-regression model trained on this app's own recorded signal outcomes, surfaced in `WRSignalEval`'s "🧠 ML Confidence Model" section with a train/retrain button and honest baseline-vs-high-confidence win-rate comparison), `src/lib/sizingHint.ts` (Edge-Positioning-lite — turns each signal category's real backtested expectancy into a short sizing note shown right on the live alert, not just in the eval panel), and a small multi-exchange abstraction (`src/lib/exchanges/{types,binance,bybit,okx,kraken,registry}.ts` + `src/hooks/useExchangeFeed.ts`) that added OKX and Kraken as live whale-feed sources alongside Binance/Bybit.
 - **Three "logic existed but never reached the UI" gaps closed**: `src/lib/nexus/remotePairList.ts` previously fetched and displayed a curated symbol list in Settings but never actually used it to filter anything — it now gates the whale-radar scan for real via a new `remoteWhitelistFilter` in `pairFilters.ts`. The Kraken exchange adapter was fully written but never instantiated anywhere — it's now a live feed source next to OKX. And `pairFilters.ts`'s rejection reasons (why a coin didn't fire an alert) used to go straight to `console.debug` — they're now exposed through the hook and shown as a "🔍 N FILTERED" badge (hover for the reasons) next to the alert feed header.
@@ -131,6 +132,16 @@ This mirrors the same "browser → edge function → real secret held server-sid
 **For AI agents:** `src/lib/nexus/nexusManifest.ts` exports `getManifest()` — a structured, machine-readable description of every guarded action, its exact gate thresholds (read live from `protections.ts`/`openTradesLimit.ts`, not hardcoded text), and its input/output shape. Hand this to an LLM-driven caller as context before it acts, the same way a human would read this section first.
 
 **Or let an AI agent drive it directly:** `mcp-nexus-bot/` is an MCP server wrapping the same `/api/nexus-bot/*` routes — point Claude Desktop, Claude Code, or any other MCP client at it and it gets `nexus_scan_arbitrage`, `nexus_create_grid`, `nexus_execute_arbitrage`, and read-only status tools, all going through the exact same server-side gates as the browser. See [`mcp-nexus-bot/README.md`](mcp-nexus-bot/README.md) for setup.
+
+### Strategy Trader — a second, complementary bot
+
+`RestBridgeBot` (ccxt) covers what freqtrade genuinely isn't built for — cross-exchange arbitrage, grid trading. `server/services/freqtradeClient.ts` covers the reverse: single-exchange, strategy-signal-driven entries with freqtrade's own mature stoploss/ROI/protections engine as a **second, independent** layer of risk management on top of anything Nexus already does.
+
+This closes the loop: whale-radar detects a signal (score + `mlScoring.ts` confidence + `sizingHint.ts` expectancy) → a human clicks **🎯 Send to Strategy Trader** on a CRITICAL alert (never automatic) → the same `nexus-bot-proxy` Edge Function forwards to `server/routes/strategyTrader.ts` → freqtrade's `/api/v1/forceentry`, gated by the server's own cooldown lock and a hard 50%-ML-confidence floor, independent of whatever freqtrade's own config decides.
+
+**Setup:** requires a freqtrade instance already running with `api_server.enabled: true`. On the Express server (`server/.env`): `FREQTRADE_API_URL`, `FREQTRADE_API_USERNAME`, `FREQTRADE_API_PASSWORD` (from freqtrade's own `config.json`). Check connection status in Settings → 🎯 STRATEGY TRADER.
+
+**Honesty note:** `server/services/freqtradeClient.ts` is written against freqtrade's documented REST API shape, not verified against a live instance in this environment — confirm each endpoint against your freqtrade version's own `/docs` (Swagger UI) before trusting it with a funded account.
 
 ## 🧠 Trading Hub (`/trading-hub/*`)
 
@@ -312,12 +323,13 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 - Expand AI Council with additional agent personas and longer-horizon memory scoring.
 - Grid *maintenance* (re-placing an order once a level fills) — `server/services/nexusBotWorker.ts` has the polling loop wired up but the actual per-exchange `fetchOrder`/re-place logic is a documented `TODO`, not implemented.
 - Volume Maker's real trading loop — blocked on extending `VolumeMakerOpts` (`bot.ts`) with a symbol/pair field; there's nothing concrete to trade against yet.
-- A Freqtrade REST API bridge as a second, complementary bot — closing the loop from whale-radar's own detected signals (score + ML confidence + sizing hint) into a real freqtrade `forceentry` call, with freqtrade's own stoploss/ROI as a second layer of protection alongside Nexus's own. Currently only `RestBridgeBot` (ccxt-based) is implemented.
+- `server/routes/strategyTrader.ts`'s `GET /locks` and `DELETE /locks/:id` (freqtrade's own pair-lock list) aren't surfaced in the Settings UI yet — only connection status and the forward action are wired.
 
 ✅ Done (were previously listed here as roadmap items):
 - `src/lib/nexus/pairPerformance.ts`'s `rankByPerformance()` now orders the watchlist bar (`WRTracker.tsx`) by historical performance.
 - `src/lib/mlScoring.ts`'s `predictConfidence()` is now a live per-coin "🧠N%" badge in the scanner table (`WRScanner.tsx`), alongside a win-rate badge from `getSymbolPerformance()`.
 - `mcp-nexus-bot/` — an MCP server wrapping `/api/nexus-bot/*`, so an MCP-compatible AI client (Claude Desktop, Claude Code, ...) can drive Nexus directly with the same server-side gates the browser bridge goes through. See its own [README](mcp-nexus-bot/README.md).
+- A Freqtrade REST API bridge as a second, complementary bot — see [Strategy Trader](#strategy-trader--a-second-complementary-bot).
 
 ✅ Done (were previously listed here as roadmap items):
 - Pairlist-style pre-filters already exist: `src/lib/pairFilters.ts` (whale-feed) and `src/lib/nexus/pairQuality.ts` (bot gate) — ports of freqtrade's RangeStabilityFilter/VolatilityFilter/SpreadFilter/AgeFilter/PerformanceFilter/RemotePairList, the last two reusing `pairPerformance.ts` and `remotePairList.ts` directly rather than re-deriving the logic.
