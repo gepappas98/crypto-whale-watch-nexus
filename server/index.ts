@@ -57,9 +57,13 @@ if (!API_AUTH_TOKEN) {
 app.use('/api', (req, res, next) => {
   // Allow CORS preflight + whitelisted public reads
   if (req.method === 'OPTIONS') return next();
-  if (PUBLIC_PATHS.has(req.baseUrl + req.path) || PUBLIC_PATHS.has(req.originalUrl.split('?')[0])) {
+  const path = req.originalUrl.split('?')[0].replace(/\/+$/, '') || '/';
+  if (req.method === 'GET' && (PUBLIC_PATHS.has(path) || PUBLIC_PATHS.has(req.baseUrl + req.path))) {
+    // Agent-accessible: ChatGPT Actions and other bots issue cross-origin GETs.
+    res.setHeader('Access-Control-Allow-Origin', '*');
     return next();
   }
+
   if (!API_AUTH_TOKEN) {
     return res.status(503).json({ error: 'Server auth not configured' });
   }
@@ -92,6 +96,7 @@ app.use('/api/portfolio',        portfolioRouter);
 app.use('/api/tracked',          trackedRouter);
 app.use('/api/alerts',           alertsRouter);
 app.use('/api/whale-events',     whaleEventsRouter);
+app.use('/api/whales',           whalesRouter);
 app.use('/api/signal-outcomes',  signalOutcomesRouter);
 app.use('/api/nexus-bot',        nexusBotRouter);
 
