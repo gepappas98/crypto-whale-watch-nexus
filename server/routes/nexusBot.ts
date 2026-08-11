@@ -64,14 +64,14 @@ nexusBotRouter.get('/grids', async (_req: Request, res: Response) => {
     const rows = await query<{
       id: string; exchange: string; symbol: string; market_type: string; mode: string;
       upper_price: string; lower_price: string; grid_count: number; total_investment: string;
-      fee_rate: string; status: string; order_ids: string[]; created_at: string;
+      fee_rate: string; status: string; order_ids: string[]; created_at: string; filled_count: number;
     }>(`SELECT * FROM nexus_bot_grids ORDER BY created_at DESC`);
     res.json(rows.map((r) => ({
       id: r.id, exchange: r.exchange, symbol: r.symbol, marketType: r.market_type, mode: r.mode,
       upperPrice: Number(r.upper_price), lowerPrice: Number(r.lower_price), gridCount: r.grid_count,
       totalInvestment: Number(r.total_investment), feeRate: Number(r.fee_rate),
-      status: r.status, pnl: 0, // real PNL needs order-fill tracking — not faked, see note in ccxtExecutor.ts
-      filledGrids: 0, activeOrders: Array.isArray(r.order_ids) ? r.order_ids.length : 0,
+      status: r.status, pnl: 0, // real PNL still needs entry-vs-exit price tracking per fill — not faked
+      filledGrids: r.filled_count ?? 0, activeOrders: Array.isArray(r.order_ids) ? r.order_ids.length : 0,
       createdAt: new Date(r.created_at).getTime(),
     })));
   } catch (err) {
@@ -147,17 +147,24 @@ nexusBotRouter.delete('/grids/:id', async (req: Request, res: Response) => {
 });
 
 // ── Volume maker ──────────────────────────────────────────────────────────────
-// NOTE: this only flips the singleton row's `active` flag and records the
-// intent — an actual continuous trading loop needs a long-running worker,
-// not a stateless request. See services/nexusBotWorker.ts.
+// The worker (services/nexusBotWorker.ts) picks up `active`+`exchange`+
+// `symbol` on its next poll and runs the actual tick loop — this route just
+// flips the switch and records the intent.
 nexusBotRouter.post('/volume-maker/start', async (req: Request, res: Response) => {
-  const { mode, signalSource } = req.body as { mode?: string; signalSource?: string };
+  const { mode, signalSource, exchange, symbol } = req.body as {
+    mode?: string; signalSource?: string; exchange?: string; symbol?: string;
+  };
+  if (!exchange || !symbol) {
+    return res.status(400).json({ error: 'exchange and symbol are required — there is nothing concrete to trade without them' });
+  }
   try {
     await query(
-      `UPDATE nexus_bot_volume_maker SET active = true, mode = $1, signal_source = $2, started_at = now(), updated_at = now() WHERE id = 1`,
-      [mode ?? 'unspecified', signalSource ?? 'unspecified'],
+      `UPDATE nexus_bot_volume_maker
+       SET active = true, mode = $1, signal_source = $2, exchange = $3, symbol = $4, started_at = now(), updated_at = now()
+       WHERE id = 1`,
+      [mode ?? 'unspecified', signalSource ?? 'unspecified', exchange, symbol],
     );
-    await recordTrade({ kind: 'volume_maker', pair: '*', dryRun: isServerDryRun(), status: 'open', meta: { mode, signalSource, event: 'start' } });
+    await recordTrade({ kind: 'volume_maker', pair: symbol, exchange, dryRun: isServerDryRun(), status: 'open', meta: { mode, signalSource, event: 'start' } });
     res.json(await readVolumeStats());
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -184,11 +191,13 @@ nexusBotRouter.get('/volume-maker/stats', async (_req: Request, res: Response) =
 async function readVolumeStats() {
   const [row] = await query<{
     active: boolean; mode: string | null; total_volume_usd: string; fees_usd: string; rebates_usd: string; trades: number;
-  }>(`SELECT active, mode, total_volume_usd, fees_usd, rebates_usd, trades FROM nexus_bot_volume_maker WHERE id = 1`);
+    exchange: string | null; symbol: string | null;
+  }>(`SELECT active, mode, total_volume_usd, fees_usd, rebates_usd, trades, exchange, symbol FROM nexus_bot_volume_maker WHERE id = 1`);
   return {
     active: row?.active ?? false, mode: row?.mode ?? 'unspecified',
     totalVolumeUsd: Number(row?.total_volume_usd ?? 0), feesUsd: Number(row?.fees_usd ?? 0),
     rebatesUsd: Number(row?.rebates_usd ?? 0), trades: row?.trades ?? 0,
+    exchange: row?.exchange ?? undefined, symbol: row?.symbol ?? undefined,
   };
 }
 
