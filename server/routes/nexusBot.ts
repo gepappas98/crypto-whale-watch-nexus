@@ -10,12 +10,21 @@ import { Router, Request, Response } from 'express';
 import { query } from '../db';
 import { isServerDryRun, checkAndLockCooldown, recordTrade } from '../services/nexusBotGates';
 import {
-  executeArbitrageLegs, placeGridOrders, cancelGridOrders, fetchPortfolioBalances,
+  executeArbitrageLegs, placeGridOrders, cancelGridOrders, fetchPortfolioBalances, scanServerArbitrage,
 } from '../services/ccxtExecutor';
 
 export const nexusBotRouter = Router();
 
 // ── Arbitrage ─────────────────────────────────────────────────────────────────
+nexusBotRouter.get('/arbitrage/scan', async (_req: Request, res: Response) => {
+  try {
+    const opportunities = await scanServerArbitrage();
+    res.json(opportunities);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 nexusBotRouter.post('/arbitrage/execute', async (req: Request, res: Response) => {
   const opp = req.body as {
     pair?: string; exchanges?: [string, string]; direction?: string;
