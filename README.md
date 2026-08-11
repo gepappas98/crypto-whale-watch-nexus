@@ -323,13 +323,13 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 - Expand AI Council with additional agent personas and longer-horizon memory scoring.
 - Grid *maintenance* (re-placing an order once a level fills) — `server/services/nexusBotWorker.ts` has the polling loop wired up but the actual per-exchange `fetchOrder`/re-place logic is a documented `TODO`, not implemented.
 - Volume Maker's real trading loop — blocked on extending `VolumeMakerOpts` (`bot.ts`) with a symbol/pair field; there's nothing concrete to trade against yet.
-- `server/routes/strategyTrader.ts`'s `GET /locks` and `DELETE /locks/:id` (freqtrade's own pair-lock list) aren't surfaced in the Settings UI yet — only connection status and the forward action are wired.
 
 ✅ Done (were previously listed here as roadmap items):
 - `src/lib/nexus/pairPerformance.ts`'s `rankByPerformance()` now orders the watchlist bar (`WRTracker.tsx`) by historical performance.
 - `src/lib/mlScoring.ts`'s `predictConfidence()` is now a live per-coin "🧠N%" badge in the scanner table (`WRScanner.tsx`), alongside a win-rate badge from `getSymbolPerformance()`.
 - `mcp-nexus-bot/` — an MCP server wrapping `/api/nexus-bot/*`, so an MCP-compatible AI client (Claude Desktop, Claude Code, ...) can drive Nexus directly with the same server-side gates the browser bridge goes through. See its own [README](mcp-nexus-bot/README.md).
 - A Freqtrade REST API bridge as a second, complementary bot — see [Strategy Trader](#strategy-trader--a-second-complementary-bot).
+- freqtrade's own pair-lock list is now visible in Settings → 🎯 STRATEGY TRADER, with a per-lock CLEAR action (`GET`/`DELETE /strategy-trader/locks`).
 
 ✅ Done (were previously listed here as roadmap items):
 - Pairlist-style pre-filters already exist: `src/lib/pairFilters.ts` (whale-feed) and `src/lib/nexus/pairQuality.ts` (bot gate) — ports of freqtrade's RangeStabilityFilter/VolatilityFilter/SpreadFilter/AgeFilter/PerformanceFilter/RemotePairList, the last two reusing `pairPerformance.ts` and `remotePairList.ts` directly rather than re-deriving the logic.
