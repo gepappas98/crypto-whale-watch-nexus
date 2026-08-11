@@ -53,7 +53,7 @@ export class RestBridgeBot implements TradingBot {
     return call<void>('DELETE', `/grids/${encodeURIComponent(id)}`);
   }
 
-  startVolumeMaker(opts: { mode: string; signalSource: string }) {
+  startVolumeMaker(opts: { mode: string; signalSource: string; exchange: string; symbol: string }) {
     return call<VolumeStats>('POST', '/volume-maker/start', opts);
   }
 
