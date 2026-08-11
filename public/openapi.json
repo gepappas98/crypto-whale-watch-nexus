@@ -2,81 +2,84 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Crypto Whale Watch Nexus API",
-    "version": "1.0.0",
-    "description": "Public read endpoints for real-time crypto whale transactions, manipulation alerts, market scans, signal performance, and Hyperliquid status."
+    "description": "API for fetching real-time crypto whale transactions, DEX volume, and Hyperliquid L1 analytics.",
+    "version": "1.0.0"
   },
   "servers": [
-    { "url": "https://crypto-whale-watch-nexus.lovable.app", "description": "Production" }
-  ],
-  "tags": [
-    { "name": "health" },
-    { "name": "whales" },
-    { "name": "alerts" },
-    { "name": "scans" },
-    { "name": "signals" },
-    { "name": "hyperliquid" }
+    {
+      "url": "https://crypto-whale-watch-nexus.lovable.app",
+      "description": "Production server"
+    }
   ],
   "paths": {
-    "/api/health": {
+    "/api/whales": {
       "get": {
-        "tags": ["health"],
-        "operationId": "getHealth",
-        "summary": "Service health check",
-        "responses": {
-          "200": {
-            "description": "Service is up",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": { "ok": { "type": "boolean" } }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/health/db": {
-      "get": {
-        "tags": ["health"],
-        "operationId": "getDbHealth",
-        "summary": "Database connectivity check",
-        "responses": {
-          "200": { "description": "Database reachable" },
-          "500": { "description": "Database unreachable" }
-        }
-      }
-    },
-    "/api/whale-events": {
-      "get": {
-        "tags": ["whales"],
-        "operationId": "listWhaleEvents",
-        "summary": "Get latest whale transactions",
+        "summary": "Get recent whale transactions",
+        "description": "Returns a list of large crypto transactions filtered by threshold, blockchain, or asset.",
+        "operationId": "getWhaleTransactions",
         "parameters": [
           {
             "name": "limit",
             "in": "query",
-            "description": "Maximum rows to return (default 200, max 1000).",
+            "description": "Number of transactions to return (default 10)",
             "required": false,
-            "schema": { "type": "integer", "default": 200, "maximum": 1000, "minimum": 1 }
+            "schema": {
+              "type": "integer",
+              "default": 10
+            }
           },
           {
-            "name": "symbol",
+            "name": "min_usd",
             "in": "query",
-            "description": "Filter by trading symbol, e.g. BTCUSDT.",
+            "description": "Minimum transaction value in USD",
             "required": false,
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "integer",
+              "default": 100000
+            }
+          },
+          {
+            "name": "asset",
+            "in": "query",
+            "description": "Filter by asset or trading symbol, e.g. BTC or BTCUSDT",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "A list of tracked whale transactions",
+            "description": "Successful response with array of whale transactions",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": { "$ref": "#/components/schemas/WhaleEvent" }
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tx_hash": {
+                            "type": "string"
+                          },
+                          "asset": {
+                            "type": "string"
+                          },
+                          "amount_usd": {
+                            "type": "number"
+                          },
+                          "transaction_type": {
+                            "type": "string"
+                          },
+                          "timestamp": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -84,19 +87,49 @@
         }
       }
     },
-    "/api/whale-events/summary": {
+    "/api/whales/summary": {
       "get": {
-        "tags": ["whales"],
+        "summary": "Get 24h aggregated whale flow",
+        "description": "Aggregated buy and sell whale flow per asset over the last 24 hours.",
         "operationId": "getWhaleFlowSummary",
-        "summary": "Aggregated 24h whale flow per symbol",
         "responses": {
           "200": {
-            "description": "Buy/sell whale flow grouped by symbol over the last 24 hours",
+            "description": "Aggregated whale flow by asset",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": { "$ref": "#/components/schemas/WhaleFlowSummary" }
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "asset": {
+                            "type": "string"
+                          },
+                          "trades": {
+                            "type": "integer"
+                          },
+                          "total_usd": {
+                            "type": "number"
+                          },
+                          "buy_usd": {
+                            "type": "number"
+                          },
+                          "sell_usd": {
+                            "type": "number"
+                          },
+                          "max_trade_usd": {
+                            "type": "number"
+                          },
+                          "last_seen": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -106,47 +139,55 @@
     },
     "/api/alerts": {
       "get": {
-        "tags": ["alerts"],
-        "operationId": "listAlerts",
         "summary": "Get recent manipulation and whale alerts",
+        "description": "Returns recent market manipulation and whale activity alerts, pinned alerts first.",
+        "operationId": "getAlerts",
         "parameters": [
           {
             "name": "limit",
             "in": "query",
-            "description": "Maximum alerts to return (default 100, max 500).",
+            "description": "Number of alerts to return (default 100, max 500)",
             "required": false,
-            "schema": { "type": "integer", "default": 100, "maximum": 500, "minimum": 1 }
+            "schema": {
+              "type": "integer",
+              "default": 100
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Recent alerts, pinned first",
-            "content": {
-              "application/json": {
-                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Alert" } }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/scan": {
-      "get": {
-        "tags": ["scans"],
-        "operationId": "runMarketScan",
-        "summary": "Run a live market scan (server-side market data proxy)",
-        "responses": {
-          "200": {
-            "description": "Scored coin list with manipulation threat levels",
+            "description": "Recent alerts",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": { "type": "boolean" },
-                    "source": { "type": "string" },
-                    "ts": { "type": "string", "format": "date-time" },
-                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/ScanCoin" } }
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "level": {
+                            "type": "string"
+                          },
+                          "tag": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "pinned": {
+                            "type": "boolean"
+                          },
+                          "timestamp": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
                   }
                 }
               }
@@ -155,237 +196,56 @@
         }
       }
     },
-    "/api/scans": {
+    "/api/scan": {
       "get": {
-        "tags": ["scans"],
-        "operationId": "listScanSessions",
-        "summary": "List stored scan sessions",
+        "summary": "Run a live market manipulation scan",
+        "description": "Scores tracked coins for manipulation risk using live market data.",
+        "operationId": "runMarketScan",
         "responses": {
           "200": {
-            "description": "Scan session history",
+            "description": "Scored coin list with manipulation threat levels",
             "content": {
               "application/json": {
-                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/ScanSession" } }
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "ts": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "symbol": {
+                            "type": "string"
+                          },
+                          "score": {
+                            "type": "number"
+                          },
+                          "threat": {
+                            "type": "string"
+                          },
+                          "price": {
+                            "type": "number"
+                          },
+                          "change_24h": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
-        }
-      }
-    },
-    "/api/scans/{id}": {
-      "get": {
-        "tags": ["scans"],
-        "operationId": "getScanSession",
-        "summary": "Get all coins recorded in one scan session",
-        "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
-        ],
-        "responses": {
-          "200": {
-            "description": "Coins in the session",
-            "content": {
-              "application/json": {
-                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/ScanCoin" } }
-              }
-            }
-          },
-          "404": { "description": "Session not found" }
-        }
-      }
-    },
-    "/api/scans/symbol/{sym}": {
-      "get": {
-        "tags": ["scans"],
-        "operationId": "getSymbolHistory",
-        "summary": "Historical scan records for one symbol",
-        "parameters": [
-          { "name": "sym", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Symbol, e.g. SOL" }
-        ],
-        "responses": {
-          "200": {
-            "description": "Historical rows for the symbol",
-            "content": {
-              "application/json": {
-                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/ScanCoin" } }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/scans/threats/top": {
-      "get": {
-        "tags": ["scans"],
-        "operationId": "getTopThreats",
-        "summary": "Highest manipulation-risk coins across recent scans",
-        "responses": {
-          "200": {
-            "description": "Top threat coins",
-            "content": {
-              "application/json": {
-                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/ScanCoin" } }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/signal-outcomes/recent": {
-      "get": {
-        "tags": ["signals"],
-        "operationId": "listRecentSignals",
-        "summary": "Recently fired trading signals",
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": { "type": "integer", "default": 100 }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Recent signal fires with entry prices",
-            "content": {
-              "application/json": {
-                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/SignalOutcome" } }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/signal-outcomes/eval": {
-      "get": {
-        "tags": ["signals"],
-        "operationId": "getSignalEvaluation",
-        "summary": "Aggregated signal performance (win rate, average returns)",
-        "responses": {
-          "200": {
-            "description": "Performance per signal type",
-            "content": {
-              "application/json": {
-                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/SignalEval" } }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/functions/v1/hyperliquid-cache": {
-      "get": {
-        "tags": ["hyperliquid"],
-        "operationId": "getHyperliquidStatus",
-        "summary": "Hyperliquid L1 status and cached market data",
-        "description": "Cached passthrough to the Hyperliquid API for market metadata, mid prices, and connectivity status.",
-        "responses": {
-          "200": {
-            "description": "Hyperliquid status payload",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/HyperliquidStatus" }
-              }
-            }
-          },
-          "503": { "description": "Upstream Hyperliquid API unavailable" }
-        }
-      }
-    }
-  },
-  "components": {
-    "schemas": {
-      "WhaleEvent": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "symbol": { "type": "string", "example": "BTCUSDT" },
-          "side": { "type": "string", "enum": ["BUY", "SELL"] },
-          "price": { "type": "number" },
-          "qty": { "type": "number" },
-          "usdt": { "type": "number", "description": "Notional trade size in USDT" },
-          "exchange": { "type": "string", "example": "binance" },
-          "created_at": { "type": "string", "format": "date-time" }
-        }
-      },
-      "WhaleFlowSummary": {
-        "type": "object",
-        "properties": {
-          "symbol": { "type": "string" },
-          "trades": { "type": "integer" },
-          "total_usdt": { "type": "number" },
-          "buy_usdt": { "type": "number" },
-          "sell_usdt": { "type": "number" },
-          "max_trade": { "type": "number" },
-          "last_seen": { "type": "string", "format": "date-time" }
-        }
-      },
-      "Alert": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "level": { "type": "string", "enum": ["critical", "high", "medium", "info"] },
-          "tag": { "type": "string" },
-          "text": { "type": "string" },
-          "sizing": { "type": "string", "nullable": true },
-          "pinned": { "type": "boolean" },
-          "created_at": { "type": "string", "format": "date-time" }
-        }
-      },
-      "ScanCoin": {
-        "type": "object",
-        "properties": {
-          "symbol": { "type": "string" },
-          "score": { "type": "number", "description": "Manipulation risk score" },
-          "threat": { "type": "string" },
-          "category": { "type": "string", "nullable": true },
-          "vmcap": { "type": "number", "description": "Volume-to-market-cap ratio" },
-          "price": { "type": "number" },
-          "change_24h": { "type": "number" },
-          "scanned_at": { "type": "string", "format": "date-time" }
-        }
-      },
-      "ScanSession": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "scanned_at": { "type": "string", "format": "date-time" },
-          "coin_count": { "type": "integer" },
-          "crit_count": { "type": "integer" },
-          "high_count": { "type": "integer" }
-        }
-      },
-      "SignalOutcome": {
-        "type": "object",
-        "properties": {
-          "symbol": { "type": "string" },
-          "signal": { "type": "string", "example": "AGGRESSIVE LONG" },
-          "score": { "type": "number" },
-          "category": { "type": "string", "nullable": true },
-          "entry_price": { "type": "number" },
-          "created_at": { "type": "string", "format": "date-time" }
-        }
-      },
-      "SignalEval": {
-        "type": "object",
-        "properties": {
-          "signal": { "type": "string" },
-          "fires": { "type": "integer" },
-          "with_outcome": { "type": "integer" },
-          "avg_1h_pct": { "type": "number", "nullable": true },
-          "avg_4h_pct": { "type": "number", "nullable": true },
-          "avg_24h_pct": { "type": "number", "nullable": true },
-          "win_rate_4h": { "type": "number", "nullable": true },
-          "avg_score": { "type": "number", "nullable": true },
-          "last_fire": { "type": "string", "format": "date-time", "nullable": true }
-        }
-      },
-      "HyperliquidStatus": {
-        "type": "object",
-        "properties": {
-          "ok": { "type": "boolean" },
-          "cached": { "type": "boolean" },
-          "ts": { "type": "string", "format": "date-time" },
-          "data": { "type": "object", "additionalProperties": true }
         }
       }
     }

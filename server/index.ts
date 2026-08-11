@@ -11,6 +11,7 @@ import { portfolioRouter }      from './routes/portfolio';
 import { trackedRouter }        from './routes/tracked';
 import { alertsRouter }         from './routes/alerts';
 import { whaleEventsRouter }    from './routes/whaleEvents';
+import { whalesRouter }         from './routes/whales';
 import { signalOutcomesRouter, fillOutcomePrices } from './routes/signalOutcomes';
 import { nexusBotRouter } from './routes/nexusBot';
 import { startNexusBotWorker } from './services/nexusBotWorker';
@@ -38,7 +39,16 @@ app.use(express.json({ limit: '2mb' }));
 // Without API_AUTH_TOKEN set, the server refuses to start protected routes —
 // fail-closed by design so a misconfigured deploy never silently exposes data.
 const API_AUTH_TOKEN = process.env.API_AUTH_TOKEN || '';
-const PUBLIC_PATHS = new Set(['/api/health', '/api/scan']);
+// Public, agent-facing read endpoints (OpenAI Custom GPT Actions, LLM crawlers).
+const PUBLIC_PATHS = new Set([
+  '/api/health',
+  '/api/health/db',
+  '/api/scan',
+  '/api/whales',
+  '/api/whales/',
+  '/api/whales/summary',
+  '/api/alerts',
+]);
 
 if (!API_AUTH_TOKEN) {
   console.warn('[AUTH] ⚠ API_AUTH_TOKEN not set — all protected routes will return 503');
@@ -47,9 +57,13 @@ if (!API_AUTH_TOKEN) {
 app.use('/api', (req, res, next) => {
   // Allow CORS preflight + whitelisted public reads
   if (req.method === 'OPTIONS') return next();
-  if (PUBLIC_PATHS.has(req.baseUrl + req.path) || PUBLIC_PATHS.has(req.originalUrl.split('?')[0])) {
+  const path = req.originalUrl.split('?')[0].replace(/\/+$/, '') || '/';
+  if (req.method === 'GET' && (PUBLIC_PATHS.has(path) || PUBLIC_PATHS.has(req.baseUrl + req.path))) {
+    // Agent-accessible: ChatGPT Actions and other bots issue cross-origin GETs.
+    res.setHeader('Access-Control-Allow-Origin', '*');
     return next();
   }
+
   if (!API_AUTH_TOKEN) {
     return res.status(503).json({ error: 'Server auth not configured' });
   }
@@ -82,6 +96,7 @@ app.use('/api/portfolio',        portfolioRouter);
 app.use('/api/tracked',          trackedRouter);
 app.use('/api/alerts',           alertsRouter);
 app.use('/api/whale-events',     whaleEventsRouter);
+app.use('/api/whales',           whalesRouter);
 app.use('/api/signal-outcomes',  signalOutcomesRouter);
 app.use('/api/nexus-bot',        nexusBotRouter);
 
