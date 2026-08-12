@@ -65,12 +65,13 @@ nexusBotRouter.get('/grids', async (_req: Request, res: Response) => {
       id: string; exchange: string; symbol: string; market_type: string; mode: string;
       upper_price: string; lower_price: string; grid_count: number; total_investment: string;
       fee_rate: string; status: string; order_ids: string[]; created_at: string; filled_count: number;
+      realized_pnl_usd: string;
     }>(`SELECT * FROM nexus_bot_grids ORDER BY created_at DESC`);
     res.json(rows.map((r) => ({
       id: r.id, exchange: r.exchange, symbol: r.symbol, marketType: r.market_type, mode: r.mode,
       upperPrice: Number(r.upper_price), lowerPrice: Number(r.lower_price), gridCount: r.grid_count,
       totalInvestment: Number(r.total_investment), feeRate: Number(r.fee_rate),
-      status: r.status, pnl: 0, // real PNL still needs entry-vs-exit price tracking per fill — not faked
+      status: r.status, pnl: Number(r.realized_pnl_usd ?? 0), // real, FIFO-matched — see services/gridPnl.ts
       filledGrids: r.filled_count ?? 0, activeOrders: Array.isArray(r.order_ids) ? r.order_ids.length : 0,
       createdAt: new Date(r.created_at).getTime(),
     })));
