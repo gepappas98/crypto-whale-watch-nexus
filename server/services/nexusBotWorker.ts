@@ -12,6 +12,7 @@
 import { query } from '../db';
 import { isServerDryRun, recordTrade } from './nexusBotGates';
 import { checkAndMaintainGrid, executeVolumeMakerTick } from './ccxtExecutor';
+import { matchFillsFifo, type Fill } from './gridPnl';
 
 const POLL_MS = Number(process.env.NEXUS_GRID_POLL_MS || 30_000);
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -21,7 +22,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 async function maintainOneGrid(grid: {
   id: string; exchange: string; symbol: string; order_ids: string[];
   upper_price: string; lower_price: string; grid_count: number; total_investment: string;
-  filled_count: number;
+  filled_count: number; open_buys: Fill[];
 }): Promise<void> {
   const result = await checkAndMaintainGrid({
     exchange: grid.exchange, symbol: grid.symbol, orderIds: grid.order_ids,
@@ -39,10 +40,16 @@ async function maintainOneGrid(grid: {
   const updatedOrderIds = [...stillOpen, ...newIds];
   const newFilledCount = grid.filled_count + result.filledOrderIds.length;
 
+  // FIFO-match this tick's fills against carried-over open buy inventory —
+  // see gridPnl.ts. `remainingBuys` becomes the new open_buys for next tick.
+  const { realizedPnlUsd, remainingBuys } = matchFillsFifo(grid.open_buys ?? [], result.fills);
+
   try {
     await query(
-      `UPDATE nexus_bot_grids SET order_ids = $1, filled_count = $2 WHERE id = $3`,
-      [JSON.stringify(updatedOrderIds), newFilledCount, grid.id],
+      `UPDATE nexus_bot_grids
+       SET order_ids = $1, filled_count = $2, realized_pnl_usd = realized_pnl_usd + $3, open_buys = $4
+       WHERE id = $5`,
+      [JSON.stringify(updatedOrderIds), newFilledCount, realizedPnlUsd, JSON.stringify(remainingBuys), grid.id],
     );
   } catch (err) {
     console.error(`[nexusBotWorker] failed to persist grid ${grid.id} maintenance update`, (err as Error).message);
@@ -55,6 +62,15 @@ async function maintainOneGrid(grid: {
       meta: { gridId: grid.id, event: 'level_filled', filledOrderId: filledId, replacement },
     });
   }
+  if (realizedPnlUsd !== 0) {
+    // One aggregate record for this tick's realized PNL — attaching it to
+    // each individual fill above would double-count across multiple fills
+    // in the same tick, since realizedPnlUsd is the FIFO matcher's tick total.
+    await recordTrade({
+      kind: 'grid_close', pair: grid.symbol, exchange: grid.exchange, dryRun: false, status: 'closed',
+      pnlUsd: realizedPnlUsd, meta: { gridId: grid.id, event: 'pnl_realized', fillsThisTick: result.fills.length },
+    });
+  }
 }
 
 async function gridTick(): Promise<void> {
@@ -64,8 +80,8 @@ async function gridTick(): Promise<void> {
     const grids = await query<{
       id: string; exchange: string; symbol: string; order_ids: string[];
       upper_price: string; lower_price: string; grid_count: number; total_investment: string;
-      filled_count: number;
-    }>(`SELECT id, exchange, symbol, order_ids, upper_price, lower_price, grid_count, total_investment, filled_count
+      filled_count: number; open_buys: Fill[];
+    }>(`SELECT id, exchange, symbol, order_ids, upper_price, lower_price, grid_count, total_investment, filled_count, open_buys
         FROM nexus_bot_grids WHERE status = 'active'`);
 
     for (const grid of grids) {
