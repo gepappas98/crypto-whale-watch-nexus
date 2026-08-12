@@ -1,6 +1,6 @@
-# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.5
+# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.6
 
-![Version](https://img.shields.io/badge/version-9.5-blue)
+![Version](https://img.shields.io/badge/version-9.6-blue)
 ![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite)
@@ -38,6 +38,7 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 
 ## 🆕 What's New
 
+- **The wallet tracker is actually live now** (v9.6): `WRRightPanel`'s "🐳 WALLETS" tab let you add a Solana address + label since long before this work started, but `WalletEntry.lastActivity` was a field that never got populated — no balance, no activity, just a static labeled list. `src/lib/solanaWallet.ts` now fetches real SOL balance and recent-transaction data via public Solana RPC (no key needed), refreshed every 45s by the new `useWalletActivity` hook. Also: `WRTracker.tsx`'s watchlist bar and this wallet list both benefit from the existing `rankByPerformance()`/real-activity work already in this codebase rather than reading as decoration.
 - **Grid maintenance, Volume Maker's trading loop, and real grid PNL — all shipped** (v9.5): `server/services/nexusBotWorker.ts`'s poll loop now does what it previously only stubbed. Grid maintenance: when a level fills (`ccxt.fetchOrder` status check), the opposite order gets re-placed one grid-step away automatically. Volume Maker: `VolumeMakerOpts` gained `exchange`/`symbol` fields (the missing piece that blocked this before), and the worker runs a small, honestly-scoped "ping-pong" tick (`NEXUS_VOLUME_MAKER_TICK_USD`, default $10 — alternating tiny market buy/sell pairs, not a sophisticated market-maker). Grid PNL: `server/services/gridPnl.ts` does FIFO cost-basis matching — sells consume the oldest unmatched buys first — so `GET /grids` reports a real running total instead of a hardcoded 0.
 - **Strategy Trader — a second, complementary bot** (v9.4): `server/services/freqtradeClient.ts` bridges to a running freqtrade instance's REST API (`/api/v1/forceentry` etc.), closing the loop from whale-radar's own detection (score + ML confidence + sizing hint) into a real freqtrade position with freqtrade's own stoploss/ROI/protections as a second, independent layer on top of Nexus's own. Same secret-handling pattern as the ccxt bridge — routes through `nexus-bot-proxy`, never a client-held token. A CRITICAL alert's new 🎯 button forwards it manually (never automatically); the server enforces its own cooldown lock and a hard 50%-ML-confidence floor before anything reaches freqtrade. Also new: `mcp-nexus-bot/`, an MCP server wrapping the same `/api/nexus-bot/*` routes so Claude Desktop, Claude Code, or any MCP client can drive Nexus directly — `nexus_scan_arbitrage`, `nexus_create_grid`, `nexus_execute_arbitrage`, and read-only status tools, all through the exact same server-side gates as the browser.
 - **A real trading-bot execution bridge** (v9.3) — `registerBot()` previously had no shipped implementation to plug in. `src/lib/nexus/restBridgeBot.ts` now provides one: browser → `nexus-bot-proxy` Edge Function (holds the real server token as a Supabase secret, never client-side) → Express `server/routes/nexusBot.ts` (its own independent dry-run + Postgres-backed cooldown gate, never just trusting the client) → `server/services/ccxtExecutor.ts` (real order placement via [ccxt](https://github.com/ccxt/ccxt) across Binance/OKX/Hyperliquid). Arbitrage execution and grid open/close place real orders end-to-end; grid *maintenance* and Volume Maker's trading loop are explicitly scoped out for now rather than faked — see [Connecting a Trading Bot](#-connecting-a-trading-bot) for exactly what's real today. Also new: `src/lib/nexus/nexusManifest.ts`, a machine-readable manifest of every guarded action and its live gate thresholds, meant to be handed to an LLM-driven caller as context before it acts.
@@ -63,7 +64,8 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 - **Whale transaction scanner** (`WRScanner`, `useWhaleStream`, `useWhaleWebSocket`, `useExchangeFeed`) — streams large trades from Binance and Bybit WebSockets (hardened, hand-tuned reconnect/circuit-breaker logic), plus OKX and Kraken via a generic adapter-driven hook (`src/lib/exchanges/`) — with an HTTP-seed fallback and exponential backoff + jitter reconnect if a socket drops.
 - **Advanced filters** (`WRAdvancedFilters`) — filter the whale feed by exchange, size, side, symbol, etc.
 - **Alert quality & delivery** (`src/lib/pairFilters.ts`, `alertCooldown.ts`, `notifyChannels.ts`, `sizingHint.ts`) — freqtrade-pattern pre-filters (dead pairs, implausible ticks, illiquid DEX pools, poor-track-record symbols, remote whitelist) keep noise out before an alert ever fires; a StoplossGuard/MaxDrawdown-style cooldown throttles what's left; alerts that clear both gates optionally push to Discord/Telegram and carry a real backtested-expectancy sizing note.
-- **Stats bar, tracker & portfolio** (`WRStatsBar`, `WRTracker`) — running session stats and a watchlist/portfolio with local persistence.
+- **Stats bar, tracker & portfolio** (`WRStatsBar`, `WRTracker`) — running session stats and a watchlist/portfolio with local persistence, ordered by historical performance (`rankByPerformance()`).
+- **Solana wallet tracker** (`WRRightPanel`'s 🐳 WALLETS tab, `src/lib/solanaWallet.ts`, `useWalletActivity`) — add any Solana address + a label; real SOL balance and recent-transaction activity refresh every 45s via public Solana RPC, no key required.
 - **Alerts** (`WRAlertBell`) — configurable alert conditions with in-app notification bell.
 - **Signal evaluation** (`WRSignalEval`, `src/lib/signalStore.ts`, `backtestMetrics.ts`, `mlScoring.ts`) — stores emitted signals, fills in realized outcome prices, and reports win-rate/profit-factor/Sharpe/Sortino/Calmar/SQN plus an optional FreqAI-lite confidence model trained on that same history.
 - **Onboarding & keyboard shortcuts** (`WROnboarding`, `WRKeyboardHelp`) — first-run walkthrough and a shortcuts cheat-sheet.
@@ -321,10 +323,11 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 
 ## 🗺️ Roadmap
 
-- Full-featured wallet tracking and smart-money wallet scoring.
+- Smart-money wallet **scoring** — ranking tracked wallets by trading skill (win rate, avg profit on their trades), not just showing raw balance/activity. Needs per-wallet trade history parsing (token swaps, not just tx count) — a bigger follow-up to the activity tracking below.
 - Expand AI Council with additional agent personas and longer-horizon memory scoring.
 
 ✅ Done (were previously listed here as roadmap items):
+- **Live wallet tracking is now actually live** — `src/lib/solanaWallet.ts` fetches real SOL balance + recent transaction count/timing via public Solana RPC (`getBalance`/`getSignaturesForAddress`), polled every 45s by `useWalletActivity`. `WalletEntry.lastActivity` existed as a field since before this work started and was never populated; the tracker tab showed a static labeled address list with no real activity behind it.
 - `src/lib/nexus/pairPerformance.ts`'s `rankByPerformance()` now orders the watchlist bar (`WRTracker.tsx`) by historical performance.
 - `src/lib/mlScoring.ts`'s `predictConfidence()` is now a live per-coin "🧠N%" badge in the scanner table (`WRScanner.tsx`), alongside a win-rate badge from `getSymbolPerformance()`.
 - `mcp-nexus-bot/` — an MCP server wrapping `/api/nexus-bot/*`, so an MCP-compatible AI client (Claude Desktop, Claude Code, ...) can drive Nexus directly with the same server-side gates the browser bridge goes through. See its own [README](mcp-nexus-bot/README.md).
@@ -348,24 +351,6 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 
 ---
 
-
 ## ⚠️ Disclaimer
 
-**Educational and informational purposes only.**
-
-This software is provided for learning, research, and personal experimentation.  
-It is **not** financial, investment, or trading advice.
-
-- Past performance of any signal, strategy, or backtest does **not** guarantee future results.
-- Cryptocurrency trading involves substantial risk of loss and is not suitable for every investor.
-- You are solely responsible for any trading decisions you make and for any funds you risk.
-- The authors and contributors assume **no responsibility** for any financial losses, damages, or other consequences arising from the use of this software.
-- Always start in **dry-run / paper-trading mode**. Never risk money you cannot afford to lose.
-- This project is **not affiliated with**, endorsed by, or connected to Binance, Bybit, OKX, Kraken, Hyperliquid, CoinGecko, DexScreener, freqtrade, or any other exchange, data provider, or third-party service. All trademarks and brand names belong to their respective owners.
-
-By using this software you acknowledge that you have read this disclaimer and accept full responsibility for your actions.
-
-### Third-party services & data
-This project uses publicly available market data and APIs from various exchanges and providers.  
-Users must comply with the respective Terms of Service and rate limits of those services.  
-API keys (when used) remain the sole responsibility of the end user.
+Educational and informational purposes only. Not financial or trading advice. Do your own research before making any trading decisions.
