@@ -1,6 +1,6 @@
-# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.4
+# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.5
 
-![Version](https://img.shields.io/badge/version-9.4-blue)
+![Version](https://img.shields.io/badge/version-9.5-blue)
 ![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite)
@@ -38,6 +38,7 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 
 ## 🆕 What's New
 
+- **Grid maintenance, Volume Maker's trading loop, and real grid PNL — all shipped** (v9.5): `server/services/nexusBotWorker.ts`'s poll loop now does what it previously only stubbed. Grid maintenance: when a level fills (`ccxt.fetchOrder` status check), the opposite order gets re-placed one grid-step away automatically. Volume Maker: `VolumeMakerOpts` gained `exchange`/`symbol` fields (the missing piece that blocked this before), and the worker runs a small, honestly-scoped "ping-pong" tick (`NEXUS_VOLUME_MAKER_TICK_USD`, default $10 — alternating tiny market buy/sell pairs, not a sophisticated market-maker). Grid PNL: `server/services/gridPnl.ts` does FIFO cost-basis matching — sells consume the oldest unmatched buys first — so `GET /grids` reports a real running total instead of a hardcoded 0.
 - **Strategy Trader — a second, complementary bot** (v9.4): `server/services/freqtradeClient.ts` bridges to a running freqtrade instance's REST API (`/api/v1/forceentry` etc.), closing the loop from whale-radar's own detection (score + ML confidence + sizing hint) into a real freqtrade position with freqtrade's own stoploss/ROI/protections as a second, independent layer on top of Nexus's own. Same secret-handling pattern as the ccxt bridge — routes through `nexus-bot-proxy`, never a client-held token. A CRITICAL alert's new 🎯 button forwards it manually (never automatically); the server enforces its own cooldown lock and a hard 50%-ML-confidence floor before anything reaches freqtrade. Also new: `mcp-nexus-bot/`, an MCP server wrapping the same `/api/nexus-bot/*` routes so Claude Desktop, Claude Code, or any MCP client can drive Nexus directly — `nexus_scan_arbitrage`, `nexus_create_grid`, `nexus_execute_arbitrage`, and read-only status tools, all through the exact same server-side gates as the browser.
 - **A real trading-bot execution bridge** (v9.3) — `registerBot()` previously had no shipped implementation to plug in. `src/lib/nexus/restBridgeBot.ts` now provides one: browser → `nexus-bot-proxy` Edge Function (holds the real server token as a Supabase secret, never client-side) → Express `server/routes/nexusBot.ts` (its own independent dry-run + Postgres-backed cooldown gate, never just trusting the client) → `server/services/ccxtExecutor.ts` (real order placement via [ccxt](https://github.com/ccxt/ccxt) across Binance/OKX/Hyperliquid). Arbitrage execution and grid open/close place real orders end-to-end; grid *maintenance* and Volume Maker's trading loop are explicitly scoped out for now rather than faked — see [Connecting a Trading Bot](#-connecting-a-trading-bot) for exactly what's real today. Also new: `src/lib/nexus/nexusManifest.ts`, a machine-readable manifest of every guarded action and its live gate thresholds, meant to be handed to an LLM-driven caller as context before it acts.
 - **Whale-radar side gets its own round of freqtrade concept ports** (v9.2), separate from the earlier Nexus Bot batch: `src/lib/alertCooldown.ts` (StoplossGuard/MaxDrawdownProtection — per-symbol + global circuit breaker on the alert feed itself, not just bot trades), `src/lib/notifyChannels.ts` (Discord webhook + Telegram bot push for alerts that clear the cooldown gate, configurable severity floor), `src/lib/mlScoring.ts` (FreqAI-lite — a from-scratch logistic-regression model trained on this app's own recorded signal outcomes, surfaced in `WRSignalEval`'s "🧠 ML Confidence Model" section with a train/retrain button and honest baseline-vs-high-confidence win-rate comparison), `src/lib/sizingHint.ts` (Edge-Positioning-lite — turns each signal category's real backtested expectancy into a short sizing note shown right on the live alert, not just in the eval panel), and a small multi-exchange abstraction (`src/lib/exchanges/{types,binance,bybit,okx,kraken,registry}.ts` + `src/hooks/useExchangeFeed.ts`) that added OKX and Kraken as live whale-feed sources alongside Binance/Bybit.
@@ -127,7 +128,7 @@ This mirrors the same "browser → edge function → real secret held server-sid
 
 **Dry-run is on by default, in two independent places.** The client-side toggle in Settings only affects the browser's own gate chain; the server enforces its own `NEXUS_DRY_RUN` flag regardless of what the client sends, and only turns off when **both** `NEXUS_DRY_RUN=false` **and** `NEXUS_LIVE_TRADING_CONFIRM=I_UNDERSTAND_THE_RISK` are set — a deliberately exact phrase, not a plain boolean, so it can't flip on from a stray typo.
 
-**Scope, stated plainly:** arbitrage execution and grid open/close place real orders end-to-end. Grid *maintenance* (re-placing an order once a level fills) is a documented `TODO` in `server/services/nexusBotWorker.ts` — it needs per-exchange `fetchOrder` status handling, which isn't implemented yet. Volume Maker only tracks start/stop state; `VolumeMakerOpts` has no symbol/pair field in the current interface, so there's nothing concrete to trade until that's extended — no fake trading loop stands in for it.
+**Scope, stated plainly:** arbitrage execution and grid open/close place real orders end-to-end. Grid *maintenance* (noticing a level filled and re-placing the opposite order one step away) and Volume Maker's trading loop are both implemented — `server/services/nexusBotWorker.ts` polls every `NEXUS_GRID_POLL_MS` (default 30s) and drives both. Grid PNL is real too: `server/services/gridPnl.ts` does FIFO cost-basis matching (sells consume the oldest unmatched buys first) rather than reporting a hardcoded 0. Volume Maker is deliberately a small "ping-pong" reference loop (`NEXUS_VOLUME_MAKER_TICK_USD`, default $10 — alternating tiny market buy/sell pairs), not a sophisticated market-maker.
 
 **For AI agents:** `src/lib/nexus/nexusManifest.ts` exports `getManifest()` — a structured, machine-readable description of every guarded action, its exact gate thresholds (read live from `protections.ts`/`openTradesLimit.ts`, not hardcoded text), and its input/output shape. Hand this to an LLM-driven caller as context before it acts, the same way a human would read this section first.
 
@@ -314,6 +315,7 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 - Backend (`server/`): Railway/Fly.io via `Procfile` (`npm run build:server && node server/dist/index.js`).
 - Hyperliquid data: deploy the `hyperliquid-cache` Supabase Edge Function + run the DB migration — see `HYPERLIQUID_DEPLOY.md`.
 - If the deployed site ever shows a **blank page**: open DevTools Console first. As of this version, `src/integrations/supabase/client.ts` no longer crashes on missing env vars, so a blank screen now points to a genuine runtime error rather than a silent import-time crash — the console will show it.
+- If a build **fails to deploy** right after touching anything in [Connecting a Trading Bot](#-connecting-a-trading-bot): `WRSettingsPanel.tsx` and `WRRightPanel.tsx` import `src/lib/nexus/bot.ts`, `restBridgeBot.ts`, and `strategyTraderBridge.ts` directly — a partial upload (some of those files updated, others not) fails the build with a "Cannot resolve module" or type error, not a runtime crash. Check the actual build log for the missing/mismatched module name before assuming the newest file is at fault; it's usually one of the three not being in sync with it.
 
 ---
 
@@ -321,8 +323,6 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 
 - Full-featured wallet tracking and smart-money wallet scoring.
 - Expand AI Council with additional agent personas and longer-horizon memory scoring.
-- Grid *maintenance* (re-placing an order once a level fills) — `server/services/nexusBotWorker.ts` has the polling loop wired up but the actual per-exchange `fetchOrder`/re-place logic is a documented `TODO`, not implemented.
-- Volume Maker's real trading loop — blocked on extending `VolumeMakerOpts` (`bot.ts`) with a symbol/pair field; there's nothing concrete to trade against yet.
 
 ✅ Done (were previously listed here as roadmap items):
 - `src/lib/nexus/pairPerformance.ts`'s `rankByPerformance()` now orders the watchlist bar (`WRTracker.tsx`) by historical performance.
@@ -330,8 +330,9 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 - `mcp-nexus-bot/` — an MCP server wrapping `/api/nexus-bot/*`, so an MCP-compatible AI client (Claude Desktop, Claude Code, ...) can drive Nexus directly with the same server-side gates the browser bridge goes through. See its own [README](mcp-nexus-bot/README.md).
 - A Freqtrade REST API bridge as a second, complementary bot — see [Strategy Trader](#strategy-trader--a-second-complementary-bot).
 - freqtrade's own pair-lock list is now visible in Settings → 🎯 STRATEGY TRADER, with a per-lock CLEAR action (`GET`/`DELETE /strategy-trader/locks`).
-
-✅ Done (were previously listed here as roadmap items):
+- Grid *maintenance* (re-placing an order once a level fills) — implemented in `server/services/nexusBotWorker.ts`, polling every `NEXUS_GRID_POLL_MS`.
+- Volume Maker's real trading loop — `VolumeMakerOpts` now carries `exchange`/`symbol`; the worker runs a small "ping-pong" tick against them (`NEXUS_VOLUME_MAKER_TICK_USD`).
+- Real grid PNL — `server/services/gridPnl.ts` FIFO-matches sells against the oldest unmatched buys; `GET /grids` reports the running total instead of a hardcoded 0.
 - Pairlist-style pre-filters already exist: `src/lib/pairFilters.ts` (whale-feed) and `src/lib/nexus/pairQuality.ts` (bot gate) — ports of freqtrade's RangeStabilityFilter/VolatilityFilter/SpreadFilter/AgeFilter/PerformanceFilter/RemotePairList, the last two reusing `pairPerformance.ts` and `remotePairList.ts` directly rather than re-deriving the logic.
 - Sortino/Calmar/SQN now computed in `src/lib/backtestMetrics.ts` alongside profit-factor/Sharpe/drawdown.
 - `src/lib/nexus/pairPerformance.ts` — PerformanceFilter-style ranking of pairs by historical signal performance.
