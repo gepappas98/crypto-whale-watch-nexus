@@ -257,6 +257,8 @@ export async function scanServerArbitrage(): Promise<ServerArbitrageOpportunity[
 
 export interface GridMaintenanceResult {
   filledOrderIds: string[];
+  /** Every filled order this tick, in fetch order — feeds gridPnl.ts's FIFO matcher. */
+  fills: Array<{ side: 'buy' | 'sell'; price: number; amountBase: number; feeUsd: number }>;
   newOrders: Array<{ oldId: string; newId: string; side: 'buy' | 'sell'; price: number }>;
   errors: string[];
 }
@@ -265,7 +267,7 @@ export async function checkAndMaintainGrid(grid: {
   exchange: string; symbol: string; orderIds: string[];
   upperPrice: number; lowerPrice: number; gridCount: number; totalInvestment: number;
 }): Promise<GridMaintenanceResult> {
-  const result: GridMaintenanceResult = { filledOrderIds: [], newOrders: [], errors: [] };
+  const result: GridMaintenanceResult = { filledOrderIds: [], fills: [], newOrders: [], errors: [] };
   const realOrderIds = grid.orderIds.filter((id) => !id.startsWith('dryrun-'));
   if (realOrderIds.length === 0) return result; // dry-run grid — nothing real to poll
 
@@ -291,6 +293,9 @@ export async function checkAndMaintainGrid(grid: {
       result.errors.push(`${orderId} filled but has no usable side/price — cannot re-place`);
       continue;
     }
+
+    const filledFee = (order as { fee?: { cost?: number } }).fee?.cost ?? 0;
+    result.fills.push({ side: filledSide, price: filledPrice, amountBase: order.filled, feeUsd: filledFee });
 
     const newSide: 'buy' | 'sell' = filledSide === 'buy' ? 'sell' : 'buy';
     const newPrice = newSide === 'sell' ? filledPrice + step : filledPrice - step;
