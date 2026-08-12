@@ -90,7 +90,11 @@ export interface PortfolioEntry {
 export interface WalletEntry {
   address: string;
   label: string;
+  /** ISO timestamp of the most recent on-chain transaction — populated by
+   *  useWalletActivity (lib/solanaWallet.ts), not set at add-time. */
   lastActivity?: string;
+  balanceSol?: number;
+  recentTxCount24h?: number;
 }
 
 export interface ScanSnapshot {
