@@ -8,6 +8,20 @@ import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { AlertItem, WhaleTrade, WalletEntry, fmtN } from '@/lib/whaleRadarState';
 import { HLExplorer } from '@/components/hyperliquid/HLExplorer';
 import type { LockInfo } from '@/lib/alertCooldown';
+import { toast } from '@/hooks/use-toast';
+import { forwardSignalToStrategyTrader } from '@/lib/nexus/strategyTraderBridge';
+
+/** "2h ago" / "5m ago" / "just now" — small enough not to warrant a shared util for one caller. */
+function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  if (diffMs < 0 || Number.isNaN(diffMs)) return '—';
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
 
 const VROW_H = 28;       // virtual row height in px
 const MAX_DOM_ROWS = 50;  // cap rendered DOM nodes
@@ -263,10 +277,15 @@ export function WRRightPanel({
             ) : (
               wallets.map((w, i) => (
                 <div key={i} className="px-3 py-2 border-b border-wr-border/40 flex items-center gap-2 animate-slide-in">
-                  <div className="wr-dot wr-dot-sol" />
+                  <div className={`wr-dot wr-dot-sol ${w.recentTxCount24h ? 'animate-pulse' : ''}`} title={w.recentTxCount24h ? `${w.recentTxCount24h} tx in last 24h` : 'no recent activity'} />
                   <div className="flex-1 min-w-0">
                     <div className="text-[9px] text-wr-white truncate">{w.label}</div>
                     <div className="text-[7px] text-wr-muted truncate">{w.address}</div>
+                    <div className="text-[7px] text-wr-cyan flex items-center gap-2 mt-0.5">
+                      {w.balanceSol != null ? <span>{w.balanceSol.toFixed(3)} SOL</span> : <span className="text-wr-muted">loading…</span>}
+                      {w.recentTxCount24h != null && <span className="text-wr-muted">{w.recentTxCount24h} tx/24h</span>}
+                      {w.lastActivity && <span className="text-wr-muted">· {timeAgo(w.lastActivity)}</span>}
+                    </div>
                   </div>
                   <button className="wr-btn red text-[7px] px-1 py-0" onClick={() => onRemoveWallet(w.address)}>✕</button>
                 </div>
@@ -355,6 +374,25 @@ export function WRRightPanel({
                   <span className="block text-[7px] text-wr-purple/80 mt-0.5 pl-0.5" title="Based on this signal category's real recorded outcomes — see the Risk Metrics panel for the full breakdown">
                     ⚖ {a.sizing}
                   </span>
+                )}
+                {a.level === 'critical' && (
+                  <button
+                    className="block text-[7px] text-wr-cyan/90 hover:text-wr-cyan mt-0.5 pl-0.5 bg-transparent border-none cursor-pointer underline decoration-dotted"
+                    title="Manually forward this symbol to freqtrade's forceentry — subject to the server's own cooldown lock and dry-run default, never sent automatically"
+                    onClick={async () => {
+                      try {
+                        const result = await forwardSignalToStrategyTrader({ pair: `${a.tag}/USDT`, entryTag: 'whale-radar-manual' });
+                        toast({
+                          title: result.dryRun ? 'Sent (dry-run)' : 'Sent to Strategy Trader',
+                          description: result.dryRun ? `${a.tag} — simulated, no real order placed` : `${a.tag} — forceentry accepted`,
+                        });
+                      } catch (err) {
+                        toast({ title: 'Strategy Trader forward failed', description: (err as Error).message, variant: 'destructive' });
+                      }
+                    }}
+                  >
+                    🎯 Send to Strategy Trader
+                  </button>
                 )}
               </div>
             ))
