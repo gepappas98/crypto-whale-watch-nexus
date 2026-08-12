@@ -348,6 +348,24 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 
 ---
 
+
 ## ⚠️ Disclaimer
 
-Educational and informational purposes only. Not financial or trading advice. Do your own research before making any trading decisions.
+**Educational and informational purposes only.**
+
+This software is provided for learning, research, and personal experimentation.  
+It is **not** financial, investment, or trading advice.
+
+- Past performance of any signal, strategy, or backtest does **not** guarantee future results.
+- Cryptocurrency trading involves substantial risk of loss and is not suitable for every investor.
+- You are solely responsible for any trading decisions you make and for any funds you risk.
+- The authors and contributors assume **no responsibility** for any financial losses, damages, or other consequences arising from the use of this software.
+- Always start in **dry-run / paper-trading mode**. Never risk money you cannot afford to lose.
+- This project is **not affiliated with**, endorsed by, or connected to Binance, Bybit, OKX, Kraken, Hyperliquid, CoinGecko, DexScreener, freqtrade, or any other exchange, data provider, or third-party service. All trademarks and brand names belong to their respective owners.
+
+By using this software you acknowledge that you have read this disclaimer and accept full responsibility for your actions.
+
+### Third-party services & data
+This project uses publicly available market data and APIs from various exchanges and providers.  
+Users must comply with the respective Terms of Service and rate limits of those services.  
+API keys (when used) remain the sole responsibility of the end user.
