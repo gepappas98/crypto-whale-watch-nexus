@@ -64,6 +64,8 @@ export function WRSettingsPanel({
   // same pattern as notifyCfg above — see lib/nexus/bot.ts / openTradesLimit.ts / remotePairList.ts) ──
   const [dryRunOn, setDryRunOn] = useState(() => isDryRun());
   const [botConnected, setBotConnected] = useState(() => isBotConnected());
+  const [botBusy, setBotBusy] = useState(false);
+  const [botError, setBotError] = useState<string | null>(null);
   const [stStatus, setStStatus] = useState<StrategyTraderStatus | null>(null);
   const [stChecking, setStChecking] = useState(false);
 
