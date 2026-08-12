@@ -17,6 +17,7 @@ import { WRMobileFilterSheet } from '@/components/whale-radar/WRMobileFilterShee
 import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
 import { useWhaleStream, type StreamSignal } from '@/hooks/useWhaleStream';
 import { useExchangeFeed } from '@/hooks/useExchangeFeed';
+import { useWalletActivity } from '@/hooks/useWalletActivity';
 import { okxAdapter } from '@/lib/exchanges/okx';
 import { krakenAdapter } from '@/lib/exchanges/kraken';
 import type { NormalizedTrade } from '@/lib/exchanges/types';
@@ -51,6 +52,7 @@ export default function WhaleRadarApp() {
   const [tracked, setTracked] = useState<Record<string, TrackedToken>>({});
   const [portfolio, setPortfolio] = useState<Record<string, PortfolioEntry>>({});
   const [wallets, setWallets] = useState<WalletEntry[]>([]);
+  useWalletActivity(wallets, setWallets);
 
   // UI State
   const [theme, setTheme] = useState<'cyber' | 'matrix' | 'dark'>('cyber');
@@ -730,8 +732,7 @@ export default function WhaleRadarApp() {
               ✓ Copied to clipboard!
             </div>
           </div>
-          <div className="text-[8px] text-wr-muted/50 pt-2">WHALE RADAR v9 — Built with 🔥 by the CEO 
-          Tips are voluntary and do not grant any rights, services, or guarantees</div>
+          <div className="text-[8px] text-wr-muted/50 pt-2">WHALE RADAR v9 — Built with 🔥 by the CEO</div>
         </div>
       </div>
     </div>
