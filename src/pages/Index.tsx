@@ -730,7 +730,8 @@ export default function WhaleRadarApp() {
               ✓ Copied to clipboard!
             </div>
           </div>
-          <div className="text-[8px] text-wr-muted/50 pt-2">WHALE RADAR v9 — Built with 🔥 by the CEO</div>
+          <div className="text-[8px] text-wr-muted/50 pt-2">WHALE RADAR v9 — Built with 🔥 by the CEO 
+          Tips are voluntary and do not grant any rights, services, or guarantees</div>
         </div>
       </div>
     </div>
