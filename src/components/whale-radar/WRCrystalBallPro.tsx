@@ -77,7 +77,7 @@ const COIN_LIST: Coin[] = [
   { symbol: "ETH", id: "ethereum", name: "Ethereum" },
   { symbol: "BNB", id: "binancecoin", name: "BNB" },
   { symbol: "SOL", id: "solana", name: "Solana" },
-  { symbol: "XRP", id: "ripple", name: "XRP" },
+  { symbol: "XRP", id: "ripple", name: "Ripple" },
   { symbol: "DOGE", id: "dogecoin", name: "Dogecoin" },
   { symbol: "ADA", id: "cardano", name: "Cardano" },
   { symbol: "AVAX", id: "avalanche-2", name: "Avalanche" },
@@ -674,7 +674,65 @@ const generateAIForecast = (
 };
 
 // ============================================================
-// BULLETPROOF FETCH
+// FALLBACK API HELPERS
+// ============================================================
+
+/**
+ * Fetch klines from Binance directly (CORS-enabled)
+ */
+async function fetchBinanceKlinesDirect(
+  symbol: string,
+  interval: string,
+  limit = 200,
+  timeout = 8000
+): Promise<any[] | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=${interval}&limit=${limit}`;
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch market data from CoinCap (CORS-enabled)
+ */
+async function fetchCoinCapMarketData(coinId: string): Promise<any | null> {
+  try {
+    const url = `https://api.coincap.io/v2/assets/${coinId}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || !data.data) return null;
+    return data.data;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch market data from Binance ticker (CORS-enabled) as fallback
+ */
+async function fetchBinanceTicker(symbol: string): Promise<any | null> {
+  try {
+    const url = `https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}USDT`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================
+// BULLETPROOF FETCH (proxy fallback)
 // ============================================================
 
 async function resilientFetch(
@@ -763,7 +821,7 @@ export default function WRCrystalBallPro() {
     (
       coin: Coin,
       tf: Timeframe,
-      coinGeckoData: any[] | null,
+      marketData: { price: number; change24h: number; change7d: number; volume: number; marketCap: number; high24h: number; low24h: number } | null,
       klines: any[] | null,
       isCached: boolean
     ): AnalysisResult => {
@@ -776,33 +834,26 @@ export default function WRCrystalBallPro() {
       let high24h = 0;
       let low24h = 0;
 
-      if (coinGeckoData && Array.isArray(coinGeckoData) && coinGeckoData.length > 0) {
-        const cg = coinGeckoData[0];
-        currentPrice = Number(cg.current_price) || 0;
-        change24h = cg.price_change_percentage_24h || 0;
-        change7d = cg.price_change_percentage_7d_in_currency || 0;
-        volume = Number(cg.total_volume) || 0;
-        marketCap = Number(cg.market_cap) || 0;
-        high24h = Number(cg.high_24h) || currentPrice;
-        low24h = Number(cg.low_24h) || currentPrice;
+      if (marketData) {
+        currentPrice = marketData.price;
+        change24h = marketData.change24h;
+        change7d = marketData.change7d;
+        volume = marketData.volume;
+        marketCap = marketData.marketCap;
+        high24h = marketData.high24h || currentPrice;
+        low24h = marketData.low24h || currentPrice;
       }
 
-      // --- Fallback: only use synthetic data as absolute last resort ---
+      // --- Fallback: deterministic realistic price based on symbol (if all APIs fail) ---
       if (currentPrice <= 0) {
-        // Use a deterministic but realistic fallback based on symbol
         const hash = coin.symbol.split("").reduce((a, b) => a + b.charCodeAt(0), 0);
         const basePrice = Math.max((hash % 500) + 0.01, 0.01);
-        // Scale based on symbol popularity (approximate)
         const popular = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA"];
         const scale = popular.includes(coin.symbol) ? 100 : popular.includes(coin.symbol.slice(0, 3)) ? 10 : 1;
         currentPrice = basePrice * scale;
-        if (coin.symbol === "BTC") currentPrice = 95000;
-        else if (coin.symbol === "ETH") currentPrice = 3500;
-        else if (coin.symbol === "SOL") currentPrice = 180;
-        else if (coin.symbol === "BNB") currentPrice = 620;
         high24h = currentPrice * 1.05;
         low24h = currentPrice * 0.95;
-        change24h = (Math.random() * 6) - 3; // -3% to +3% random
+        change24h = (Math.random() * 6) - 3;
         change7d = (Math.random() * 12) - 6;
       }
 
@@ -976,53 +1027,106 @@ export default function WRCrystalBallPro() {
     const tf = timeframe;
     const cacheKey = CACHE_KEY(coin.id, tf.binanceInterval);
 
+    // Check if we have cached data *before* fetching – used to decide error handling
+    const hasCachedData = !!readCache(coin.id, tf.binanceInterval);
+
     try {
-      // 1. Check cache
+      // 1. Check cache and set if available
       const cached = readCache(coin.id, tf.binanceInterval);
       if (cached) {
         setData(cached);
-        setLoading(false);
-        // Still fetch fresh data in background
-        // (We'll do this below)
       }
 
-      // 2. Fetch fresh data
-      const coinGeckoUrl = `https://api.coingecko.com/api/v3/coins/${coin.id}?tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
-      const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${coin.symbol}USDT&interval=${tf.binanceInterval}&limit=200`;
-
-      const [coinGeckoRes, klinesRes] = await Promise.all([
-        resilientFetch(coinGeckoUrl).catch(() => null),
-        resilientFetch(binanceUrl).catch(() => null),
-      ]);
-
-      let coinGeckoData = null;
-      let klinesData = null;
-
-      if (coinGeckoRes && coinGeckoRes.ok) {
-        coinGeckoData = await coinGeckoRes.json();
-        // Coingecko returns a single object, but our parser expects an array
-        if (coinGeckoData && !Array.isArray(coinGeckoData)) {
-          coinGeckoData = [coinGeckoData];
+      // 2. Fetch fresh data using multiple free APIs
+      // 2a. Try Binance klines directly (CORS-enabled)
+      let klinesData = await fetchBinanceKlinesDirect(coin.symbol, tf.binanceInterval);
+      // 2b. If direct fails, try proxy for Binance
+      if (!klinesData) {
+        try {
+          const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${coin.symbol}USDT&interval=${tf.binanceInterval}&limit=200`;
+          const res = await resilientFetch(binanceUrl, 8000, 1);
+          if (res.ok) klinesData = await res.json();
+        } catch {
+          // ignore
         }
       }
 
-      if (klinesRes && klinesRes.ok) {
-        klinesData = await klinesRes.json();
+      // 3. Get market data (price, change, volume, etc.)
+      let marketData: { price: number; change24h: number; change7d: number; volume: number; marketCap: number; high24h: number; low24h: number } | null = null;
+
+      // 3a. Try CoinCap (CORS-enabled) first
+      const coinCapData = await fetchCoinCapMarketData(coin.id);
+      if (coinCapData) {
+        const price = parseFloat(coinCapData.priceUsd);
+        marketData = {
+          price: price || 0,
+          change24h: parseFloat(coinCapData.changePercent24Hr) || 0,
+          change7d: 0, // CoinCap doesn't provide 7d change directly
+          volume: parseFloat(coinCapData.volumeUsd24Hr) || 0,
+          marketCap: parseFloat(coinCapData.marketCapUsd) || 0,
+          high24h: price * 1.02, // approximation (no high/low)
+          low24h: price * 0.98,
+        };
+        // Try to get 7d change from historical? Not necessary for now.
       }
 
+      // 3b. If CoinCap fails, try Binance ticker (CORS-enabled)
+      if (!marketData) {
+        const ticker = await fetchBinanceTicker(coin.symbol);
+        if (ticker) {
+          const price = parseFloat(ticker.lastPrice);
+          marketData = {
+            price: price || 0,
+            change24h: parseFloat(ticker.priceChangePercent) || 0,
+            change7d: 0, // Binance ticker doesn't have 7d
+            volume: parseFloat(ticker.volume) || 0,
+            marketCap: 0, // not available
+            high24h: parseFloat(ticker.highPrice) || price,
+            low24h: parseFloat(ticker.lowPrice) || price,
+          };
+        }
+      }
+
+      // 3c. If both fail, try CoinGecko via proxy
+      if (!marketData) {
+        try {
+          const coinGeckoUrl = `https://api.coingecko.com/api/v3/coins/${coin.id}?tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
+          const res = await resilientFetch(coinGeckoUrl, 10000, 2);
+          if (res.ok) {
+            const cgData = await res.json();
+            if (cgData && cgData.market_data) {
+              const md = cgData.market_data;
+              const price = md.current_price?.usd || 0;
+              marketData = {
+                price,
+                change24h: md.price_change_percentage_24h || 0,
+                change7d: md.price_change_percentage_7d || 0,
+                volume: md.total_volume?.usd || 0,
+                marketCap: md.market_cap?.usd || 0,
+                high24h: md.high_24h?.usd || price,
+                low24h: md.low_24h?.usd || price,
+              };
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // If we still have no market data, we'll fallback to deterministic fake price later in buildAnalysis
       const isCached = !!cached;
-      const analysis = buildAnalysis(coin, tf, coinGeckoData, klinesData, isCached);
+      const analysis = buildAnalysis(coin, tf, marketData, klinesData, isCached);
 
-      // 3. Update cache
+      // 4. Update cache and state
       writeCache(coin.id, tf.binanceInterval, analysis);
-
-      // 4. Update state
       setData(analysis);
       setError(null);
-      setIsDegraded(!coinGeckoData || !klinesData);
+      // Mark degraded if we couldn't get both marketData and klinesData from at least one live source
+      const hasLiveData = !!marketData && !!klinesData;
+      setIsDegraded(!hasLiveData);
     } catch (err: any) {
-      // If we have cached data, don't show error — just mark as degraded
-      if (data) {
+      // If we had cached data, keep it and only show degraded status
+      if (hasCachedData) {
         setIsDegraded(true);
         setError(null);
       } else {
@@ -1033,7 +1137,7 @@ export default function WRCrystalBallPro() {
       setLoading(false);
       abortRef.current = null;
     }
-  }, [selectedCoin, timeframe, buildAnalysis, data]);
+  }, [selectedCoin, timeframe, buildAnalysis]); // <--- FIX: Removed 'data' from deps
 
   // Auto-fetch on coin or timeframe change
   useEffect(() => {
