@@ -64,6 +64,8 @@ export function WRSettingsPanel({
   // same pattern as notifyCfg above — see lib/nexus/bot.ts / openTradesLimit.ts / remotePairList.ts) ──
   const [dryRunOn, setDryRunOn] = useState(() => isDryRun());
   const [botConnected, setBotConnected] = useState(() => isBotConnected());
+  const [botBusy, setBotBusy] = useState(false);
+  const [botError, setBotError] = useState<string | null>(null);
   const [stStatus, setStStatus] = useState<StrategyTraderStatus | null>(null);
   const [stChecking, setStChecking] = useState(false);
 
@@ -335,19 +337,34 @@ export function WRSettingsPanel({
         <div className="flex items-center justify-between gap-2">
           <span className="text-[8px] text-wr-muted">Execution bridge</span>
           <button
+            disabled={botBusy}
             className={`wr-btn text-[8px] px-2 ${botConnected ? 'text-wr-green border-wr-green' : ''}`}
-            onClick={() => {
-              if (botConnected) { unregisterBot(); setBotConnected(false); }
-              else { registerBot(new RestBridgeBot()); setBotConnected(true); }
+            onClick={async () => {
+              if (botConnected) { unregisterBot(); setBotConnected(false); setBotError(null); return; }
+              // Preflight: the bridge is useless (and throws on every action)
+              // unless the proxy has NEXUS_BOT_API_URL + API_AUTH_TOKEN set.
+              setBotBusy(true); setBotError(null);
+              const probe = new RestBridgeBot();
+              try {
+                await probe.getPortfolio();
+                registerBot(probe);
+                setBotConnected(true);
+              } catch (e) {
+                setBotError((e as Error)?.message ?? 'Bridge unreachable');
+              } finally {
+                setBotBusy(false);
+              }
             }}
           >
-            {botConnected ? '● CONNECTED (RestBridgeBot)' : '○ CONNECT BOT'}
+            {botBusy ? '… CHECKING' : botConnected ? '● CONNECTED (RestBridgeBot)' : '○ CONNECT BOT'}
           </button>
         </div>
-        <Note cls="text-wr-muted">
-          {botConnected
-            ? 'Routes through supabase/functions/nexus-bot-proxy → your Express server → ccxt.'
-            : 'No bot connected — grid/arbitrage/volume-maker actions will throw until you connect one.'}
+        <Note cls={botError ? 'text-wr-red' : 'text-wr-muted'}>
+          {botError
+            ? `Bridge not available — ${botError}`
+            : botConnected
+              ? 'Routes through supabase/functions/nexus-bot-proxy → your Express server → ccxt.'
+              : 'No bot connected — grid/arbitrage/volume-maker actions will throw until you connect one.'}
         </Note>
         <div className="flex items-center justify-between gap-2 mt-1.5">
           <span className="text-[8px] text-wr-muted">Dry-run mode</span>

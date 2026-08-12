@@ -859,7 +859,7 @@ export default function WRCrystalBallPro() {
 
       // --- Initialize with defaults ---
       let signal: AnalysisResult["signal"] = "NEUTRAL";
-      let confidence = CONFIDENCE.BASE_NEUTRAL;
+      let confidence: number = CONFIDENCE.BASE_NEUTRAL;
       const reasons: string[] = [];
       let rsiVal = 50;
       let macdHist = 0;
@@ -871,7 +871,7 @@ export default function WRCrystalBallPro() {
       let divergence = { bullish: false, bearish: false, strength: "" };
       let adxData = { adx: 25, diPositive: 25, diNegative: 25 };
       let cciVal = 0;
-      let superTrendData = { trend: "neutral" as const, value: currentPrice };
+      let superTrendData: { trend: "bull" | "bear" | "neutral"; value: number } = { trend: "neutral", value: currentPrice };
 
       // --- Technical analysis (if we have klines) ---
       if (klines && Array.isArray(klines) && klines.length > 30) {
