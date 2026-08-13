@@ -30,12 +30,14 @@ export interface WalletActivity {
 
 const cache = new Map<string, { data: WalletActivity; ts: number }>();
 
-interface RpcSignatureEntry {
+export interface RpcSignatureEntry {
   signature: string;
   blockTime: number | null;
 }
 
-async function rpcCall<T>(method: string, params: unknown[]): Promise<T> {
+/** Exported so walletSkillScoring.ts can reuse the same timeout/error
+ *  handling instead of re-deriving its own RPC client. */
+export async function solanaRpcCall<T>(method: string, params: unknown[]): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -67,8 +69,8 @@ export async function fetchWalletActivity(address: string): Promise<WalletActivi
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.data;
 
   const [balanceResult, signatures] = await Promise.all([
-    rpcCall<{ value: number }>('getBalance', [address]),
-    rpcCall<RpcSignatureEntry[]>('getSignaturesForAddress', [address, { limit: 20 }]),
+    solanaRpcCall<{ value: number }>('getBalance', [address]),
+    solanaRpcCall<RpcSignatureEntry[]>('getSignaturesForAddress', [address, { limit: 20 }]),
   ]);
 
   const balanceSol = (balanceResult?.value ?? 0) / LAMPORTS_PER_SOL;
