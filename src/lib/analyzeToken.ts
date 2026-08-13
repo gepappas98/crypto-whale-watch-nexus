@@ -21,6 +21,9 @@ interface AiCacheEntry {
 const aiCache: Record<string, AiCacheEntry> = {};
 const AI_CACHE_MS = 10 * 60 * 1000;
 
+const sentimentCache: Record<string, AiCacheEntry> = {};
+const SENTIMENT_CACHE_MS = 10 * 60 * 1000;
+
 export async function analyzeToken(coin: CoinData, aiKey: string): Promise<string | null> {
   if (!aiKey) return null;
 
@@ -112,6 +115,15 @@ export async function analyzeSentiment(
   const washCount = coins.filter(c => c.category === 'WASH').length;
   const pumpCount = coins.filter(c => c.category === 'PUMP').length;
   const rugCount  = coins.filter(c => c.birdData && c.birdData.rugScore >= 70).length;
+
+  // Cache key folds in the counts that actually drive the prompt, not just
+  // time — a scan that doesn't change the risk picture (same crit/high/wash/
+  // pump/rug counts) reuses the cached read instead of spending an API call
+  // on a prompt that would come out functionally identical.
+  const cacheKey = `${critCount}|${highCount}|${washCount}|${pumpCount}|${rugCount}|${coins.length}`;
+  const cached = sentimentCache[cacheKey];
+  if (cached && Date.now() - cached.ts < SENTIMENT_CACHE_MS) return cached.text;
+
   const top = coins
     .filter(c => c.score >= 50)
     .slice(0, 5)
@@ -145,7 +157,9 @@ export async function analyzeSentiment(
     }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    return data.content?.[0]?.text || 'No response';
+    const text = data.content?.[0]?.text || 'No response';
+    sentimentCache[cacheKey] = { ts: Date.now(), text };
+    return text;
   } catch (e: unknown) {
     return 'AI error: ' + (e instanceof Error ? e.message : 'Unknown').slice(0, 60);
   }
