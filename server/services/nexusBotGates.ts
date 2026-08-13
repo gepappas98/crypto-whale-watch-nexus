@@ -59,7 +59,7 @@ export async function checkAndLockCooldown(pair: string): Promise<GateResult> {
 }
 
 export async function recordTrade(input: {
-  kind: 'arbitrage' | 'grid_open' | 'grid_close' | 'volume_maker';
+  kind: 'arbitrage' | 'grid_open' | 'grid_close' | 'volume_maker' | 'strategy_trade';
   pair: string;
   exchange?: string;
   side?: string;
