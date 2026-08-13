@@ -6,6 +6,7 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { AlertItem, WhaleTrade, WalletEntry, fmtN } from '@/lib/whaleRadarState';
+import { rankWalletsBySkill } from '@/lib/walletSkillScoring';
 import { HLExplorer } from '@/components/hyperliquid/HLExplorer';
 import type { LockInfo } from '@/lib/alertCooldown';
 import { toast } from '@/hooks/use-toast';
@@ -55,6 +56,10 @@ export function WRRightPanel({
 }: WRRightPanelProps) {
   const [walletInput, setWalletInput] = useState('');
   const [walletLabel, setWalletLabel] = useState('');
+  // Skill-scored wallets (closed trades found) sort to the top; wallets
+  // with no scored history yet keep their add-order at the bottom, same
+  // "rank, don't hide" convention rankByPerformance() uses for symbols.
+  const rankedWallets = useMemo(() => rankWalletsBySkill(wallets), [wallets]);
   const [activeTab, setActiveTab] = useState<'whales' | 'wallets' | 'hl'>('whales');
 
   const handleAddWallet = () => {
@@ -275,16 +280,28 @@ export function WRRightPanel({
                 Add Solana wallet addresses to track whale/dev wallet flows in real-time
               </div>
             ) : (
-              wallets.map((w, i) => (
-                <div key={i} className="px-3 py-2 border-b border-wr-border/40 flex items-center gap-2 animate-slide-in">
+              rankedWallets.map((w) => (
+                <div key={w.address} className="px-3 py-2 border-b border-wr-border/40 flex items-center gap-2 animate-slide-in">
                   <div className={`wr-dot wr-dot-sol ${w.recentTxCount24h ? 'animate-pulse' : ''}`} title={w.recentTxCount24h ? `${w.recentTxCount24h} tx in last 24h` : 'no recent activity'} />
                   <div className="flex-1 min-w-0">
                     <div className="text-[9px] text-wr-white truncate">{w.label}</div>
                     <div className="text-[7px] text-wr-muted truncate">{w.address}</div>
-                    <div className="text-[7px] text-wr-cyan flex items-center gap-2 mt-0.5">
+                    <div className="text-[7px] text-wr-cyan flex items-center gap-2 mt-0.5 flex-wrap">
                       {w.balanceSol != null ? <span>{w.balanceSol.toFixed(3)} SOL</span> : <span className="text-wr-muted">loading…</span>}
                       {w.recentTxCount24h != null && <span className="text-wr-muted">{w.recentTxCount24h} tx/24h</span>}
                       {w.lastActivity && <span className="text-wr-muted">· {timeAgo(w.lastActivity)}</span>}
+                    </div>
+                    <div className="text-[7px] flex items-center gap-2 mt-0.5">
+                      {w.closedTrades ? (
+                        <span
+                          className={w.skillScore != null && w.skillScore >= 50 ? 'text-wr-green' : 'text-wr-amber'}
+                          title={`${w.closedTrades} closed round-trip(s) this session's scan actually cost-basis-matched; more history builds a steadier score`}
+                        >
+                          🎯 {w.skillScore?.toFixed(0) ?? '—'} · {w.winRate != null ? `${(w.winRate * 100).toFixed(0)}% win` : ''} · {w.avgProfitSol != null ? `${w.avgProfitSol >= 0 ? '+' : ''}${w.avgProfitSol.toFixed(3)} SOL avg` : ''}
+                        </span>
+                      ) : (
+                        <span className="text-wr-muted">no closed trades scanned yet</span>
+                      )}
                     </div>
                   </div>
                   <button className="wr-btn red text-[7px] px-1 py-0" onClick={() => onRemoveWallet(w.address)}>✕</button>
