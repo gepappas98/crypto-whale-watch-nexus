@@ -9,6 +9,7 @@ import type {
   CouncilDepth,
   CouncilMemoryEntry,
   CouncilStreamEvent,
+  DeskTrackRecord,
 } from '@/types/council';
 
 const FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-council`;
@@ -219,6 +220,24 @@ function wasDirectionallyCorrect(verdict: CouncilMemoryEntry['finalVerdict'], re
   return null; // NEUTRAL made no directional claim — nothing to grade
 }
 
+const MIN_CONFIDENT_CALLS = 5; // graded calls needed before the score isn't pulled toward the 50 baseline
+
+/** Shared by buildReflection() (narrative) and computeDeskTrackRecord()
+ *  (structured badge) so both grade calls the exact same way — longest
+ *  available horizon, NEUTRAL excluded — rather than drifting apart. */
+function gradeCalls(entries: CouncilMemoryEntry[]): { verdict: CouncilMemoryEntry['finalVerdict']; ret: number; correct: boolean }[] {
+  const scored = entries.filter(e => Object.keys(e.performance ?? {}).length > 0 && e.finalVerdict !== 'NEUTRAL');
+  const graded: { verdict: CouncilMemoryEntry['finalVerdict']; ret: number; correct: boolean }[] = [];
+  for (const e of scored) {
+    const longest = longestAvailableBucket(e.performance);
+    if (!longest) continue;
+    const correct = wasDirectionallyCorrect(e.finalVerdict, longest[1] ?? 0);
+    if (correct === null) continue;
+    graded.push({ verdict: e.finalVerdict, ret: longest[1] ?? 0, correct });
+  }
+  return graded;
+}
+
 export function buildReflection(entries: CouncilMemoryEntry[]): string | null {
   const scored = entries.filter(e => Object.keys(e.performance ?? {}).length > 0);
   if (!scored.length) return null;
@@ -238,13 +257,26 @@ export function buildReflection(entries: CouncilMemoryEntry[]): string | null {
   // calls entirely (previously graded as if they were bearish, which
   // artificially dragged the hit rate around for calls with no direction
   // to actually get right or wrong).
-  const gradable = scored.filter(e => e.finalVerdict !== 'NEUTRAL');
-  const hits = gradable.filter((e) => {
-    const longest = longestAvailableBucket(e.performance);
-    return longest ? wasDirectionallyCorrect(e.finalVerdict, longest[1] ?? 0) === true : false;
-  }).length;
-  const headline = gradable.length > 0
-    ? `Desk track record on this token: ${hits}/${gradable.length} directionally correct.`
+  const graded = gradeCalls(entries);
+  const hits = graded.filter(g => g.correct).length;
+  const headline = graded.length > 0
+    ? `Desk track record on this token: ${hits}/${graded.length} directionally correct.`
     : `Desk track record on this token: no directional calls to grade yet (NEUTRAL only).`;
   return `${headline}\n${lines.join('\n')}`;
+}
+
+/** Structured counterpart to buildReflection() — same grading, meant for a
+ *  UI badge rather than text folded into the PM's prompt. See
+ *  DeskTrackRecord's docstring for the scoring rationale. */
+export function computeDeskTrackRecord(entries: CouncilMemoryEntry[]): DeskTrackRecord {
+  const graded = gradeCalls(entries);
+  if (graded.length === 0) {
+    return { gradedCalls: 0, hits: 0, hitRate: null, avgReturnPct: null, score: null };
+  }
+  const hits = graded.filter(g => g.correct).length;
+  const hitRate = hits / graded.length;
+  const avgReturnPct = +(graded.reduce((s, g) => s + g.ret, 0) / graded.length).toFixed(2);
+  const confidence = Math.min(1, graded.length / MIN_CONFIDENT_CALLS);
+  const score = Math.round(hitRate * 100 * confidence + 50 * (1 - confidence));
+  return { gradedCalls: graded.length, hits, hitRate, avgReturnPct, score };
 }
