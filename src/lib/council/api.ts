@@ -177,6 +177,7 @@ export async function refreshMemoryPerformance(
     if (!e.priceAt) { updated.push(e); continue; }
     const ageMs = now - new Date(e.createdAt).getTime();
     const bucket =
+      ageMs >= 30 * 864e5 ? '30d' :
       ageMs >= 7 * 864e5 ? '7d' :
       ageMs >= 864e5 ? '24h' :
       ageMs >= 4 * 36e5 ? '4h' :
@@ -197,24 +198,53 @@ export async function refreshMemoryPerformance(
 }
 
 /** Deterministic local reflection over past councils — injected into the PM prompt. */
+/** Longest-elapsed-time bucket available — the most conclusive read on
+ *  whether a thesis played out, not the first one computed (which is
+ *  usually just the noisy 1h figure). */
+const BUCKET_HORIZON_ORDER = ['30d', '7d', '24h', '4h', '1h'] as const;
+function longestAvailableBucket(performance: Record<string, number | null>): [string, number] | null {
+  for (const key of BUCKET_HORIZON_ORDER) {
+    const v = performance[key];
+    if (v != null) return [key, v];
+  }
+  return null;
+}
+
+function wasDirectionallyCorrect(verdict: CouncilMemoryEntry['finalVerdict'], ret: number): boolean | null {
+  const bullish = verdict === 'LONG' || verdict === 'STRONG_LONG';
+  const bearish = verdict === 'SHORT' || verdict === 'STRONG_SHORT';
+  if (bullish) return ret > 0;
+  if (bearish) return ret < 0;
+  if (verdict === 'AVOID') return ret <= 0;
+  return null; // NEUTRAL made no directional claim — nothing to grade
+}
+
 export function buildReflection(entries: CouncilMemoryEntry[]): string | null {
   const scored = entries.filter(e => Object.keys(e.performance ?? {}).length > 0);
   if (!scored.length) return null;
   const lines = scored.slice(0, 4).map((e) => {
+    // "Most notable" (largest-magnitude) move for the narrative line — a
+    // big swing either way is the most tellable data point about this call.
     const best = Object.entries(e.performance).sort(
       (a, b) => Math.abs((b[1] ?? 0)) - Math.abs((a[1] ?? 0)),
     )[0];
     const ret = best?.[1] ?? 0;
-    const bullish = e.finalVerdict === 'LONG' || e.finalVerdict === 'STRONG_LONG';
-    const bearish = e.finalVerdict === 'SHORT' || e.finalVerdict === 'STRONG_SHORT';
-    const right = (bullish && (ret ?? 0) > 0) || (bearish && (ret ?? 0) < 0) ||
-      (e.finalVerdict === 'AVOID' && (ret ?? 0) <= 0);
-    return `${new Date(e.createdAt).toLocaleDateString()} · ${e.finalVerdict} (conv ${e.conviction}) → ${best?.[0]} ${ret}% · ${right ? 'CORRECT' : 'WRONG'}`;
+    const right = wasDirectionallyCorrect(e.finalVerdict, ret);
+    const tag = right === null ? 'N/A' : right ? 'CORRECT' : 'WRONG';
+    return `${new Date(e.createdAt).toLocaleDateString()} · ${e.finalVerdict} (conv ${e.conviction}) → ${best?.[0]} ${ret}% · ${tag}`;
   });
-  const hits = scored.filter((e) => {
-    const ret = Object.values(e.performance)[0] ?? 0;
-    const bullish = e.finalVerdict === 'LONG' || e.finalVerdict === 'STRONG_LONG';
-    return bullish ? (ret ?? 0) > 0 : (ret ?? 0) <= 0;
+  // "Hits" (the headline track-record stat) grades against the LONGEST
+  // available horizon instead of an arbitrary bucket, and excludes NEUTRAL
+  // calls entirely (previously graded as if they were bearish, which
+  // artificially dragged the hit rate around for calls with no direction
+  // to actually get right or wrong).
+  const gradable = scored.filter(e => e.finalVerdict !== 'NEUTRAL');
+  const hits = gradable.filter((e) => {
+    const longest = longestAvailableBucket(e.performance);
+    return longest ? wasDirectionallyCorrect(e.finalVerdict, longest[1] ?? 0) === true : false;
   }).length;
-  return `Desk track record on this token: ${hits}/${scored.length} directionally correct.\n${lines.join('\n')}`;
+  const headline = gradable.length > 0
+    ? `Desk track record on this token: ${hits}/${gradable.length} directionally correct.`
+    : `Desk track record on this token: no directional calls to grade yet (NEUTRAL only).`;
+  return `${headline}\n${lines.join('\n')}`;
 }
