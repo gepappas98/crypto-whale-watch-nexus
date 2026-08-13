@@ -62,6 +62,11 @@ export interface AlertItem {
   tc: string;
   sizing?: string | null;
   pinned: boolean;
+  /** Backend row id — set once saveAlert()'s response resolves (new alerts)
+   *  or by loadAlerts() (persisted ones). Undefined for an alert that
+   *  hasn't round-tripped to the server yet (e.g. offline mode, or the
+   *  save is still in flight) — pin-toggling stays local-only until then. */
+  dbId?: number;
 }
 
 export interface WhaleTrade {
