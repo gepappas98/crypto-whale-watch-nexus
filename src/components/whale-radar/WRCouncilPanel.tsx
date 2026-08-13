@@ -2,12 +2,13 @@
  *  Live multi-agent trading desk. Streams the debate, then locks in a
  *  structured CouncilDecision and persists it with memory + reflection.
  * ═══════════════════════════════════════════════════════════════════════════ */
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AGENT_META, type AgentId, type CouncilDecision, type CouncilDepth, type CouncilMemoryEntry } from '@/types/council';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AGENT_META, DEPTH_AGENTS, type AgentId, type CouncilDecision, type CouncilDepth, type CouncilMemoryEntry } from '@/types/council';
 import type { CoinData, WhaleTrade } from '@/lib/whaleRadarState';
 import { buildCouncilContext } from '@/lib/council/context';
 import {
   buildReflection,
+  computeDeskTrackRecord,
   loadCouncilMemory,
   refreshMemoryPerformance,
   runCouncil,
@@ -41,6 +42,7 @@ export function WRCouncilPanel({ coin, whaleTrades, llm, onClose, autoRun }: Pro
   const [error, setError] = useState<string | null>(null);
   const [memory, setMemory] = useState<CouncilMemoryEntry[]>([]);
   const [showMemory, setShowMemory] = useState(false);
+  const trackRecord = useMemo(() => computeDeskTrackRecord(memory), [memory]);
   const abortRef = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
   const startedRef = useRef(false);
@@ -178,6 +180,15 @@ export function WRCouncilPanel({ coin, whaleTrades, llm, onClose, autoRun }: Pro
           <button className="wr-btn text-[8px] ml-auto" onClick={() => setShowMemory(s => !s)}>
             🗂 MEMORY ({memory.length})
           </button>
+          {trackRecord.gradedCalls > 0 && (
+            <span
+              className={`text-[8px] px-1.5 py-0.5 border font-mono tracking-widest cursor-help
+                ${(trackRecord.score ?? 50) >= 60 ? 'border-wr-green text-wr-green' : (trackRecord.score ?? 50) <= 40 ? 'border-wr-red text-wr-red' : 'border-wr-border text-wr-muted'}`}
+              title={`Graded at each call's longest available realized-return horizon (up to 30d), NEUTRAL calls excluded. ${trackRecord.gradedCalls} < ${5} graded calls means this is still confidence-discounted toward 50.`}
+            >
+              🎯 {trackRecord.score} · {trackRecord.hits}/{trackRecord.gradedCalls} hit{trackRecord.avgReturnPct != null ? ` · avg ${trackRecord.avgReturnPct >= 0 ? '+' : ''}${trackRecord.avgReturnPct}%` : ''}
+            </span>
+          )}
         </div>
 
         {/* Body */}
@@ -185,6 +196,12 @@ export function WRCouncilPanel({ coin, whaleTrades, llm, onClose, autoRun }: Pro
           {showMemory && (
             <div className="border border-wr-border bg-wr-bg3 p-3">
               <div className="text-[8px] text-wr-amber tracking-[2px] mb-2">PAST COUNCILS · {coin.symbol}</div>
+              {trackRecord.gradedCalls > 0 && (
+                <div className="text-[9px] text-wr-white mb-2 pb-2 border-b border-wr-border/50">
+                  Longest-horizon track record: <span className="text-wr-cyan">{trackRecord.hits}/{trackRecord.gradedCalls} directionally correct</span>
+                  {trackRecord.avgReturnPct != null && <span className="text-wr-muted"> · avg realized {trackRecord.avgReturnPct >= 0 ? '+' : ''}{trackRecord.avgReturnPct}%</span>}
+                </div>
+              )}
               {memory.length === 0 ? (
                 <div className="text-[9px] text-wr-muted">No prior councils recorded for this token.</div>
               ) : memory.map(m => (
@@ -205,8 +222,14 @@ export function WRCouncilPanel({ coin, whaleTrades, llm, onClose, autoRun }: Pro
 
           {messages.length === 0 && !running && (
             <div className="text-[10px] text-wr-muted leading-relaxed">
-              The council convenes five agents — Bull Researcher, Bear Researcher, Risk Desk, Trader and
-              Portfolio Manager — over live whale, manipulation, liquidity and perp data for{' '}
+              The {depth.toUpperCase()} council convenes {DEPTH_AGENTS[depth].length} agents —{' '}
+              {DEPTH_AGENTS[depth].map((a, i) => (
+                <span key={a}>
+                  {i > 0 && (i === DEPTH_AGENTS[depth].length - 1 ? ' and ' : ', ')}
+                  <span className={AGENT_META[a].color}>{AGENT_META[a].label}</span>
+                </span>
+              ))}{' '}
+              over live whale, manipulation, liquidity and perp data for{' '}
               <span className="text-wr-green">{coin.symbol}</span>. Pick a depth and convene.
             </div>
           )}
