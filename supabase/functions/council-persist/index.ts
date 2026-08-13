@@ -60,7 +60,11 @@ async function fetchLivePrice(symbol: string): Promise<number | null> {
 }
 
 /** Which realised-return bucket a decision of this age falls into. */
+/** Which realised-return bucket a decision of this age falls into. 30d added
+ *  for 'swing'/'position' time-horizon calls — the old 7d ceiling meant a
+ *  multi-week thesis never got a performance reading past its first week. */
 function bucketFor(ageMs: number): string | null {
+  if (ageMs >= 30 * 864e5) return '30d';
   if (ageMs >= 7 * 864e5) return '7d';
   if (ageMs >= 864e5) return '24h';
   if (ageMs >= 4 * 36e5) return '4h';
