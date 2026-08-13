@@ -28,6 +28,11 @@ const ALLOWED_PATHS = [
   /^\/grids\/[A-Za-z0-9_-]+$/,
   /^\/volume-maker\/(start|stop|stats)$/,
   /^\/portfolio$/,
+  /^\/strategy-trader\/status$/,
+  /^\/strategy-trader\/locks$/,
+  /^\/strategy-trader\/locks\/\d+$/,
+  /^\/strategy-trader\/enter$/,
+  /^\/strategy-trader\/exit$/,
 ];
 
 Deno.serve(async (req) => {
