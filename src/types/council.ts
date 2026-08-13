@@ -36,6 +36,7 @@ export type CouncilDepth = 'quick' | 'standard' | 'deep';
 export type AgentId =
   | 'bull'
   | 'bear'
+  | 'quant'
   | 'risk'
   | 'trader'
   | 'pm';
@@ -51,9 +52,20 @@ export interface AgentMeta {
 export const AGENT_META: Record<AgentId, AgentMeta> = {
   bull: { id: 'bull', label: 'BULL RESEARCHER', role: 'Long thesis', color: 'text-wr-green', glyph: '▲' },
   bear: { id: 'bear', label: 'BEAR RESEARCHER', role: 'Short / risk thesis', color: 'text-wr-red', glyph: '▼' },
+  quant: { id: 'quant', label: 'QUANT DESK', role: 'Orderflow · derivatives positioning', color: 'text-wr-blue', glyph: '∑' },
   risk: { id: 'risk', label: 'RISK DESK', role: 'Aggressive · Neutral · Conservative', color: 'text-wr-amber', glyph: '⚖' },
   trader: { id: 'trader', label: 'TRADER AGENT', role: 'Execution synthesis', color: 'text-wr-cyan', glyph: '⌁' },
   pm: { id: 'pm', label: 'PORTFOLIO MANAGER', role: 'Final verdict · memory', color: 'text-wr-purple', glyph: '★' },
+};
+
+/** Mirrors the server's DEPTH_AGENTS gating (supabase/functions/agent-council)
+ *  — kept here too so the client can describe the roster (intro copy, depth
+ *  picker hints) without a round-trip. The server is still the actual
+ *  authority on which agents run; this is display-only. */
+export const DEPTH_AGENTS: Record<CouncilDepth, AgentId[]> = {
+  quick: ['bull', 'bear', 'pm'],
+  standard: ['bull', 'bear', 'risk', 'trader', 'pm'],
+  deep: ['bull', 'bear', 'quant', 'risk', 'trader', 'pm'],
 };
 
 export interface AgentMessage {
@@ -108,6 +120,25 @@ export interface CouncilMemoryEntry {
 export interface CouncilRunResult {
   decision: CouncilDecision;
   transcript: AgentMessage[];
+}
+
+/** Numeric summary of how this token's past graded calls actually played
+ *  out, scored at each call's LONGEST available realized-return horizon
+ *  (now out to 30d — see council-persist's bucketFor). Distinct from
+ *  buildReflection()'s narrative text: this is the structured version meant
+ *  for a UI badge, not just text baked into the PM's prompt. */
+export interface DeskTrackRecord {
+  gradedCalls: number; // directional calls (excludes NEUTRAL) with at least one realized bucket
+  hits: number;
+  hitRate: number | null;
+  avgReturnPct: number | null; // mean realized return at each call's longest horizon
+  /** Confidence-discounted 0-100 read on the desk's track record for this
+   *  token, pulled toward 50 (no-information baseline for a binary
+   *  direction call) when gradedCalls is thin — same reasoning
+   *  pairPerformance.ts / walletSkillScoring.ts already use for small
+   *  samples, just anchored at 50 instead of 0 since a coin flip's
+   *  expected hit rate is 50%, not 0%. */
+  score: number | null;
 }
 
 /** SSE event shapes emitted by the agent-council edge function. */
