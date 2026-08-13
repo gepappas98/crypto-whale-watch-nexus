@@ -5,7 +5,7 @@ import { corsHeaders } from '../_shared/cors.ts';
 const LOVABLE_URL = 'https://ai.gateway.lovable.dev/v1/responses';
 const DEFAULT_MODEL = 'openai/gpt-5.6-sol';
 
-type AgentId = 'bull' | 'bear' | 'risk' | 'trader' | 'pm';
+type AgentId = 'bull' | 'bear' | 'quant' | 'risk' | 'trader' | 'pm';
 
 interface LlmConfig {
   provider?: 'lovable' | 'anthropic' | 'openai' | 'openrouter' | 'groq' | 'custom';
@@ -52,7 +52,11 @@ function resolveBaseUrl(provider: string, baseUrl?: string): string {
 const DEPTH_AGENTS: Record<string, AgentId[]> = {
   quick: ['bull', 'bear', 'pm'],
   standard: ['bull', 'bear', 'risk', 'trader', 'pm'],
-  deep: ['bull', 'bear', 'risk', 'trader', 'pm'],
+  // 'deep' previously ran the exact same five agents as 'standard' — only
+  // the per-agent word limit differed. QUANT gives deep a genuinely
+  // distinct roster: a dedicated orderflow/derivatives-positioning read
+  // that bull/bear only touch in passing today.
+  deep: ['bull', 'bear', 'quant', 'risk', 'trader', 'pm'],
 };
 
 const LENGTH: Record<string, string> = {
@@ -72,6 +76,8 @@ function agentPrompt(agent: AgentId, depth: string): string {
       return base + ' ROLE: BULL RESEARCHER. Build the strongest honest long case: whale accumulation, volume expansion, funding/OI positioning, liquidity, narrative. Flag if the long case is weak.';
     case 'bear':
       return base + ' ROLE: BEAR RESEARCHER. Build the short / do-not-touch case: wash trading, rug vectors, holder concentration, mint/freeze authority, manipulation patterns, thin liquidity, distribution.';
+    case 'quant':
+      return base + ' ROLE: QUANT DESK. Ignore narrative — read pure orderflow and derivatives positioning: perp funding rate (positive = longs paying shorts, crowded-long tell), open interest trend, and the buy/sell $ imbalance in RECENT WHALE TRADES. State the imbalance ratio and funding number explicitly, then one line on what the positioning implies (squeeze risk, crowded trade, neutral). Say "NO EDGE — insufficient orderflow data" if funding/OI/whale-trade data is too thin to read.';
     case 'risk':
       return base + ' ROLE: RISK DESK. Output three labelled voices that actually disagree: "AGGRESSIVE:", "NEUTRAL:", "CONSERVATIVE:" — each 1-3 sentences on position size and risk, then "RISK DESK CONSENSUS:" with one line.';
     case 'trader':
