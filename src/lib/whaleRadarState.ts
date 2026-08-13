@@ -95,6 +95,14 @@ export interface WalletEntry {
   lastActivity?: string;
   balanceSol?: number;
   recentTxCount24h?: number;
+  /** Smart-money trading-skill fields — populated by useWalletSkillScoring
+   *  (lib/walletSkillScoring.ts), not set at add-time. skillScore/winRate
+   *  stay undefined until at least one closed (fully cost-basis-matched)
+   *  swap round-trip has been parsed for this wallet. */
+  skillScore?: number;
+  winRate?: number;
+  avgProfitSol?: number;
+  closedTrades?: number;
 }
 
 export interface ScanSnapshot {
