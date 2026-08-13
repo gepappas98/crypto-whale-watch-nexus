@@ -29,7 +29,7 @@ import {
   calcSizing, saveState, loadState,
 } from '@/lib/whaleRadarState';
 import { handleRateLimit, getActiveCooldowns, onRateLimitChange } from '@/lib/rateLimit';
-import { saveWhaleEvent, initBackendCheck, saveAlert, loadAlerts, savePortfolioEntry, deletePortfolioEntry, loadPortfolio, saveTrackedToken, deleteTrackedToken, loadTracked } from '@/lib/db';
+import { saveWhaleEvent, initBackendCheck, saveAlert, loadAlerts, toggleAlertPin, savePortfolioEntry, deletePortfolioEntry, loadPortfolio, saveTrackedToken, deleteTrackedToken, loadTracked } from '@/lib/db';
 import { fillSignalPrices } from '@/lib/signalStore';
 import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
 import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
@@ -38,6 +38,7 @@ import { WRCouncilPanel } from '@/components/whale-radar/WRCouncilPanel';
 import type { CouncilLlmSettings } from '@/lib/council/api';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
+import { analyzeSentiment } from '@/lib/analyzeToken';
 
 // Scan engine, signal computation and CG fetching live in:
 //   - @/hooks/useMarketData  (state + orchestration)
@@ -201,7 +202,14 @@ export default function WhaleRadarApp() {
     const tc = level === 'critical' ? 'C' : level === 'high' ? 'H' : level === 'medium' ? 'M' : 'I';
     const newItem: AlertItem = { ts: Date.now(), level, tag, text, tc, sizing, pinned: false };
     setAlerts(prev => [newItem, ...prev].slice(0, CFG.AFEED_MAX * 2));
-    saveAlert(newItem).catch(() => {});
+    // Patch in the backend row id once it resolves, matched by ts (unique
+    // per alert at creation time) — this is what lets a later pin-toggle
+    // actually persist instead of only updating local state. See db.ts's
+    // saveAlert()/toggleAlertPin() docstrings for why this was missing.
+    saveAlert(newItem).then((dbId) => {
+      if (dbId == null) return;
+      setAlerts(prev => prev.map(a => (a.ts === newItem.ts ? { ...a, dbId } : a)));
+    }).catch(() => {});
   }, []);
 
   // ══ SCAN ENGINE (extracted to useMarketData hook) ═════════════════════════
@@ -621,7 +629,16 @@ export default function WhaleRadarApp() {
           wallets={wallets}
           onAddWallet={(w) => setWallets(prev => [...prev, w])}
           onRemoveWallet={(addr) => setWallets(prev => prev.filter(w => w.address !== addr))}
-          onTogglePin={(idx) => setAlerts(prev => prev.map((a, i) => i === idx ? { ...a, pinned: !a.pinned } : a))}
+          onTogglePin={(idx) => {
+            setAlerts(prev => prev.map((a, i) => {
+              if (i !== idx) return a;
+              // Fire-and-forget the persisted toggle — local state flips
+              // immediately either way, this just makes the pin survive a
+              // reload instead of silently reverting (see db.ts).
+              if (a.dbId != null) toggleAlertPin(a.dbId).catch(() => {});
+              return { ...a, pinned: !a.pinned };
+            }));
+          }}
           onClearAlerts={() => setAlerts([])}
           bybitEnabled={bybitEnabled}
           onToggleBybit={handleToggleBybit}
@@ -923,6 +940,37 @@ function SentimentContent({ coins, aiKey }: { coins: CoinData[]; aiKey: string }
   const highCount = coins.filter(c => c.threat === 'HIGH').length;
   const washCount = coins.filter(c => c.category === 'WASH').length;
 
+  // analyzeSentiment() (lib/analyzeToken.ts) is a real Claude call — the
+  // same pattern WRScanner's per-coin "AI ANALYZE" already uses — that
+  // existed with no caller. This modal previously showed canned template
+  // text under an "✦ AI ASSESSMENT" label without ever calling AI at all,
+  // even though it already required an AI key to display anything.
+  const [text, setText] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+
+  const run = useCallback(async () => {
+    if (!aiKey || coins.length === 0) return;
+    setLoading(true);
+    setError(false);
+    try {
+      const result = await analyzeSentiment(coins, aiKey);
+      setText(result);
+      setError(!result || result.startsWith('AI error') || result.startsWith('AI rate limited'));
+    } catch {
+      setText('AI analysis failed');
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [aiKey, coins]);
+
+  // Fetch once when the modal opens with a usable coin list — not on every
+  // render, and analyzeSentiment()'s own cache (keyed by the risk-count
+  // signature, see analyzeToken.ts) keeps a re-open right after from
+  // spending a second API call on an unchanged picture.
+  useEffect(() => { void run(); }, [run]);
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-3">
@@ -943,13 +991,19 @@ function SentimentContent({ coins, aiKey }: { coins: CoinData[]; aiKey: string }
         <p className="text-center text-wr-muted text-xs py-4">Enter AI key in ⚙ Settings to enable sentiment analysis</p>
       ) : (
         <div className="border-t border-wr-purple/30 pt-3">
-          <div className="text-[8px] text-wr-purple tracking-widest mb-2">✦ AI ASSESSMENT</div>
-          <p className="text-[10px] text-wr-white leading-relaxed">
-            Market shows {critCount > 3 ? 'ELEVATED' : critCount > 0 ? 'MODERATE' : 'LOW'} manipulation risk.
-            {washCount > 0 ? ` ${washCount} tokens flagged for wash trading patterns.` : ''}
-            {critCount > 5 ? ' High cluster of critical alerts suggests coordinated activity.' : ''}
-            Exercise caution with high-score tokens.
-          </p>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[8px] text-wr-purple tracking-widest">✦ AI ASSESSMENT</div>
+            <button className="wr-btn text-[7px] px-1.5" onClick={() => void run()} disabled={loading}>
+              {loading ? '…' : '↻ REGENERATE'}
+            </button>
+          </div>
+          {loading && !text ? (
+            <p className="text-[10px] text-wr-muted py-2">Analyzing {coins.length} scanned tokens…</p>
+          ) : (
+            <p className={`text-[10px] leading-relaxed whitespace-pre-line ${error ? 'text-wr-amber' : 'text-wr-white'}`}>
+              {text ?? 'No response'}
+            </p>
+          )}
         </div>
       )}
     </div>
