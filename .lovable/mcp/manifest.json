@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "sdk_version": "0.26.2",
+  "path": "/functions/v1/mcp",
+  "auth": {
+    "type": "none"
+  },
+  "mcp": {
+    "server": {
+      "name": "crypto-whale-tracker-pro",
+      "version": "0.1.0",
+      "title": "CRYPTO Whale Tracker Pro"
+    },
+    "tools": [
+      {
+        "name": "get_market_snapshot",
+        "title": "Get market snapshot",
+        "description": "Live 24h price snapshot for a crypto asset (price, % change, high/low, volume) sourced from Binance spot markets.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string",
+              "description": "Asset or pair, e.g. 'BTC', 'SOL' or 'BTCUSDT'. Defaults to USDT quote."
+            }
+          },
+          "required": [
+            "symbol"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_whale_trades",
+        "title": "Get whale trades",
+        "description": "Recent large ('whale') trades for an asset: aggregated Binance trades filtered by a minimum USD notional, newest first.",
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string",
+              "description": "Asset or pair, e.g. 'BTC' or 'BTCUSDT'."
+            },
+            "min_usd": {
+              "type": "number",
+              "description": "Minimum trade size in USD. Default 100000."
+            },
+            "limit": {
+              "type": "number",
+              "description": "Max trades to return, 1-50. Default 20."
+            }
+          },
+          "required": [
+            "symbol"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_orderbook_pressure",
+        "title": "Get order book pressure",
+        "description": "Live order book imbalance for an asset: total bid vs ask liquidity near the spread and the resulting buy/sell pressure bias.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string",
+              "description": "Asset or pair, e.g. 'ETH' or 'ETHUSDT'."
+            },
+            "depth": {
+              "type": "number",
+              "description": "Number of book levels per side, 5-100. Default 50."
+            }
+          },
+          "required": [
+            "symbol"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_council_decisions",
+        "title": "List AI council decisions",
+        "description": "Recent verdicts from this app's multi-agent AI trading council (bull/bear/risk/trader/PM), newest first. Optionally filter by asset symbol.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string",
+              "description": "Filter by asset symbol, e.g. 'BTC'."
+            },
+            "limit": {
+              "type": "number",
+              "description": "Max decisions to return, 1-25. Default 10."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
