@@ -10,7 +10,7 @@ import {
 } from '@/lib/notifyChannels';
 import { isDryRun, setDryRun, isBotConnected, registerBot, unregisterBot } from '@/lib/nexus/bot';
 import { RestBridgeBot } from '@/lib/nexus/restBridgeBot';
-import { getStrategyTraderStatus, getStrategyTraderLocks, clearStrategyTraderLock, type StrategyTraderStatus } from '@/lib/nexus/strategyTraderBridge';
+import { getStrategyTraderStatus, getStrategyTraderLocks, clearStrategyTraderLock, exitStrategyTraderPosition, type StrategyTraderStatus } from '@/lib/nexus/strategyTraderBridge';
 import { getMaxOpenTrades, setMaxOpenTrades } from '@/lib/nexus/openTradesLimit';
 import {
   getRemotePairListUrl, setRemotePairListUrl, fetchRemotePairList,
@@ -94,6 +94,17 @@ export function WRSettingsPanel({
       .then(refreshLocks)
       .catch((err) => toast({ title: 'Could not clear lock', description: (err as Error).message, variant: 'destructive' }))
       .finally(() => setStLocksBusy(null));
+  };
+  const [stExitBusy, setStExitBusy] = useState<number | null>(null); // trade_id currently being closed, if any
+  const handleExitTrade = (tradeId: number) => {
+    setStExitBusy(tradeId);
+    exitStrategyTraderPosition(tradeId)
+      .then(() => {
+        toast({ title: 'Exit sent', description: `Trade #${tradeId} — forceexit accepted` });
+        checkStrategyTrader();
+      })
+      .catch((err) => toast({ title: 'Exit failed', description: (err as Error).message, variant: 'destructive' }))
+      .finally(() => setStExitBusy(null));
   };
   const [maxOpen, setMaxOpen] = useState(() => getMaxOpenTrades());
   const [remoteUrl, setRemoteUrlState] = useState(() => getRemotePairListUrl() ?? '');
@@ -435,6 +446,35 @@ export function WRSettingsPanel({
                 Win rate {(stStatus.profit.winrate * 100).toFixed(1)}% · closed P/L {stStatus.profit.profit_closed_percent.toFixed(2)}%
               </Note>
             )}
+            <div className="mt-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[8px] text-wr-muted">Open trades</span>
+              </div>
+              {!stStatus.openTrades || stStatus.openTrades.length === 0 ? (
+                <Note cls="text-wr-muted">No open trades.</Note>
+              ) : (
+                <div className="mt-1 space-y-1">
+                  {stStatus.openTrades.map((t) => (
+                    <div key={t.trade_id} className="flex items-center justify-between gap-1.5 text-[8px] bg-wr-bg2 border border-wr-border px-1.5 py-1 rounded">
+                      <div className="min-w-0">
+                        <div className="text-wr-white truncate">#{t.trade_id} · {t.pair}</div>
+                        <div className={`truncate ${t.profit_ratio >= 0 ? 'text-wr-green' : 'text-wr-red'}`}>
+                          {(t.profit_ratio * 100).toFixed(2)}%
+                        </div>
+                      </div>
+                      <button
+                        className="wr-btn text-[7px] px-1.5 shrink-0"
+                        disabled={stExitBusy === t.trade_id}
+                        onClick={() => handleExitTrade(t.trade_id)}
+                        title="Force-exit this position via freqtrade's forceexit"
+                      >
+                        {stExitBusy === t.trade_id ? '…' : 'EXIT'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="mt-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-[8px] text-wr-muted">freqtrade's own pair locks</span>
