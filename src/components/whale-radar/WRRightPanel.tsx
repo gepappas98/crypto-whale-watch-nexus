@@ -8,6 +8,7 @@ import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { AlertItem, WhaleTrade, WalletEntry, fmtN } from '@/lib/whaleRadarState';
 import { rankWalletsBySkill } from '@/lib/walletSkillScoring';
 import { HLExplorer } from '@/components/hyperliquid/HLExplorer';
+import { WRHistoryPanel } from '@/components/whale-radar/WRHistoryPanel';
 import type { LockInfo } from '@/lib/alertCooldown';
 import { toast } from '@/hooks/use-toast';
 import { forwardSignalToStrategyTrader } from '@/lib/nexus/strategyTraderBridge';
@@ -60,7 +61,7 @@ export function WRRightPanel({
   // with no scored history yet keep their add-order at the bottom, same
   // "rank, don't hide" convention rankByPerformance() uses for symbols.
   const rankedWallets = useMemo(() => rankWalletsBySkill(wallets), [wallets]);
-  const [activeTab, setActiveTab] = useState<'whales' | 'wallets' | 'hl'>('whales');
+  const [activeTab, setActiveTab] = useState<'whales' | 'wallets' | 'hl' | 'history'>('whales');
 
   const handleAddWallet = () => {
     const addr = walletInput.trim();
@@ -154,6 +155,13 @@ export function WRRightPanel({
         >
           🔗 HL
         </button>
+        <button
+          className={`flex-1 py-1.5 text-[8px] tracking-[2px] text-center cursor-pointer border-b-2 transition-all font-mono
+            ${activeTab === 'history' ? 'text-wr-amber border-wr-amber' : 'text-wr-muted border-transparent'}`}
+          onClick={() => setActiveTab('history')}
+        >
+          📜 HISTORY
+        </button>
       </div>
 
       {/* ── Hyperliquid Explorer (full panel, no alerts below) ── */}
@@ -163,7 +171,15 @@ export function WRRightPanel({
         </div>
       )}
 
-      {activeTab !== 'hl' && (
+      {/* ── Scan History (full panel, no alerts below) — see WRHistoryPanel.tsx
+           for the "logic existed but never reached the UI" gap this closes. ── */}
+      {activeTab === 'history' && (
+        <div className="flex-1 overflow-hidden flex flex-col">
+          <WRHistoryPanel isActive={activeTab === 'history'} />
+        </div>
+      )}
+
+      {activeTab !== 'hl' && activeTab !== 'history' && (
         <>
       {activeTab === 'whales' ? (
         <div className="border-b border-wr-border">
