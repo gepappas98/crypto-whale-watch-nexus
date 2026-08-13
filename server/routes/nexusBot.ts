@@ -12,9 +12,16 @@ import { isServerDryRun, checkAndLockCooldown, recordTrade } from '../services/n
 import {
   executeArbitrageLegs, placeGridOrders, cancelGridOrders, fetchPortfolioBalances, scanServerArbitrage,
 } from '../services/ccxtExecutor';
+import { strategyTraderRouter } from './strategyTrader';
 
 export const nexusBotRouter = Router();
 
+// Strategy Trader (freqtrade bridge) — see routes/strategyTrader.ts. Mounted
+// here (not as its own top-level /api/* router) so it inherits the same
+// bearer-token auth as the rest of /api/nexus-bot/*, matching the client's
+// path shape: nexus-bot-proxy forwards '/strategy-trader/...' to
+// '/api/nexus-bot/strategy-trader/...'.
+nexusBotRouter.use('/strategy-trader', strategyTraderRouter);
 // ── Arbitrage ─────────────────────────────────────────────────────────────────
 nexusBotRouter.get('/arbitrage/scan', async (_req: Request, res: Response) => {
   try {
