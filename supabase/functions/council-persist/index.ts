@@ -25,7 +25,12 @@ const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 
-const VERDICTS = new Set(['LONG', 'SHORT', 'HOLD', 'AVOID', 'WAIT']);
+// Must stay in sync with CouncilVerdict in src/types/council.ts — this used
+// to list a stale set ('HOLD'/'WAIT' instead of the real 'NEUTRAL'/
+// 'STRONG_LONG'/'STRONG_SHORT'), which silently rejected every decision
+// except plain LONG/SHORT/AVOID and meant memory never persisted for most
+// calls. Verified against the actual enum, not re-guessed.
+const VERDICTS = new Set(['STRONG_LONG', 'LONG', 'NEUTRAL', 'SHORT', 'STRONG_SHORT', 'AVOID']);
 const DEPTHS = new Set(['quick', 'standard', 'deep']);
 
 /** Cap a JSON blob's serialised size so a caller can't stuff the table. */
