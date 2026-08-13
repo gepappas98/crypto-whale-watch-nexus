@@ -181,8 +181,16 @@ export async function getTokenHistory(symbol: string): Promise<HistoricalCoin[]>
   return (await api<HistoricalCoin[]>(`/scans/symbol/${symbol}`, { _silent: true })) ?? [];
 }
 
-export async function getTopThreats(): Promise<Record<string, unknown>[]> {
-  return (await api<Record<string, unknown>[]>('/scans/threats/top', { _silent: true })) ?? [];
+export interface TopThreatRow {
+  symbol: string;
+  peak_score: number;
+  appearances: number;
+  worst_threat: string;
+  last_seen: string;
+}
+
+export async function getTopThreats(): Promise<TopThreatRow[]> {
+  return (await api<TopThreatRow[]>('/scans/threats/top', { _silent: true })) ?? [];
 }
 
 // ══ PORTFOLIO ════════════════════════════════════════════════════════════════
