@@ -18,6 +18,7 @@ import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
 import { useWhaleStream, type StreamSignal } from '@/hooks/useWhaleStream';
 import { useExchangeFeed } from '@/hooks/useExchangeFeed';
 import { useWalletActivity } from '@/hooks/useWalletActivity';
+import { useWalletSkillScoring } from '@/hooks/useWalletSkillScoring';
 import { okxAdapter } from '@/lib/exchanges/okx';
 import { krakenAdapter } from '@/lib/exchanges/kraken';
 import type { NormalizedTrade } from '@/lib/exchanges/types';
@@ -53,6 +54,7 @@ export default function WhaleRadarApp() {
   const [portfolio, setPortfolio] = useState<Record<string, PortfolioEntry>>({});
   const [wallets, setWallets] = useState<WalletEntry[]>([]);
   useWalletActivity(wallets, setWallets);
+  useWalletSkillScoring(wallets, setWallets);
 
   // UI State
   const [theme, setTheme] = useState<'cyber' | 'matrix' | 'dark'>('cyber');
