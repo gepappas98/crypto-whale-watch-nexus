@@ -291,9 +291,14 @@ export async function deleteTrackedToken(symbol: string): Promise<void> {
 
 // ══ ALERTS ════════════════════════════════════════════════════════════════════
 
-export async function saveAlert(alert: AlertItem): Promise<void> {
-  if (alert.level === 'info') return;
-  await api('/alerts', {
+/** Returns the new alert's backend row id (or null if unsaved — offline,
+ *  filtered as 'info', or the request failed), same convention as
+ *  saveScan()'s session_id. The server already returns the full inserted
+ *  row on POST — this was previously discarded, which is why pin-toggling
+ *  never persisted (toggleAlertPin() had no id to call with). */
+export async function saveAlert(alert: AlertItem): Promise<number | null> {
+  if (alert.level === 'info') return null;
+  const row = await api<{ id: number }>('/alerts', {
     method: 'POST',
     body: JSON.stringify({
       level: alert.level,
@@ -303,6 +308,7 @@ export async function saveAlert(alert: AlertItem): Promise<void> {
       pinned: alert.pinned,
     }),
   });
+  return row?.id ?? null;
 }
 
 export async function loadAlerts(): Promise<AlertItem[]> {
@@ -319,6 +325,7 @@ export async function loadAlerts(): Promise<AlertItem[]> {
     tc: r.level === 'critical' ? 'C' : r.level === 'high' ? 'H' : r.level === 'medium' ? 'M' : 'I',
     sizing: r.sizing,
     pinned: r.pinned,
+    dbId: r.id,
   }));
 }
 
