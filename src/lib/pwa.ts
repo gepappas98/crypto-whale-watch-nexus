@@ -1,4 +1,14 @@
 // PWA Registration and utilities for Whale Radar
+//
+// registerServiceWorker() below registers public/sw.js in real production
+// contexts. As of v9.15, sw.js is a real persistent worker (push/sync/
+// notificationclick handlers, no fetch handler — see sw.js's own header for
+// why that matters) — previously it was a self-unregistering kill switch,
+// which is why subscribeToPush()/triggerBackgroundSync() below existed but
+// could never actually deliver anything. See src/lib/pushBridge.ts for the
+// higher-level opt-in flow (permission + subscribe + register with server)
+// that most callers should use instead of calling subscribeToPush() bare.
+import { useState, useEffect } from 'react';
 
 export interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
@@ -161,6 +171,45 @@ export function setupInstallPrompt(callback: (event: BeforeInstallPromptEvent) =
     
     deferredPrompt = null;
   };
+}
+
+/** React-friendly wrapper around the same beforeinstallprompt/appinstalled
+ *  events setupInstallPrompt() listens for — that function's approach (a
+ *  window.installPWA global) works for any non-React caller, but a
+ *  component wants state, not a global. This is the actual path
+ *  WRHeader's install button and WRSettingsPanel's 📲 APP group use.
+ *  Renders nothing meaningful on Safari/Firefox (they never fire
+ *  beforeinstallprompt) or once already installed — canInstall stays false. */
+export function useInstallPrompt() {
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = useState(() => isStandalone());
+
+  useEffect(() => {
+    const onBeforeInstall = (e: BeforeInstallPromptEvent) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    const onInstalled = () => {
+      setDeferredPrompt(null);
+      setIsInstalled(true);
+    };
+    window.addEventListener('beforeinstallprompt', onBeforeInstall);
+    window.addEventListener('appinstalled', onInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBeforeInstall);
+      window.removeEventListener('appinstalled', onInstalled);
+    };
+  }, []);
+
+  const promptInstall = async (): Promise<'accepted' | 'dismissed' | 'unavailable'> => {
+    if (!deferredPrompt) return 'unavailable';
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    setDeferredPrompt(null);
+    return outcome;
+  };
+
+  return { canInstall: Boolean(deferredPrompt), isInstalled, promptInstall };
 }
 
 // Check if app is installed
