@@ -15,6 +15,8 @@ import { getMaxOpenTrades, setMaxOpenTrades } from '@/lib/nexus/openTradesLimit'
 import {
   getRemotePairListUrl, setRemotePairListUrl, fetchRemotePairList,
 } from '@/lib/nexus/remotePairList';
+import { useInstallPrompt, isStandalone, clearAppCache } from '@/lib/pwa';
+import { enablePush, disablePush, getCurrentPushSubscription, sendTestPush } from '@/lib/pushBridge';
 
 interface WRSettingsPanelProps {
   apiKey: string; onApiKeyChange: (v: string) => void;
@@ -121,6 +123,50 @@ export function WRSettingsPanel({
     } else {
       setRemoteStatus(`✓ ${result.pairs.length} pairs loaded from remote`);
     }
+  };
+
+  // ── PWA install + cache (self-contained, same pattern as the others above) ──
+  const { canInstall, isInstalled, promptInstall } = useInstallPrompt();
+  const [cacheClearBusy, setCacheClearBusy] = useState(false);
+  const handleClearCache = () => {
+    setCacheClearBusy(true);
+    clearAppCache()
+      .then(() => toast({ title: 'Cache cleared', description: 'Reload the page to fetch a fresh copy.' }))
+      .catch((err) => toast({ title: 'Could not clear cache', description: (err as Error).message, variant: 'destructive' }))
+      .finally(() => setCacheClearBusy(false));
+  };
+
+  // ── Push notifications ──
+  const [pushSub, setPushSub] = useState<PushSubscription | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
+  useEffect(() => {
+    getCurrentPushSubscription().then(setPushSub).catch(() => setPushSub(null));
+  }, []);
+  const handleTogglePush = async () => {
+    setPushBusy(true); setPushError(null);
+    try {
+      if (pushSub) {
+        await disablePush();
+        setPushSub(null);
+      } else {
+        const sub = await enablePush();
+        setPushSub(sub);
+        if (!sub) setPushError('Permission denied or push not supported in this browser');
+      }
+    } catch (e) {
+      setPushError((e as Error)?.message ?? 'Push setup failed');
+    } finally {
+      setPushBusy(false);
+    }
+  };
+  const [pushTestBusy, setPushTestBusy] = useState(false);
+  const handleSendTestPush = () => {
+    setPushTestBusy(true);
+    sendTestPush()
+      .then((r) => toast({ title: 'Test push sent', description: `Delivered to ${r.sent} subscription(s)${r.pruned ? `, pruned ${r.pruned} dead` : ''}` }))
+      .catch((err) => toast({ title: 'Test push failed', description: (err as Error).message, variant: 'destructive' }))
+      .finally(() => setPushTestBusy(false));
   };
 
   return (
@@ -509,6 +555,33 @@ export function WRSettingsPanel({
         <Note cls="text-wr-muted">
           Manually forward a CRITICAL alert via the 🎯 button in the alert feed — never sent automatically. Server enforces a 50% ML-confidence floor and its own cooldown lock, independent of freqtrade's own protections.
         </Note>
+      </SettingsGroup>
+
+      <SettingsGroup label="📲 APP">
+        {isInstalled ? (
+          <Note cls="text-wr-green">✓ Installed — running standalone</Note>
+        ) : canInstall ? (
+          <button className="wr-btn text-[8px]" onClick={() => promptInstall()}>📲 ADD TO HOME SCREEN</button>
+        ) : (
+          <Note cls="text-wr-muted">Install prompt not offered by this browser (Safari/Firefox never fire it) or already dismissed.</Note>
+        )}
+        <button className="wr-btn text-[8px] mt-1" disabled={cacheClearBusy} onClick={handleClearCache}>
+          {cacheClearBusy ? '▶ CLEARING…' : '🗑 CLEAR APP CACHE'}
+        </button>
+        <Note cls="text-wr-muted">If the app looks stuck on an old version after a deploy, clear cache then reload.</Note>
+      </SettingsGroup>
+
+      <SettingsGroup label="🔔 PUSH NOTIFICATIONS">
+        <button className={`wr-btn text-[8px] ${pushSub ? 'active text-wr-green border-wr-green' : ''}`} disabled={pushBusy} onClick={handleTogglePush}>
+          {pushBusy ? '▶ …' : pushSub ? '● ENABLED' : '○ ENABLE PUSH'}
+        </button>
+        {pushError && <Note cls="text-wr-red">{pushError}</Note>}
+        {pushSub && (
+          <button className="wr-btn text-[8px] mt-1" disabled={pushTestBusy} onClick={handleSendTestPush}>
+            {pushTestBusy ? '▶ SENDING…' : '▶ SEND TEST PUSH'}
+          </button>
+        )}
+        <Note cls="text-wr-muted">Delivered via the browser's Push API even when this tab is closed. Requires the server's VAPID keys to be configured — see .env.example.</Note>
       </SettingsGroup>
     </div>
   );
