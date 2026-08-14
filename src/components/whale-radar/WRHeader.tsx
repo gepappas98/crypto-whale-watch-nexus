@@ -1,5 +1,6 @@
 /* ══ WHALE RADAR v9 — HEADER ═════════════════════════════════════════════════ */
 import { Link } from 'react-router-dom';
+import { useInstallPrompt } from '@/lib/pwa';
 
 interface WRHeaderProps {
   scanCount: number;
@@ -17,6 +18,7 @@ export function WRHeader({
   scanCount, alertCount, nextScan, aiCallCount, scanning,
   soundOn, onToggleSound, onToggleSettings, onToggleKbd,
 }: WRHeaderProps) {
+  const { canInstall, promptInstall } = useInstallPrompt();
   return (
     <header className="flex items-center gap-3 px-4 py-2.5 border-b border-wr-border bg-wr-bg2 sticky top-0 z-[100]">
       {/* Radar icon */}
@@ -69,6 +71,15 @@ export function WRHeader({
         >
           NEXUS →
         </Link>
+        {canInstall && (
+          <button
+            className="text-[10px] tracking-[2px] px-2 py-1 rounded border border-wr-amber/40 text-wr-amber hover:bg-wr-amber/10 transition-colors bg-transparent cursor-pointer"
+            onClick={() => promptInstall()}
+            title="Add Whale Radar to your home screen"
+          >
+            📲 INSTALL
+          </button>
+        )}
 
 
         <button
