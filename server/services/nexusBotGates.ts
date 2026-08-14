@@ -31,30 +31,47 @@ export interface GateResult {
   reason?: string;
 }
 
-/** Checks + (on pass) sets a short cooldown lock for `pair`. Call this once
- *  per mutating action, right before executing. Fails OPEN (allows) only if
- *  the DB itself is unreachable — logged loudly, since that's a config
- *  problem, not something that should silently block trading forever, but
- *  also not something that should silently disable this gate either. */
+/** Checks + (on pass) atomically sets a short admission lock for `pair` in a
+ *  SINGLE statement. Call this once per mutating action, right before
+ *  executing.
+ *
+ *  v9.13 shipped this as a separate SELECT-then-INSERT, which had a real
+ *  race: two concurrent requests for the same pair could both see "no lock"
+ *  before either had written one, and both would proceed. Fixed here by
+ *  folding the check into the INSERT's own ON CONFLICT ... WHERE clause —
+ *  Postgres locks the conflicting row before evaluating that WHERE, so only
+ *  one of two concurrent callers can ever win the UPDATE and get a row back.
+ *
+ *  Also fails CLOSED now, not open: a trade-admission gate that quietly
+ *  allows everything through the moment the DB hiccups isn't a gate. If the
+ *  DB is unreachable, callers get a 503 instead of a silently-ungated order.
+ *  (This previously failed open across every nexus-bot action — arbitrage,
+ *  grids, volume-maker, and strategy-trader alike — not just this route.) */
 export async function checkAndLockCooldown(pair: string): Promise<GateResult> {
   try {
-    const rows = await query<{ locked_until: string }>(
-      `SELECT locked_until FROM nexus_bot_locks WHERE pair = $1 AND source = 'cooldown' AND locked_until > now()`,
-      [pair]
-    );
-    if (rows.length > 0) {
-      return { allowed: false, reason: `cooldown active until ${rows[0].locked_until}` };
-    }
-    await query(
+    const acquired = await query<{ locked_until: string }>(
       `INSERT INTO nexus_bot_locks (pair, source, reason, locked_until)
-       VALUES ($1, 'cooldown', 'post-trade cooldown', now() + ($2 || ' minutes')::interval)
-       ON CONFLICT (pair, source) DO UPDATE SET locked_until = EXCLUDED.locked_until, reason = EXCLUDED.reason`,
+       VALUES ($1, 'cooldown', 'admission lock', now() + ($2 || ' minutes')::interval)
+       ON CONFLICT (pair, source) DO UPDATE
+         SET locked_until = EXCLUDED.locked_until, reason = EXCLUDED.reason
+         WHERE nexus_bot_locks.locked_until <= now()
+       RETURNING locked_until`,
       [pair, String(COOLDOWN_MINUTES)]
     );
+    if (acquired.length === 0) {
+      // Conflict existed and its WHERE guard blocked the update — an active
+      // lock is still held. Look it up only to build a human-readable reason;
+      // this second query isn't part of the atomic decision, just messaging.
+      const existing = await query<{ locked_until: string }>(
+        `SELECT locked_until FROM nexus_bot_locks WHERE pair = $1 AND source = 'cooldown'`,
+        [pair]
+      );
+      return { allowed: false, reason: `cooldown active until ${existing[0]?.locked_until ?? 'unknown'}` };
+    }
     return { allowed: true };
   } catch (err) {
-    console.error('[nexusBotGates] cooldown check failed, failing OPEN — check DATABASE_URL', (err as Error).message);
-    return { allowed: true };
+    console.error('[nexusBotGates] cooldown check failed, failing CLOSED — check DATABASE_URL', (err as Error).message);
+    return { allowed: false, reason: 'trading protection unavailable (cooldown check failed) — refusing to trade until this is fixed' };
   }
 }
 
