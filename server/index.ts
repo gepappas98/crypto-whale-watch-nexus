@@ -14,6 +14,7 @@ import { whaleEventsRouter }    from './routes/whaleEvents';
 import { whalesRouter }         from './routes/whales';
 import { signalOutcomesRouter, fillOutcomePrices } from './routes/signalOutcomes';
 import { nexusBotRouter } from './routes/nexusBot';
+import { pushRouter } from './routes/push';
 import { startNexusBotWorker } from './services/nexusBotWorker';
 
 const app = express();
@@ -48,6 +49,7 @@ const PUBLIC_PATHS = new Set([
   '/api/whales/',
   '/api/whales/summary',
   '/api/alerts',
+  '/api/push/vapid-public-key',
 ]);
 
 if (!API_AUTH_TOKEN) {
@@ -99,6 +101,7 @@ app.use('/api/whale-events',     whaleEventsRouter);
 app.use('/api/whales',           whalesRouter);
 app.use('/api/signal-outcomes',  signalOutcomesRouter);
 app.use('/api/nexus-bot',        nexusBotRouter);
+app.use('/api/push',             pushRouter);
 
 // ── 404 ────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
