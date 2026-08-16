@@ -392,8 +392,11 @@
 /* WR Button base */
 .wr-btn {
   font-family: var(--font-mono);
-  font-size: 9px;
-  padding: 4px 10px;
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 7px 13px;
+  min-height: 30px;
+  border-radius: 2px;
   background: transparent;
   border: 1px solid hsl(var(--wr-green-dim));
   color: hsl(var(--wr-green));
@@ -402,66 +405,76 @@
   transition: all 0.15s;
   white-space: nowrap;
 }
-.wr-btn:hover {
-  background: hsl(var(--wr-green-ghost) / 0.06);
+.wr-btn:hover:not(:disabled) {
+  background: hsl(var(--wr-green-ghost) / 0.08);
   border-color: hsl(var(--wr-green));
+  box-shadow: 0 0 10px hsl(var(--wr-green) / 0.25);
 }
 .wr-btn.active {
-  background: hsl(var(--wr-green) / 0.12);
+  background: hsl(var(--wr-green) / 0.14);
   border-color: hsl(var(--wr-green));
   color: hsl(var(--wr-white));
+  box-shadow: 0 0 8px hsl(var(--wr-green) / 0.2);
 }
 .wr-btn.amber {
-  border-color: hsl(var(--wr-amber) / 0.4);
+  border-color: hsl(var(--wr-amber) / 0.45);
   color: hsl(var(--wr-amber));
 }
-.wr-btn.amber:hover {
-  background: hsl(var(--wr-amber) / 0.1);
+.wr-btn.amber:hover:not(:disabled) {
+  background: hsl(var(--wr-amber) / 0.12);
+  box-shadow: 0 0 10px hsl(var(--wr-amber) / 0.25);
 }
 .wr-btn.amber.active {
-  background: hsl(var(--wr-amber) / 0.1);
+  background: hsl(var(--wr-amber) / 0.14);
   border-color: hsl(var(--wr-amber));
+  box-shadow: 0 0 8px hsl(var(--wr-amber) / 0.2);
 }
 .wr-btn.red {
   border-color: hsl(var(--wr-red-dim));
   color: hsl(var(--wr-red));
 }
-.wr-btn.red:hover {
-  background: hsl(var(--wr-red) / 0.08);
+.wr-btn.red:hover:not(:disabled) {
+  background: hsl(var(--wr-red) / 0.1);
+  box-shadow: 0 0 10px hsl(var(--wr-red) / 0.25);
 }
 .wr-btn.blue {
-  border-color: hsl(var(--wr-blue) / 0.35);
+  border-color: hsl(var(--wr-blue) / 0.4);
   color: hsl(var(--wr-blue));
 }
-.wr-btn.blue:hover {
-  background: hsl(var(--wr-blue) / 0.08);
+.wr-btn.blue:hover:not(:disabled) {
+  background: hsl(var(--wr-blue) / 0.1);
+  box-shadow: 0 0 10px hsl(var(--wr-blue) / 0.25);
 }
 .wr-btn.ai {
-  border-color: hsl(var(--wr-purple) / 0.3);
+  border-color: hsl(var(--wr-purple) / 0.35);
   color: hsl(var(--wr-purple));
-  background: hsl(var(--wr-purple) / 0.04);
+  background: hsl(var(--wr-purple) / 0.05);
 }
-.wr-btn.ai:hover {
-  background: hsl(var(--wr-purple) / 0.1);
+.wr-btn.ai:hover:not(:disabled) {
+  background: hsl(var(--wr-purple) / 0.12);
   border-color: hsl(var(--wr-purple));
+  box-shadow: 0 0 10px hsl(var(--wr-purple) / 0.25);
 }
 .wr-btn.sol {
-  border-color: hsl(var(--wr-sol) / 0.3);
+  border-color: hsl(var(--wr-sol) / 0.35);
   color: hsl(var(--wr-sol));
-  background: hsl(var(--wr-sol) / 0.04);
+  background: hsl(var(--wr-sol) / 0.05);
 }
-.wr-btn.sol:hover {
-  background: hsl(var(--wr-sol) / 0.1);
+.wr-btn.sol:hover:not(:disabled) {
+  background: hsl(var(--wr-sol) / 0.12);
+  box-shadow: 0 0 10px hsl(var(--wr-sol) / 0.25);
 }
 .wr-btn.gold {
-  border-color: hsl(var(--wr-gold) / 0.35);
+  border-color: hsl(var(--wr-gold) / 0.4);
   color: hsl(var(--wr-gold));
 }
-.wr-btn.gold:hover {
-  background: hsl(var(--wr-gold) / 0.06);
+.wr-btn.gold:hover:not(:disabled) {
+  background: hsl(var(--wr-gold) / 0.1);
+  box-shadow: 0 0 10px hsl(var(--wr-gold) / 0.25);
 }
 .wr-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.38;
+  cursor: not-allowed;
   pointer-events: none;
 }
 
@@ -469,16 +482,20 @@
 .wr-input {
   background: hsl(var(--wr-bg));
   border: 1px solid hsl(var(--wr-muted));
+  border-radius: 2px;
   color: hsl(var(--wr-green));
   font-family: var(--font-mono);
-  font-size: 10px;
-  padding: 4px 8px;
+  font-size: 11px;
+  padding: 6px 10px;
+  min-height: 30px;
   outline: none;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
   width: 100%;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 .wr-input:focus {
   border-color: hsl(var(--wr-amber));
+  box-shadow: 0 0 8px hsl(var(--wr-amber) / 0.2);
 }
 .wr-input::placeholder {
   color: hsl(var(--wr-muted));
@@ -487,9 +504,12 @@
 /* Badge styles */
 .wr-badge {
   display: inline-block;
-  font-size: 7px;
-  padding: 2px 5px;
-  letter-spacing: 1px;
+  font-size: 8.5px;
+  font-weight: 500;
+  padding: 3px 7px;
+  border-radius: 2px;
+  letter-spacing: 0.5px;
+  line-height: 1.4;
 }
 .wr-badge-critical {
   background: hsl(var(--wr-red) / 0.18);
@@ -848,6 +868,7 @@
 :focus-visible {
   outline: 2px solid hsl(var(--wr-green));
   outline-offset: 2px;
+  box-shadow: 0 0 10px hsl(var(--wr-green) / 0.35);
 }
 
 /* Skip link for keyboard users */
