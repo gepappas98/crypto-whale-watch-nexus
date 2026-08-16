@@ -16,6 +16,7 @@
     "noImplicitAny": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
+    "resolveJsonModule": true,
     "paths": {
       "@/*": [
         "./src/*"
