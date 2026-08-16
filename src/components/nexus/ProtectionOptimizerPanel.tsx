@@ -3,10 +3,10 @@ import { Sparkles, Check, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-  optimizeProtectionThresholds,
+  optimizeProtectionThresholds, applyBestCandidate,
   type OptimizationResult,
 } from "@/lib/nexus/protectionOptimizer";
-import { getProtectionConfig, setProtectionConfig } from "@/lib/nexus/protections";
+import { setProtectionConfig } from "@/lib/nexus/protections";
 
 /** Surfaces the hyperopt-style grid-search suggestion from
  *  protectionOptimizer.ts. Deliberately never auto-applies anything — the
@@ -36,16 +36,12 @@ export function ProtectionOptimizerPanel() {
   if (results.length === 0) return null;
 
   const best: OptimizationResult = results[0];
-  const current = getProtectionConfig();
   const improvesOnCurrent = best.simulatedNetProfit > 0;
 
   const applyBest = () => {
-    setProtectionConfig({
-      ...current,
-      maxDrawdown: { ...current.maxDrawdown, ...best.candidate.maxDrawdown },
-      stoplossGuard: { ...current.stoplossGuard, ...best.candidate.stoplossGuard },
-      lowProfitPairs: { ...current.lowProfitPairs, ...best.candidate.lowProfitPairs },
-    });
+    const next = applyBestCandidate();
+    if (!next) return; // shouldn't happen here (results.length > 0 already checked above), but stay defensive
+    setProtectionConfig(next);
     setApplied(true);
   };
 
