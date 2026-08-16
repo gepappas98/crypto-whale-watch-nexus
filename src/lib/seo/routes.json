@@ -1,0 +1,101 @@
+{
+  "siteName": "Whale Radar",
+  "siteOrigin": "https://crypto-whale-watch-nexus.lovable.app",
+  "defaultTitle": "Whale Radar — Real-Time Crypto Whale Tracker",
+  "defaultDescription": "Track crypto whale trades live on Binance, Bybit, Solana & Hyperliquid. Free AI manipulation detection, alerts, and trading signals.",
+  "routes": [
+    {
+      "path": "/",
+      "priority": 1.0
+    },
+    {
+      "path": "/orderflow",
+      "title": "Orderflow Pro — Whale Radar",
+      "description": "Live Binance order flow: depth ladder, bid/ask imbalance, CVD, liquidation pressure and hidden-liquidity signals in one real-time terminal.",
+      "priority": 0.8
+    },
+    {
+      "path": "/trading-hub",
+      "title": "Trading Intelligence Hub — Whale Radar",
+      "description": "Technical analysis, backtesting, sentiment and screening for crypto markets, built on live exchange data with no simulated inputs.",
+      "priority": 0.8
+    },
+    {
+      "path": "/trading-hub/technical",
+      "title": "Technical Analysis — Whale Radar",
+      "description": "Live RSI, MACD, moving averages, Bollinger Bands and momentum readings computed from real-time crypto price data.",
+      "priority": 0.6
+    },
+    {
+      "path": "/trading-hub/backtest",
+      "title": "Strategy Backtesting — Whale Radar",
+      "description": "Backtest crypto trading strategies against historical candles and review win rate, drawdown and realised return before risking capital.",
+      "priority": 0.6
+    },
+    {
+      "path": "/trading-hub/screener",
+      "title": "Crypto Market Screener — Whale Radar",
+      "description": "Screen crypto markets by volume, volatility, momentum and manipulation risk to surface tradeable setups as they form.",
+      "priority": 0.6
+    },
+    {
+      "path": "/trading-hub/sentiment",
+      "title": "Market Sentiment — Whale Radar",
+      "description": "Track crypto market sentiment, funding rates and positioning to see when the crowd is leaning too far in one direction.",
+      "priority": 0.6
+    },
+    {
+      "path": "/trading-hub/timeframes",
+      "title": "Multi-Timeframe Analysis — Whale Radar",
+      "description": "Compare crypto trend and momentum across multiple timeframes at once to confirm setups and spot conflicting signals.",
+      "priority": 0.6
+    },
+    {
+      "path": "/trading-hub/patterns",
+      "title": "Chart Pattern Detection — Whale Radar",
+      "description": "Automatically detect breakouts, reversals and continuation patterns on live crypto charts across your watchlist.",
+      "priority": 0.6
+    },
+    {
+      "path": "/nexus/whale",
+      "title": "Nexus Whale Watch — Whale Radar",
+      "description": "Watch large crypto orders hit the tape in real time across Binance, Bybit and Solana, with size thresholds you control.",
+      "priority": 0.8
+    },
+    {
+      "path": "/nexus/arbitrage",
+      "title": "Nexus Arbitrage — Whale Radar",
+      "description": "Spot live cross-exchange crypto price gaps and funding spreads, with fees and depth factored into every opportunity.",
+      "priority": 0.6
+    },
+    {
+      "path": "/nexus/grid",
+      "title": "Grid Bot Studio — Whale Radar",
+      "description": "Design and stress-test crypto grid trading strategies against live volatility before deploying them to a real account.",
+      "priority": 0.6
+    },
+    {
+      "path": "/nexus/volume",
+      "title": "Volume Maker — Whale Radar",
+      "description": "Analyse crypto volume distribution and liquidity profiles to understand where real participation sits in the book.",
+      "priority": 0.6
+    },
+    {
+      "path": "/nexus/portfolio",
+      "title": "Portfolio Tracker — Whale Radar",
+      "description": "Track crypto holdings, live P&L and position risk alongside the whale activity moving your tokens.",
+      "priority": 0.6
+    },
+    {
+      "path": "/nexus/crystal-ball",
+      "title": "Crystal Ball Forecast — Whale Radar",
+      "description": "AI-assisted crypto price scenarios built from live order flow, whale positioning and technical context.",
+      "priority": 0.6
+    }
+  ],
+  "notFound": {
+    "title": "Page Not Found — Whale Radar",
+    "description": "The page you are looking for does not exist on Whale Radar.",
+    "noindex": true
+  }
+}
