@@ -34,6 +34,40 @@ async function binanceGet(path, params) {
     clearTimeout(timer);
   }
 }
+var BINANCE_FUTURES = "https://fapi.binance.com";
+async function binanceFuturesGet(path, params = {}) {
+  const url = new URL(`${BINANCE_FUTURES}${path}`);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1e4);
+  try {
+    const res = await fetch(url.toString(), {
+      headers: { accept: "application/json" },
+      signal: controller.signal
+    });
+    if (!res.ok) {
+      throw new Error(`Binance futures ${path} failed (${res.status}) \u2014 the perpetual may not be listed`);
+    }
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function jsonFetch(url, init, timeoutMs = 1e4) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      ...init,
+      headers: { accept: "application/json", ...init?.headers ?? {} },
+      signal: controller.signal
+    });
+    if (!res.ok) throw new Error(`Request to ${new URL(url).host} failed (${res.status})`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // src/lib/mcp/tools/get-market-snapshot.ts
 var get_market_snapshot_default = defineTool({
@@ -218,13 +252,497 @@ var list_council_decisions_default = defineTool4({
   }
 });
 
+// src/lib/mcp/tools/get-price-history.ts
+import { defineTool as defineTool5 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z5 } from "npm:zod@^3.25.76";
+var INTERVALS = [
+  "1m",
+  "5m",
+  "15m",
+  "30m",
+  "1h",
+  "4h",
+  "6h",
+  "12h",
+  "1d",
+  "1w"
+];
+var get_price_history_default = defineTool5({
+  name: "get_price_history",
+  title: "Get price history (OHLCV)",
+  description: "Historical candles (open/high/low/close/volume) for a crypto asset from Binance spot, oldest first. Use for charting, trend checks, or feeding your own analysis.",
+  inputSchema: {
+    symbol: z5.string().describe("Asset or pair, e.g. 'BTC' or 'BTCUSDT'."),
+    interval: z5.enum(INTERVALS).optional().describe("Candle interval. Default '1h'."),
+    limit: z5.number().optional().describe("Number of candles, 1-500. Default 100.")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+  handler: async ({ symbol, interval, limit }) => {
+    const pair = toPair(symbol);
+    const tf = interval ?? "1h";
+    const max = Math.min(Math.max(Math.trunc(limit ?? 100) || 100, 1), 500);
+    const raw = await binanceGet("/api/v3/klines", { symbol: pair, interval: tf, limit: max });
+    const candles = raw.map((k) => ({
+      open_time: new Date(k[0]).toISOString(),
+      open: Number(k[1]),
+      high: Number(k[2]),
+      low: Number(k[3]),
+      close: Number(k[4]),
+      volume: Number(k[5]),
+      trades: k[8]
+    }));
+    const payload = { pair, interval: tf, count: candles.length, candles };
+    return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
+  }
+});
+
+// src/lib/mcp/tools/get-technical-indicators.ts
+import { defineTool as defineTool6, ToolError as ToolError2 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z6 } from "npm:zod@^3.25.76";
+function sma(values, period) {
+  if (values.length < period) return null;
+  const slice = values.slice(-period);
+  return slice.reduce((a, b) => a + b, 0) / period;
+}
+function ema(values, period) {
+  if (values.length < period) return null;
+  const k = 2 / (period + 1);
+  let prev = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (const v of values.slice(period)) prev = v * k + prev * (1 - k);
+  return prev;
+}
+function rsi(values, period = 14) {
+  if (values.length < period + 1) return null;
+  let gains = 0;
+  let losses = 0;
+  for (let i = values.length - period; i < values.length; i++) {
+    const diff = values[i] - values[i - 1];
+    if (diff >= 0) gains += diff;
+    else losses -= diff;
+  }
+  if (losses === 0) return 100;
+  const rs = gains / losses;
+  return 100 - 100 / (1 + rs);
+}
+var get_technical_indicators_default = defineTool6({
+  name: "get_technical_indicators",
+  title: "Get technical indicators",
+  description: "Computed technical analysis for an asset from live Binance candles: RSI(14), SMA(20/50), EMA(12/26), MACD, ATR(14) and a simple trend read.",
+  inputSchema: {
+    symbol: z6.string().describe("Asset or pair, e.g. 'BTC' or 'ETHUSDT'."),
+    interval: z6.enum(["5m", "15m", "1h", "4h", "1d"]).optional().describe("Candle interval used for the calculation. Default '1h'.")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+  handler: async ({ symbol, interval }) => {
+    const pair = toPair(symbol);
+    const tf = interval ?? "1h";
+    const raw = await binanceGet("/api/v3/klines", { symbol: pair, interval: tf, limit: 200 });
+    if (!raw.length) throw new ToolError2(`No candle data for ${pair}`);
+    const closes = raw.map((k) => Number(k[4]));
+    const highs = raw.map((k) => Number(k[2]));
+    const lows = raw.map((k) => Number(k[3]));
+    const trs = [];
+    for (let i = 1; i < closes.length; i++) {
+      trs.push(
+        Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]))
+      );
+    }
+    const ema12 = ema(closes, 12);
+    const ema26 = ema(closes, 26);
+    const sma20 = sma(closes, 20);
+    const sma50 = sma(closes, 50);
+    const price = closes[closes.length - 1];
+    const rsi14 = rsi(closes, 14);
+    const trend = sma20 !== null && sma50 !== null ? sma20 > sma50 && price > sma20 ? "bullish" : sma20 < sma50 && price < sma20 ? "bearish" : "neutral" : "unknown";
+    const payload = {
+      pair,
+      interval: tf,
+      price,
+      rsi_14: rsi14,
+      sma_20: sma20,
+      sma_50: sma50,
+      ema_12: ema12,
+      ema_26: ema26,
+      macd: ema12 !== null && ema26 !== null ? ema12 - ema26 : null,
+      atr_14: sma(trs, 14),
+      trend
+    };
+    return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
+  }
+});
+
+// src/lib/mcp/tools/get-top-movers.ts
+import { defineTool as defineTool7 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z7 } from "npm:zod@^3.25.76";
+var get_top_movers_default = defineTool7({
+  name: "get_top_movers",
+  title: "Get top movers",
+  description: "Biggest 24h gainers, losers or volume leaders across Binance USDT spot markets, filtered to reasonably liquid pairs.",
+  inputSchema: {
+    kind: z7.enum(["gainers", "losers", "volume"]).optional().describe("Ranking to return. Default 'gainers'."),
+    limit: z7.number().optional().describe("Number of markets, 1-25. Default 10."),
+    min_volume_usd: z7.number().optional().describe("Minimum 24h quote volume in USD. Default 5000000.")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+  handler: async ({ kind, limit, min_volume_usd }) => {
+    const rank = kind ?? "gainers";
+    const max = Math.min(Math.max(Math.trunc(limit ?? 10) || 10, 1), 25);
+    const minVol = Number.isFinite(min_volume_usd) && min_volume_usd > 0 ? min_volume_usd : 5e6;
+    const all = await binanceGet("/api/v3/ticker/24hr", {});
+    const rows = all.filter((t) => t.symbol.endsWith("USDT") && !/(UP|DOWN|BULL|BEAR)USDT$/.test(t.symbol)).map((t) => ({
+      pair: t.symbol,
+      price: Number(t.lastPrice),
+      change_pct_24h: Number(t.priceChangePercent),
+      quote_volume_usd: Number(t.quoteVolume)
+    })).filter((t) => t.quote_volume_usd >= minVol);
+    rows.sort(
+      (a, b) => rank === "volume" ? b.quote_volume_usd - a.quote_volume_usd : rank === "losers" ? a.change_pct_24h - b.change_pct_24h : b.change_pct_24h - a.change_pct_24h
+    );
+    const payload = { kind: rank, min_volume_usd: minVol, count: Math.min(max, rows.length), markets: rows.slice(0, max) };
+    return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
+  }
+});
+
+// src/lib/mcp/tools/get-funding-and-oi.ts
+import { defineTool as defineTool8 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z8 } from "npm:zod@^3.25.76";
+var get_funding_and_oi_default = defineTool8({
+  name: "get_funding_and_open_interest",
+  title: "Get funding rate & open interest",
+  description: "Perpetual futures positioning for an asset: current funding rate, mark vs index price, open interest, and the top-trader long/short account ratio from Binance futures.",
+  inputSchema: {
+    symbol: z8.string().describe("Asset or perpetual pair, e.g. 'BTC' or 'BTCUSDT'.")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+  handler: async ({ symbol }) => {
+    const pair = toPair(symbol);
+    const [premium, oi, ratios] = await Promise.all([
+      binanceFuturesGet("/fapi/v1/premiumIndex", { symbol: pair }),
+      binanceFuturesGet("/fapi/v1/openInterest", { symbol: pair }),
+      binanceFuturesGet("/futures/data/topLongShortAccountRatio", {
+        symbol: pair,
+        period: "1h",
+        limit: 1
+      }).catch(() => [])
+    ]);
+    const fundingRate = Number(premium.lastFundingRate);
+    const payload = {
+      pair,
+      mark_price: Number(premium.markPrice),
+      index_price: Number(premium.indexPrice),
+      funding_rate: fundingRate,
+      funding_rate_pct: fundingRate * 100,
+      funding_bias: fundingRate > 0 ? "longs pay shorts" : fundingRate < 0 ? "shorts pay longs" : "flat",
+      next_funding_time: new Date(premium.nextFundingTime).toISOString(),
+      open_interest: Number(oi.openInterest),
+      open_interest_usd: Number(oi.openInterest) * Number(premium.markPrice),
+      top_trader_long_short_ratio: ratios[0] ? Number(ratios[0].longShortRatio) : null
+    };
+    return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
+  }
+});
+
+// src/lib/mcp/tools/compare-exchange-prices.ts
+import { defineTool as defineTool9, ToolError as ToolError3 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z9 } from "npm:zod@^3.25.76";
+function base(symbol) {
+  return symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/(USDT|USDC|USD|BUSD)$/, "") || "BTC";
+}
+async function binance(b) {
+  const r = await jsonFetch(`https://api.binance.com/api/v3/ticker/price?symbol=${b}USDT`);
+  return Number(r.price);
+}
+async function okx(b) {
+  const r = await jsonFetch(
+    `https://www.okx.com/api/v5/market/ticker?instId=${b}-USDT`
+  );
+  return Number(r.data?.[0]?.last);
+}
+async function bybit(b) {
+  const r = await jsonFetch(
+    `https://api.bybit.com/v5/market/tickers?category=spot&symbol=${b}USDT`
+  );
+  return Number(r.result?.list?.[0]?.lastPrice);
+}
+async function kraken(b) {
+  const r = await jsonFetch(
+    `https://api.kraken.com/0/public/Ticker?pair=${b}USD`
+  );
+  const first = Object.values(r.result ?? {})[0];
+  return Number(first?.c?.[0]);
+}
+async function hyperliquid(b) {
+  const r = await jsonFetch("https://api.hyperliquid.xyz/info", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "allMids" })
+  });
+  return Number(r?.[b]);
+}
+var SOURCES = {
+  binance,
+  okx,
+  bybit,
+  kraken,
+  hyperliquid
+};
+var compare_exchange_prices_default = defineTool9({
+  name: "compare_exchange_prices",
+  title: "Compare prices across exchanges",
+  description: "Live price of an asset on Binance, OKX, Bybit, Kraken and Hyperliquid side by side, with the best bid/ask venues and the cross-exchange spread in percent (arbitrage lead, not a verified opportunity).",
+  inputSchema: {
+    symbol: z9.string().describe("Base asset, e.g. 'BTC', 'ETH', 'SOL'.")
+  },
+  annotations: { readOnlyHint: true, openWorldHint: true },
+  handler: async ({ symbol }) => {
+    const b = base(symbol);
+    const entries = await Promise.all(
+      Object.entries(SOURCES).map(async ([name, fn]) => {
+        try {
+          const price = await fn(b);
+          return Number.isFinite(price) && price > 0 ? { exchange: name, price } : null;
+        } catch {
+          return null;
+        }
+      })
+    );
+    const prices = entries.filter((e) => e !== null);
+    if (!prices.length) throw new ToolError3(`No exchange returned a price for ${b}`);
+    const cheapest = prices.reduce((a, c) => c.price < a.price ? c : a);
+    const priciest = prices.reduce((a, c) => c.price > a.price ? c : a);
+    const spreadPct = (priciest.price - cheapest.price) / cheapest.price * 100;
+    const payload = {
+      asset: b,
+      prices,
+      cheapest,
+      most_expensive: priciest,
+      spread_pct: Number(spreadPct.toFixed(4)),
+      note: "Spread ignores fees, slippage and withdrawal times \u2014 treat as a lead, not a verified arbitrage."
+    };
+    return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
+  }
+});
+
+// src/lib/mcp/tools/get-trade-flow.ts
+import { defineTool as defineTool10, ToolError as ToolError4 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z10 } from "npm:zod@^3.25.76";
+var get_trade_flow_default = defineTool10({
+  name: "get_trade_flow",
+  title: "Get buy/sell trade flow",
+  description: "Aggressive buy vs sell volume for an asset over the most recent trades: notional split, delta, average trade size and the resulting flow bias.",
+  inputSchema: {
+    symbol: z10.string().describe("Asset or pair, e.g. 'BTC' or 'SOLUSDT'."),
+    trades: z10.number().optional().describe("How many recent trades to analyse, 100-1000. Default 1000.")
+  },
+  annotations: { readOnlyHint: true, openWorldHint: true },
+  handler: async ({ symbol, trades }) => {
+    const pair = toPair(symbol);
+    const n = Math.min(Math.max(Math.trunc(trades ?? 1e3) || 1e3, 100), 1e3);
+    const raw = await binanceGet("/api/v3/aggTrades", { symbol: pair, limit: n });
+    if (!raw.length) throw new ToolError4(`No recent trades for ${pair}`);
+    let buyUsd = 0;
+    let sellUsd = 0;
+    for (const t of raw) {
+      const usd = Number(t.p) * Number(t.q);
+      if (t.m) sellUsd += usd;
+      else buyUsd += usd;
+    }
+    const total = buyUsd + sellUsd;
+    const delta = buyUsd - sellUsd;
+    const buyPct = total > 0 ? buyUsd / total * 100 : 0;
+    const payload = {
+      pair,
+      trades_analysed: raw.length,
+      window_start: new Date(raw[0].T).toISOString(),
+      window_end: new Date(raw[raw.length - 1].T).toISOString(),
+      buy_volume_usd: Math.round(buyUsd),
+      sell_volume_usd: Math.round(sellUsd),
+      delta_usd: Math.round(delta),
+      buy_share_pct: Number(buyPct.toFixed(2)),
+      avg_trade_usd: Math.round(total / raw.length),
+      bias: buyPct > 55 ? "buyers in control" : buyPct < 45 ? "sellers in control" : "balanced"
+    };
+    return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
+  }
+});
+
+// src/lib/mcp/tools/get-hyperliquid-market.ts
+import { defineTool as defineTool11, ToolError as ToolError5 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z11 } from "npm:zod@^3.25.76";
+var get_hyperliquid_market_default = defineTool11({
+  name: "get_hyperliquid_market",
+  title: "Get Hyperliquid perp market",
+  description: "Live Hyperliquid perpetual data for an asset: mark price, 24h change and volume, funding rate, open interest and max leverage. Omit the symbol to get the busiest markets.",
+  inputSchema: {
+    symbol: z11.string().optional().describe("Base asset, e.g. 'BTC'. Omit for a top-markets list."),
+    limit: z11.number().optional().describe("Markets to return when no symbol is given, 1-25. Default 10.")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+  handler: async ({ symbol, limit }) => {
+    const res = await jsonFetch("https://api.hyperliquid.xyz/info", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "metaAndAssetCtxs" })
+    });
+    const [meta, ctxs] = res;
+    if (!meta?.universe?.length) throw new ToolError5("Hyperliquid returned no market metadata");
+    const markets = meta.universe.map((u, i) => {
+      const c = ctxs[i];
+      const mark = Number(c?.markPx ?? 0);
+      const prev = Number(c?.prevDayPx ?? 0);
+      return {
+        asset: u.name,
+        mark_price: mark,
+        mid_price: c?.midPx ? Number(c.midPx) : null,
+        change_pct_24h: prev > 0 ? Number(((mark - prev) / prev * 100).toFixed(2)) : null,
+        volume_24h_usd: Number(c?.dayNtlVlm ?? 0),
+        funding_rate: Number(c?.funding ?? 0),
+        open_interest: Number(c?.openInterest ?? 0),
+        max_leverage: u.maxLeverage ?? null
+      };
+    });
+    if (symbol?.trim()) {
+      const want = symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/(USDT|USDC|USD)$/, "");
+      const found = markets.find((m) => m.asset.toUpperCase() === want);
+      if (!found) throw new ToolError5(`${want} is not listed on Hyperliquid`);
+      return { content: [{ type: "text", text: JSON.stringify(found) }], structuredContent: found };
+    }
+    const max = Math.min(Math.max(Math.trunc(limit ?? 10) || 10, 1), 25);
+    const top = [...markets].sort((a, b) => b.volume_24h_usd - a.volume_24h_usd).slice(0, max);
+    const payload = { count: top.length, markets: top };
+    return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
+  }
+});
+
+// src/lib/mcp/tools/get-hyperliquid-wallet.ts
+import { defineTool as defineTool12, ToolError as ToolError6 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z12 } from "npm:zod@^3.25.76";
+var get_hyperliquid_wallet_default = defineTool12({
+  name: "get_hyperliquid_wallet",
+  title: "Get Hyperliquid wallet positions",
+  description: "Public on-chain snapshot of a Hyperliquid wallet: account value, withdrawable balance and every open perp position with size, entry, leverage, liquidation price and unrealised PnL. Useful for whale-wallet tracking.",
+  inputSchema: {
+    address: z12.string().describe("Hyperliquid/EVM wallet address, e.g. '0xabc...'.")
+  },
+  annotations: { readOnlyHint: true, openWorldHint: true },
+  handler: async ({ address }) => {
+    const addr = address.trim().toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(addr)) throw new ToolError6("address must be a 0x-prefixed 40-hex-character wallet address");
+    const state = await jsonFetch("https://api.hyperliquid.xyz/info", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "clearinghouseState", user: addr })
+    });
+    const positions = (state.assetPositions ?? []).map(({ position: p }) => {
+      const size = Number(p.szi);
+      return {
+        asset: p.coin,
+        side: size >= 0 ? "long" : "short",
+        size: Math.abs(size),
+        entry_price: p.entryPx ? Number(p.entryPx) : null,
+        position_value_usd: p.positionValue ? Number(p.positionValue) : null,
+        unrealized_pnl_usd: p.unrealizedPnl ? Number(p.unrealizedPnl) : null,
+        liquidation_price: p.liquidationPx ? Number(p.liquidationPx) : null,
+        leverage: p.leverage?.value ?? null
+      };
+    });
+    const payload = {
+      address: addr,
+      account_value_usd: Number(state.marginSummary?.accountValue ?? 0),
+      total_notional_position_usd: Number(state.marginSummary?.totalNtlPos ?? 0),
+      withdrawable_usd: Number(state.withdrawable ?? 0),
+      open_positions: positions.length,
+      positions
+    };
+    return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
+  }
+});
+
+// src/lib/mcp/tools/get-market-sentiment.ts
+import { defineTool as defineTool13 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z13 } from "npm:zod@^3.25.76";
+var get_market_sentiment_default = defineTool13({
+  name: "get_market_sentiment",
+  title: "Get crypto market sentiment",
+  description: "Overall crypto market mood: the Fear & Greed index (current plus recent history) alongside total market cap, 24h volume and BTC/ETH dominance.",
+  inputSchema: {
+    history_days: z13.number().optional().describe("Days of Fear & Greed history to include, 1-30. Default 7.")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+  handler: async ({ history_days }) => {
+    const days = Math.min(Math.max(Math.trunc(history_days ?? 7) || 7, 1), 30);
+    const [fng, global] = await Promise.all([
+      jsonFetch(`https://api.alternative.me/fng/?limit=${days}`).catch(() => ({})),
+      jsonFetch("https://api.coingecko.com/api/v3/global").catch(() => ({}))
+    ]);
+    const history = (fng.data ?? []).map((d) => ({
+      value: Number(d.value),
+      label: d.value_classification,
+      date: new Date(Number(d.timestamp) * 1e3).toISOString()
+    }));
+    const payload = {
+      fear_greed: history[0] ?? null,
+      fear_greed_history: history,
+      total_market_cap_usd: global.data?.total_market_cap?.usd ?? null,
+      total_volume_24h_usd: global.data?.total_volume?.usd ?? null,
+      market_cap_change_pct_24h: global.data?.market_cap_change_percentage_24h_usd ?? null,
+      btc_dominance_pct: global.data?.market_cap_percentage?.btc ?? null,
+      eth_dominance_pct: global.data?.market_cap_percentage?.eth ?? null
+    };
+    return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
+  }
+});
+
+// src/lib/mcp/tools/search-assets.ts
+import { defineTool as defineTool14 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z14 } from "npm:zod@^3.25.76";
+var search_assets_default = defineTool14({
+  name: "search_assets",
+  title: "Search tradable assets",
+  description: "Find which assets this tracker can query: searches Binance USDT spot markets by name fragment and returns matching pairs with price, 24h change and volume. Use before other tools when unsure of a ticker.",
+  inputSchema: {
+    query: z14.string().describe("Name fragment, e.g. 'sol', 'pepe', 'eth'."),
+    limit: z14.number().optional().describe("Max results, 1-25. Default 10.")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+  handler: async ({ query, limit }) => {
+    const q = query.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const max = Math.min(Math.max(Math.trunc(limit ?? 10) || 10, 1), 25);
+    const all = await binanceGet("/api/v3/ticker/24hr", {});
+    const matches = all.filter((t) => t.symbol.endsWith("USDT") && t.symbol.replace(/USDT$/, "").includes(q)).map((t) => ({
+      pair: t.symbol,
+      asset: t.symbol.replace(/USDT$/, ""),
+      price: Number(t.lastPrice),
+      change_pct_24h: Number(t.priceChangePercent),
+      quote_volume_usd: Number(t.quoteVolume)
+    })).sort((a, b) => b.quote_volume_usd - a.quote_volume_usd).slice(0, max);
+    const payload = { query: q, count: matches.length, results: matches };
+    return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
+  }
+});
+
 // src/lib/mcp/index.ts
 var mcp_default = defineMcp({
   name: "crypto-whale-tracker-pro",
   title: "CRYPTO Whale Tracker Pro",
-  version: "0.1.0",
-  instructions: "Live crypto market intelligence from Whale Radar. Use `get_market_snapshot` for 24h price stats, `get_whale_trades` for recent large-notional trades, `get_orderbook_pressure` for bid/ask imbalance, and `list_council_decisions` for the app's AI trading-council verdicts. All data is public and read-only.",
-  tools: [get_market_snapshot_default, get_whale_trades_default, get_orderbook_pressure_default, list_council_decisions_default]
+  version: "0.2.0",
+  instructions: "Live crypto market intelligence from Whale Radar. Price & discovery: `search_assets`, `get_market_snapshot`, `get_price_history`, `get_top_movers`, `compare_exchange_prices`. Flow & microstructure: `get_whale_trades`, `get_trade_flow`, `get_orderbook_pressure`. Derivatives: `get_funding_and_open_interest`, `get_hyperliquid_market`, `get_hyperliquid_wallet`. Analysis: `get_technical_indicators`, `get_market_sentiment`, `list_council_decisions` (this app's AI trading-council verdicts). All data is public and read-only \u2014 nothing here places trades.",
+  tools: [
+    search_assets_default,
+    get_market_snapshot_default,
+    get_price_history_default,
+    get_top_movers_default,
+    compare_exchange_prices_default,
+    get_whale_trades_default,
+    get_trade_flow_default,
+    get_orderbook_pressure_default,
+    get_funding_and_oi_default,
+    get_hyperliquid_market_default,
+    get_hyperliquid_wallet_default,
+    get_technical_indicators_default,
+    get_market_sentiment_default,
+    list_council_decisions_default
+  ]
 });
 
 // lovable-mcp-supabase-entry.ts
