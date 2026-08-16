@@ -129,11 +129,14 @@
   <body>
     <div id="root"></div>
     
-    <!-- No-JS Fallback -->
+    <!-- No-JS Fallback — also the only content non-JS-executing crawlers ever
+         see, since #root is empty until React mounts. Keep this in sync with
+         DEFAULT_TITLE/DEFAULT_DESCRIPTION in src/lib/seo/routeMeta.ts. -->
     <noscript>
       <div style="padding: 3rem 1rem; text-align: center; font-family: system-ui; max-width: 600px; margin: 0 auto;">
-        <h1>🚨 JavaScript Required</h1>
-        <p>Whale Radar needs JavaScript enabled to deliver live market data, WebSocket feeds, and real-time alerts.</p>
+        <h1>Whale Radar — Real-Time Crypto Whale Tracker</h1>
+        <p>Track crypto whale trades live on Binance, Bybit, Solana and Hyperliquid, with free AI-assisted market manipulation detection, alerts, and trading signals.</p>
+        <p>Whale Radar needs JavaScript enabled to deliver live market data, WebSocket feeds, and real-time alerts — please enable JavaScript to use the app.</p>
       </div>
     </noscript>
     
