@@ -1,6 +1,14 @@
 /* ══ ROUTE METADATA ═══════════════════════════════════════════════════════════
  * Single source of truth for per-route <title>, description and canonical URL.
  * Consumed by <RouteSeo /> which applies these to document.head on navigation.
+ *
+ * MAINTENANCE: public/sitemap.xml is hand-maintained, NOT generated from this
+ * file — if you add a route here, add the matching <url> entry to sitemap.xml
+ * too, or search engines won't discover it. (There's no build-time sitemap
+ * generator in this project; adding one — e.g. a postbuild script — would be
+ * a reasonable follow-up, but wasn't added here to avoid introducing new
+ * build-time tooling that couldn't be verified against Lovable's actual
+ * deploy pipeline without a live test.)
  */
 
 export const SITE_NAME = 'Whale Radar';
