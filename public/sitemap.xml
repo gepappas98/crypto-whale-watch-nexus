@@ -22,37 +22,37 @@
     <loc>https://crypto-whale-watch-nexus.lovable.app/trading-hub/technical</loc>
     <lastmod>2026-08-16</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://crypto-whale-watch-nexus.lovable.app/trading-hub/backtest</loc>
     <lastmod>2026-08-16</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://crypto-whale-watch-nexus.lovable.app/trading-hub/screener</loc>
     <lastmod>2026-08-16</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://crypto-whale-watch-nexus.lovable.app/trading-hub/sentiment</loc>
     <lastmod>2026-08-16</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://crypto-whale-watch-nexus.lovable.app/trading-hub/timeframes</loc>
     <lastmod>2026-08-16</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://crypto-whale-watch-nexus.lovable.app/trading-hub/patterns</loc>
     <lastmod>2026-08-16</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://crypto-whale-watch-nexus.lovable.app/nexus/whale</loc>
@@ -64,13 +64,13 @@
     <loc>https://crypto-whale-watch-nexus.lovable.app/nexus/arbitrage</loc>
     <lastmod>2026-08-16</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://crypto-whale-watch-nexus.lovable.app/nexus/grid</loc>
     <lastmod>2026-08-16</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://crypto-whale-watch-nexus.lovable.app/nexus/volume</loc>
