@@ -1,23 +1,20 @@
 /* ══ ROUTE METADATA ═══════════════════════════════════════════════════════════
  * Single source of truth for per-route <title>, description and canonical URL.
- * Consumed by <RouteSeo /> which applies these to document.head on navigation.
- *
- * MAINTENANCE: public/sitemap.xml is hand-maintained, NOT generated from this
- * file — if you add a route here, add the matching <url> entry to sitemap.xml
- * too, or search engines won't discover it. (There's no build-time sitemap
- * generator in this project; adding one — e.g. a postbuild script — would be
- * a reasonable follow-up, but wasn't added here to avoid introducing new
- * build-time tooling that couldn't be verified against Lovable's actual
- * deploy pipeline without a live test.)
+ * Consumed by <RouteSeo /> (client-side, for JS-executing crawlers) AND by
+ * scripts/prerender-shells.mjs (build-time, for text-only crawlers — see that
+ * script's docstring for why both are needed). The actual data lives in
+ * routes.json, not here — a plain JSON file so the postbuild script (plain
+ * Node, no TS toolchain) can read the exact same data with zero duplication,
+ * rather than two hand-maintained copies drifting apart.
  */
+import routesData from './routes.json';
 
-export const SITE_NAME = 'Whale Radar';
-export const SITE_ORIGIN = 'https://crypto-whale-watch-nexus.lovable.app';
+export const SITE_NAME = routesData.siteName;
+export const SITE_ORIGIN = routesData.siteOrigin;
 
 /** Sitewide defaults — must stay in sync with the static tags in index.html. */
-export const DEFAULT_TITLE = 'Whale Radar — Real-Time Crypto Whale Tracker';
-export const DEFAULT_DESCRIPTION =
-  'Track crypto whale trades live on Binance, Bybit, Solana & Hyperliquid. Free AI manipulation detection, alerts, and trading signals.';
+export const DEFAULT_TITLE = routesData.defaultTitle;
+export const DEFAULT_DESCRIPTION = routesData.defaultDescription;
 
 export interface RouteMeta {
   title: string;
@@ -26,94 +23,21 @@ export interface RouteMeta {
   noindex?: boolean;
 }
 
-/** Exact pathname → metadata. Trailing slashes are normalised before lookup. */
-export const ROUTE_META: Record<string, RouteMeta> = {
-  '/': {
-    title: DEFAULT_TITLE,
-    description: DEFAULT_DESCRIPTION,
-  },
-  '/orderflow': {
-    title: 'Orderflow Pro — Whale Radar',
-    description:
-      'Live Binance order flow: depth ladder, bid/ask imbalance, CVD, liquidation pressure and hidden-liquidity signals in one real-time terminal.',
-  },
-
-  // ── Trading Intelligence Hub ──────────────────────────────────────────────
-  '/trading-hub': {
-    title: 'Trading Intelligence Hub — Whale Radar',
-    description:
-      'Technical analysis, backtesting, sentiment and screening for crypto markets, built on live exchange data with no simulated inputs.',
-  },
-  '/trading-hub/technical': {
-    title: 'Technical Analysis — Whale Radar',
-    description:
-      'Live RSI, MACD, moving averages, Bollinger Bands and momentum readings computed from real-time crypto price data.',
-  },
-  '/trading-hub/backtest': {
-    title: 'Strategy Backtesting — Whale Radar',
-    description:
-      'Backtest crypto trading strategies against historical candles and review win rate, drawdown and realised return before risking capital.',
-  },
-  '/trading-hub/screener': {
-    title: 'Crypto Market Screener — Whale Radar',
-    description:
-      'Screen crypto markets by volume, volatility, momentum and manipulation risk to surface tradeable setups as they form.',
-  },
-  '/trading-hub/sentiment': {
-    title: 'Market Sentiment — Whale Radar',
-    description:
-      'Track crypto market sentiment, funding rates and positioning to see when the crowd is leaning too far in one direction.',
-  },
-  '/trading-hub/timeframes': {
-    title: 'Multi-Timeframe Analysis — Whale Radar',
-    description:
-      'Compare crypto trend and momentum across multiple timeframes at once to confirm setups and spot conflicting signals.',
-  },
-  '/trading-hub/patterns': {
-    title: 'Chart Pattern Detection — Whale Radar',
-    description:
-      'Automatically detect breakouts, reversals and continuation patterns on live crypto charts across your watchlist.',
-  },
-
-  // ── Nexus terminal ────────────────────────────────────────────────────────
-  '/nexus/whale': {
-    title: 'Nexus Whale Watch — Whale Radar',
-    description:
-      'Watch large crypto orders hit the tape in real time across Binance, Bybit and Solana, with size thresholds you control.',
-  },
-  '/nexus/arbitrage': {
-    title: 'Nexus Arbitrage — Whale Radar',
-    description:
-      'Spot live cross-exchange crypto price gaps and funding spreads, with fees and depth factored into every opportunity.',
-  },
-  '/nexus/grid': {
-    title: 'Grid Bot Studio — Whale Radar',
-    description:
-      'Design and stress-test crypto grid trading strategies against live volatility before deploying them to a real account.',
-  },
-  '/nexus/volume': {
-    title: 'Volume Maker — Whale Radar',
-    description:
-      'Analyse crypto volume distribution and liquidity profiles to understand where real participation sits in the book.',
-  },
-  '/nexus/portfolio': {
-    title: 'Portfolio Tracker — Whale Radar',
-    description:
-      'Track crypto holdings, live P&L and position risk alongside the whale activity moving your tokens.',
-  },
-  '/nexus/crystal-ball': {
-    title: 'Crystal Ball Forecast — Whale Radar',
-    description:
-      'AI-assisted crypto price scenarios built from live order flow, whale positioning and technical context.',
-  },
-};
+/** Exact pathname → metadata, built from routes.json. Entries that omit
+ *  title/description (currently just "/") fall back to the sitewide default,
+ *  same as the old hand-written table did for "/". */
+export const ROUTE_META: Record<string, RouteMeta> = Object.fromEntries(
+  routesData.routes.map((r) => [
+    r.path,
+    {
+      title: r.title ?? DEFAULT_TITLE,
+      description: r.description ?? DEFAULT_DESCRIPTION,
+    },
+  ]),
+);
 
 /** Metadata used for unmatched routes (404). Kept out of search indexes. */
-export const NOT_FOUND_META: RouteMeta = {
-  title: 'Page Not Found — Whale Radar',
-  description: 'The page you are looking for does not exist on Whale Radar.',
-  noindex: true,
-};
+export const NOT_FOUND_META: RouteMeta = routesData.notFound;
 
 /** Strip trailing slash (except root) so "/orderflow/" resolves like "/orderflow". */
 export function normalisePath(pathname: string): string {
