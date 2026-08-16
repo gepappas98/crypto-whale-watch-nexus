@@ -1,16 +1,25 @@
-# Crypto Whale Watch Nexus
+# Whale Radar
 
-> Crypto Whale Watch Nexus is a real-time cryptocurrency analytics platform designed to track, detect, and analyze large whale transactions across multiple blockchains and DEXs (including Hyperliquid).
+> Track crypto whale trades live on Binance, Bybit, Solana & Hyperliquid. Free AI manipulation detection, alerts, and trading signals.
 
-## Core Capabilities
-- Real-time Crypto Whale Transaction Tracking
-- Hyperliquid L1 Analytics & Orderbook/Trade Data
-- On-chain market intelligence and alerts
-
-## Key Files & Code structure
-- `src/lib/hyperliquid.ts`: Integration logic with Hyperliquid API / RPC
-- `src/lib/db.ts`: Database integration and schemas for storing whale transactions
+## Pages
+- https://crypto-whale-watch-nexus.lovable.app/ — Whale Radar — Real-Time Crypto Whale Tracker: Track crypto whale trades live on Binance, Bybit, Solana & Hyperliquid. Free AI manipulation detection, alerts, and trading signals.
+- https://crypto-whale-watch-nexus.lovable.app/orderflow — Orderflow Pro — Whale Radar: Live Binance order flow: depth ladder, bid/ask imbalance, CVD, liquidation pressure and hidden-liquidity signals in one real-time terminal.
+- https://crypto-whale-watch-nexus.lovable.app/trading-hub — Trading Intelligence Hub — Whale Radar: Technical analysis, backtesting, sentiment and screening for crypto markets, built on live exchange data with no simulated inputs.
+- https://crypto-whale-watch-nexus.lovable.app/trading-hub/technical — Technical Analysis — Whale Radar: Live RSI, MACD, moving averages, Bollinger Bands and momentum readings computed from real-time crypto price data.
+- https://crypto-whale-watch-nexus.lovable.app/trading-hub/backtest — Strategy Backtesting — Whale Radar: Backtest crypto trading strategies against historical candles and review win rate, drawdown and realised return before risking capital.
+- https://crypto-whale-watch-nexus.lovable.app/trading-hub/screener — Crypto Market Screener — Whale Radar: Screen crypto markets by volume, volatility, momentum and manipulation risk to surface tradeable setups as they form.
+- https://crypto-whale-watch-nexus.lovable.app/trading-hub/sentiment — Market Sentiment — Whale Radar: Track crypto market sentiment, funding rates and positioning to see when the crowd is leaning too far in one direction.
+- https://crypto-whale-watch-nexus.lovable.app/trading-hub/timeframes — Multi-Timeframe Analysis — Whale Radar: Compare crypto trend and momentum across multiple timeframes at once to confirm setups and spot conflicting signals.
+- https://crypto-whale-watch-nexus.lovable.app/trading-hub/patterns — Chart Pattern Detection — Whale Radar: Automatically detect breakouts, reversals and continuation patterns on live crypto charts across your watchlist.
+- https://crypto-whale-watch-nexus.lovable.app/nexus/whale — Nexus Whale Watch — Whale Radar: Watch large crypto orders hit the tape in real time across Binance, Bybit and Solana, with size thresholds you control.
+- https://crypto-whale-watch-nexus.lovable.app/nexus/arbitrage — Nexus Arbitrage — Whale Radar: Spot live cross-exchange crypto price gaps and funding spreads, with fees and depth factored into every opportunity.
+- https://crypto-whale-watch-nexus.lovable.app/nexus/grid — Grid Bot Studio — Whale Radar: Design and stress-test crypto grid trading strategies against live volatility before deploying them to a real account.
+- https://crypto-whale-watch-nexus.lovable.app/nexus/volume — Volume Maker — Whale Radar: Analyse crypto volume distribution and liquidity profiles to understand where real participation sits in the book.
+- https://crypto-whale-watch-nexus.lovable.app/nexus/portfolio — Portfolio Tracker — Whale Radar: Track crypto holdings, live P&L and position risk alongside the whale activity moving your tokens.
+- https://crypto-whale-watch-nexus.lovable.app/nexus/crystal-ball — Crystal Ball Forecast — Whale Radar: AI-assisted crypto price scenarios built from live order flow, whale positioning and technical context.
 
 ## API & Documentation
-- Website URL: https://crypto-whale-watch-nexus.lovable.app/
+- Website: https://crypto-whale-watch-nexus.lovable.app/
 - Repository: https://github.com/gepappas98/crypto-whale-watch-nexus
+- OpenAPI spec: https://crypto-whale-watch-nexus.lovable.app/openapi.json
