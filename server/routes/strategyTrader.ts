@@ -10,21 +10,25 @@
  *  show_config) governs whether an order is real — this route doesn't add
  *  a second one.
  *
- *  Honest note on mlConfidence: it is NOT a real security boundary. The ML
- *  model (src/lib/mlScoring.ts) trains and runs entirely in the browser —
- *  there is no server-side copy of it and no way to independently verify a
- *  confidence number the client sends. The floor below only rejects a
- *  number the client chose to report as bad; it doesn't stop a client from
- *  omitting the field, or from a future automated caller sending whatever
- *  it wants. What actually limits exposure today is that this route is
- *  only ever reached by a deliberate, explicit human click (the 🎯 button
- *  on a CRITICAL alert) — never fired automatically. If/when an automated
- *  forwarder is built, this floor needs real teeth first: either compute
- *  the score server-side from stored signal data, or have the server issue
- *  a short-lived HMAC-signed token over the signal that /enter verifies.
+ *  mlConfidence provenance (v9.16 revision of the v9.13/v9.14 note here):
+ *  the client's mlConfidence (src/lib/mlScoring.ts) trains and runs entirely
+ *  in the browser on localStorage data — the server has no way to verify a
+ *  number the client reports, so it was never a real gate on its own. The
+ *  real fix isn't a signature over the client's number (a signature can't
+ *  make an unverifiable number verifiable, it can only prove it wasn't
+ *  altered in transit — a different problem). Instead: server/services/
+ *  signalConfidence.ts computes a win-rate from signal_outcomes, the
+ *  server's OWN Postgres history — nothing the client sends. When there's
+ *  enough history for the pair (MIN_SAMPLES in that file), THAT number is
+ *  the real floor below, and mlConfidence is downgraded to audit-only
+ *  metadata (still recorded in the trade ledger, never used to gate). When
+ *  there isn't enough server history yet (a pair with no track record),
+ *  this falls back to the old client-reported-number check — weaker, but
+ *  honestly labelled as such in the response.
  * ═══════════════════════════════════════════════════════════════════════════ */
 import { Router, Request, Response } from 'express';
 import { checkAndLockCooldown, recordTrade } from '../services/nexusBotGates';
+import { getServerSideConfidence } from '../services/signalConfidence';
 import {
   isFreqtradeConfigured, getFreqtradeStatus, getFreqtradeLocks, deleteFreqtradeLock,
   forceEnter, forceExit,
@@ -80,6 +84,7 @@ strategyTraderRouter.delete('/locks/:id', async (req: Request, res: Response) =>
     res.status(502).json({ error: (err as Error).message });
   }
 });
+
 // POST /enter — forward a whale-radar signal to freqtrade's forceentry.
 strategyTraderRouter.post('/enter', async (req: Request, res: Response) => {
   if (!isFreqtradeConfigured()) return res.status(503).json({ error: 'freqtrade bridge not configured' });
@@ -99,11 +104,35 @@ strategyTraderRouter.post('/enter', async (req: Request, res: Response) => {
     }
   }
 
-  // See the file header: this floor is informational, not a real security
-  // boundary — it can only reject a number the client chose to send. Still
-  // worth rejecting when a bad one IS sent, so it's not pure theater.
-  if (typeof mlConfidence === 'number' && mlConfidence < ML_CONFIDENCE_FLOOR) {
-    return res.status(422).json({ error: `ML confidence ${mlConfidence}% is below the ${ML_CONFIDENCE_FLOOR}% floor for auto-forwarded signals` });
+  // See the file header: prefer the server's OWN win-rate history for this
+  // pair when there's enough of it — nothing the client can lie about.
+  // Only fall back to the client-reported mlConfidence (weaker — see header)
+  // when the server has no track record for this pair yet.
+  const serverConf = await getServerSideConfidence(pair);
+  let confidenceSource: 'server' | 'client' | 'none';
+  if (serverConf) {
+    confidenceSource = 'server';
+    if (serverConf.winRatePct < ML_CONFIDENCE_FLOOR) {
+      return res.status(422).json({
+        error: `Server-tracked win rate for ${pair.split('/')[0]} is ${serverConf.winRatePct}% (${serverConf.sampleSize} samples) — below the ${ML_CONFIDENCE_FLOOR}% floor`,
+        confidenceSource,
+      });
+    }
+  } else if (typeof mlConfidence === 'number') {
+    confidenceSource = 'client';
+    if (mlConfidence < ML_CONFIDENCE_FLOOR) {
+      return res.status(422).json({
+        error: `ML confidence ${mlConfidence}% is below the ${ML_CONFIDENCE_FLOOR}% floor (no server-side track record yet for this pair, so this is the weaker client-reported check — see server/routes/strategyTrader.ts header)`,
+        confidenceSource,
+      });
+    }
+  } else {
+    confidenceSource = 'none';
+    // Neither a server track record nor a client-supplied number — allowed
+    // through (this route is only ever reached by a deliberate human click,
+    // not automation), but confidenceSource: 'none' is recorded in the
+    // ledger so this is visible in hindsight, not silently indistinguishable
+    // from a real pass.
   }
 
   const gate = await checkAndLockCooldown(pair);
@@ -129,11 +158,14 @@ strategyTraderRouter.post('/enter', async (req: Request, res: Response) => {
       dryRun: dryRun === 'unknown' ? true : dryRun, // DB column is boolean NOT NULL; see meta.executionMode for the honest 'unknown' case
       status: failed ? 'error' : 'open',
       errorMessage: failed ? (result as { detail: string }).detail : undefined,
-      meta: { direction: 'enter', signalScore, mlConfidence, entryTag, freqtradeResult: result, executionMode: dryRun },
+      meta: {
+        direction: 'enter', signalScore, entryTag, freqtradeResult: result, executionMode: dryRun,
+        confidence: { source: confidenceSource, clientReported: mlConfidence, serverWinRate: serverConf?.winRatePct, serverSampleSize: serverConf?.sampleSize },
+      },
     });
 
     if (failed) return res.status(502).json({ error: (result as { detail: string }).detail, dryRun });
-    res.json({ ok: true, dryRun, trade: result });
+    res.json({ ok: true, dryRun, trade: result, confidenceSource });
   } catch (err) {
     await recordTrade({
       kind: 'strategy_trade', pair, side,
