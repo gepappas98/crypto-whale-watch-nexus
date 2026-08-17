@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { tradingApi, REFRESH } from "@/lib/trading-api";
+import { tradingApi, REFRESH, errText } from "@/lib/trading-api";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -94,7 +94,7 @@ export default function Technical() {
       {q.isError && (
         <Card className="p-4 border-destructive/40 bg-destructive/10">
           <div className="flex items-center gap-2 text-sm text-destructive">
-            <AlertCircle className="w-4 h-4" /> {String((q.error as Error)?.message)}
+            <AlertCircle className="w-4 h-4" /> {errText(q.error)}
           </div>
           <Button size="sm" className="mt-2" onClick={() => q.refetch()}>Retry</Button>
         </Card>
