@@ -16,6 +16,18 @@ async function call<T>(path: string, body: Record<string, unknown> = {}): Promis
   return data;
 }
 
+/** Bounds and flattens an error message before it's rendered in the UI.
+ *  Second layer of defense alongside the edge function's own truncation
+ *  (trading-bridge/index.ts's describeUpstreamError) — a message that
+ *  somehow still arrives unbounded (a network-layer error, a future
+ *  endpoint that forgets to truncate) can't dump a multi-KB blob into the
+ *  page the way a raw Reddit block-page error once did here. */
+export function errText(error: unknown, max = 160): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const oneLine = raw.replace(/\s+/g, ' ').trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
+}
+
 export const tradingApi = {
   technical: (symbol: string, timeframe = "1D") =>
     call<TechnicalAnalysis>("/technical-analysis", { symbol, timeframe }),
