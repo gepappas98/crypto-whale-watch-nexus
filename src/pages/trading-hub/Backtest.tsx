@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { tradingApi } from "@/lib/trading-api";
+import { tradingApi, errText } from "@/lib/trading-api";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -90,7 +90,7 @@ export default function Backtest() {
       {(run.isError || compare.isError) && (
         <Card className="p-4 border-destructive/40 bg-destructive/10 text-sm text-destructive">
           <AlertCircle className="w-4 h-4 inline mr-2" />
-          {String((run.error as Error)?.message ?? (compare.error as Error)?.message)}
+          {errText(run.error ?? compare.error)}
         </Card>
       )}
 
