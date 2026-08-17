@@ -1,6 +1,6 @@
-# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.13
+# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.14
 
-![Version](https://img.shields.io/badge/version-9.13-blue)
+![Version](https://img.shields.io/badge/version-9.14-blue)
 ![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite)
@@ -23,6 +23,8 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 - [Trading Hub](#-trading-hub-trading-hub)
 - [Hyperliquid Module](#-hyperliquid-module)
 - [AI Council](#-ai-council)
+- [MCP Tools (AI Agent Access)](#-mcp-tools-ai-agent-access)
+- [Order Flow Scanner](#-order-flow-scanner-orderflow)
 - [Reliability & Resilience Engineering](#-reliability--resilience-engineering)
 - [PWA & Performance](#-pwa--performance)
 - [Backend (optional)](#-backend-optional)
@@ -38,6 +40,7 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 
 ## 🆕 What's New
 
+- **The app now exposes itself as an MCP server — 14 read-only tools an AI agent can call directly** (v9.14): new `src/lib/mcp/` (via `@lovable.dev/mcp-js`) — see [MCP Tools](#-mcp-tools-ai-agent-access) for the full list. This is a different mechanism from v9.13's crawler-facing static shells: that fix helps a text-only crawler *read* a page, this lets an MCP-aware AI client *call* structured tools (`get_market_snapshot`, `get_whale_trades`, `list_council_decisions`, etc.) and get real JSON back. Verified: fresh `npm install` + `npm run build` (including the v9.13 postbuild step) both pass cleanly against this addition — the two features don't conflict. Small drift fixed along the way: `list_council_decisions`'s description still said the council was "bull/bear/risk/trader/PM", missing the **QUANT** agent added back in v9.8. Also: the prior deploy failure after the v9.13 SEO changes is resolved (fixed on the project side, not diagnosed here — no error log was available to confirm root cause) — a clean reinstall-and-build in a fresh sandbox now succeeds end to end.
 - **Text-only AI crawlers (ClaudeBot, GPTBot, etc.) now actually see real per-route content** (v9.13): Whale Radar is a pure client-rendered SPA — `<RouteSeo/>` (`src/components/RouteSeo.tsx`) already updated per-route `<title>`/meta tags on navigation, but only after React mounts, so any crawler reading raw HTML without executing JS (most AI-assistant crawlers, already explicitly allowed in `public/robots.txt`) only ever saw the sitewide `/` title and an empty `<div id="root">` for all 15 routes. New `scripts/prerender-shells.mjs` runs as an npm `postbuild` step: for each route in the new `src/lib/seo/routes.json` (now the single source of truth — `routeMeta.ts` reads the same file instead of hand-duplicating it), it copies `dist/index.html` into a real `dist/<route>/index.html` with that route's actual title/description/canonical/OG tags **and** visible `<h1>`/`<p>` text inside `#root`. Verified safe for real users: `src/main.tsx` uses `createRoot().render()`, not `hydrateRoot()`, so the static shell content just gets cleanly overwritten once JS loads — no hydration-mismatch warnings, no removal script needed, and real users briefly get a themed first paint instead of a blank page. Pure string templating over the one built `index.html` — no headless browser, no new dependencies. **Bonus fix found along the way**: `public/sitemap.xml` only listed 3 of the 15 routes, so most pages were never being surfaced for crawl discovery at all — the same postbuild script now regenerates `sitemap.xml` and `llms.txt` from `routes.json` too, so neither can silently fall out of sync with the real route list again. ⚠ One thing this repo can't verify on its own: whether the deploy host serves these per-route `dist/<route>/index.html` files on a direct request, or SPA-rewrites every path to the top-level `index.html` (which would make the per-route shells unreachable). Verify post-deploy with `curl -s <site>/orderflow | grep '<title>'`.
 - **The "✦ AI ASSESSMENT" in Market Sentiment was never actually AI** (v9.12): a different flavor of the gaps above — this one wasn't unreachable, it was a fake. `src/lib/analyzeToken.ts` has had a complete, working `analyzeSentiment()` since early on — same Claude call pattern as the per-coin "AI ANALYZE" button in `WRScanner` (`analyzeToken()`), just summarizing the whole scanned list instead of one token — and it had no caller. Meanwhile `Index.tsx`'s Sentiment modal (`SentimentContent`, opened via the ✦ SENT button) rendered a hardcoded `Market shows {critCount > 3 ? 'ELEVATED' : ...}` template string under an "✦ AI ASSESSMENT" label, and even gated that fake text behind requiring an AI key to be entered — implying a real call was happening when there wasn't one. `SentimentContent` now calls `analyzeSentiment()` for real, with a loading state and a ↻ REGENERATE button; `analyzeSentiment()` itself gained a cache keyed on the actual risk-count signature (crit/high/wash/pump/rug counts + scanned total, not just time) so reopening the modal on an unchanged scan doesn't spend a second API call on a prompt that would come out the same. The three CRITICAL/HIGH/WASH count tiles above it were already real counts and are untouched.
 - **Pinning an alert now actually survives a reload** (v9.11): `server/routes/alerts.ts` has had a working `PATCH /api/alerts/:id/pin` endpoint (and a client wrapper, `toggleAlertPin()` in `src/lib/db.ts`) with no caller — `WRRightPanel`'s pin toggle only ever flipped local React state. Root cause: `saveAlert()` discarded the id the server returns on insert, so there was never an id to call `toggleAlertPin()` with, and `loadAlerts()` dropped the id on the read side too. Both now carry it through (`AlertItem.dbId`, populated once the save round-trips or on load from history); `Index.tsx`'s pin handler still flips local state immediately (so the UI never waits on the network) and fires `toggleAlertPin()` alongside it when a `dbId` is available. Alerts saved while offline, or where the save is still in flight, stay local-only until a `dbId` shows up — same honest degrade-to-local pattern the rest of `db.ts` already uses.
@@ -170,6 +173,29 @@ Dashboard, Screener, Technical Analysis, Patterns, Sentiment, Backtest, and Time
 
 `WRCouncilPanel` + `src/lib/council/` — a multi-agent "council" that debates a symbol and produces a final verdict + conviction score. `quick`/`standard` run five agents (Bull, Bear, Risk Desk, Trader, PM); `deep` adds a sixth, **QUANT DESK**, reading pure orderflow/derivatives positioning (funding rate, OI trend, whale buy/sell imbalance). Decisions are persisted to Supabase (`council_decisions` table) with a running memory of past calls; performance is back-filled against live price at 1h/4h/24h/7d/30d checkpoints, and a confidence-discounted 0-100 desk track-record score (`computeDeskTrackRecord()`, graded at each call's longest available horizon) is shown right in the panel next to the memory list.
 
+## 🔌 MCP Tools (AI Agent Access)
+
+`src/lib/mcp/` — the app exposes itself as an [MCP](https://modelcontextprotocol.io) server via `@lovable.dev/mcp-js`'s `defineMcp`/`defineTool`: a Lovable build-time framework adapter turns `src/lib/mcp/index.ts`'s tool list into real HTTP route(s) automatically — there's no explicit import to wire up elsewhere in the app, the file's location under `src/lib/mcp/` is the convention. This is a different mechanism from the [postbuild static shells](#-whats-new) (v9.13): that fix helps text-only crawlers *read* the site; this lets an MCP-aware AI client (Claude, or any other MCP client) *call* it as structured tools and get JSON back, no page-reading involved. All 14 tools are `readOnlyHint: true` — nothing here places trades or writes data:
+
+| Tool | Source | What it returns |
+|---|---|---|
+| `search_assets` | Binance | Tickers matching a name fragment — the "what can I even ask about" entry point |
+| `get_market_snapshot` | Binance | 24h price/change/high/low/volume for one asset |
+| `get_price_history` | Binance | OHLCV candles, 1m–1w intervals |
+| `get_top_movers` | Binance | Gainers/losers/volume leaders, liquidity-filtered |
+| `compare_exchange_prices` | Binance, OKX, Bybit, Kraken, Hyperliquid | Same asset across 5 venues + spread (a lead, not a verified arb) |
+| `get_whale_trades` | Binance | Large aggregated trades above a USD threshold |
+| `get_trade_flow` | Binance | Aggressive buy vs sell volume split and bias over recent trades |
+| `get_orderbook_pressure` | Binance | Bid/ask liquidity imbalance near the spread |
+| `get_funding_and_open_interest` | Binance Futures | Funding rate, mark/index price, OI, top-trader long/short ratio |
+| `get_hyperliquid_market` | Hyperliquid | Perp mark price, funding, OI, max leverage — one asset or top markets by volume |
+| `get_hyperliquid_wallet` | Hyperliquid | Public wallet snapshot: account value, every open position, liquidation price |
+| `get_technical_indicators` | Binance (computed) | RSI(14), SMA(20/50), EMA(12/26), MACD, ATR(14), trend read |
+| `get_market_sentiment` | alternative.me, CoinGecko | Fear & Greed index + history, total market cap/volume, BTC/ETH dominance |
+| `list_council_decisions` | This app's Supabase | Recent [AI Council](#-ai-council) verdicts, optionally filtered by symbol |
+
+`src/lib/mcp/binance.ts` and `supabase.ts` are the shared fetch helpers (10s timeout + abort, and env-var resolution across `SUPABASE_URL`/`VITE_SUPABASE_URL` naming, matching the rest of the app's Supabase config tolerance). `list_council_decisions` reads with the `anon` key only — RLS-gated, no write access.
+
 ## 📡 Order Flow Scanner (`/orderflow`)
 
 `useOrderflowEngine` streams Binance spot orderbook depth (`@depth20@100ms`), aggregated trades, and futures liquidations (`@forceOrder`) directly over WebSocket for live bid/ask imbalance and large-block-trade visualization.
@@ -227,6 +253,7 @@ All non-public routes require a shared bearer token (`API_AUTH_TOKEN` on the ser
 | Forms/Validation | react-hook-form + Zod |
 | Testing | Vitest, Testing Library, Playwright |
 | PWA | Workbox-style manual service worker |
+| AI Agent Access | MCP server via `@lovable.dev/mcp-js` (see [MCP Tools](#-mcp-tools-ai-agent-access)) |
 | Deployment | Vercel, Lovable, Railway/Fly.io (backend) |
 
 ---
@@ -253,6 +280,8 @@ crypto-whale-watch-nexus-main/
 │   ├── lib/
 │   │   ├── exchanges/            # OKX/Kraken/Binance/Bybit adapters (whale-feed WS) + registry
 │   │   ├── council/              # AI council engine + persistence
+│   │   ├── mcp/                   # MCP server tools (defineMcp/defineTool) — see MCP Tools
+│   │   ├── seo/                   # routes.json (single source of truth) + routeMeta.ts
 │   │   ├── nexus/                # Arbitrage engine, bot connector + guarded execution,
 │   │   │                         # protections.ts (risk engine), botTradeStore.ts (ledger),
 │   │   │                         # pairPerformance.ts, openTradesLimit.ts, protectionOptimizer.ts,
@@ -273,6 +302,7 @@ crypto-whale-watch-nexus-main/
 │   ├── services/                 # api.ts, signals.ts
 │   ├── test/
 │   ├── App.tsx, main.tsx
+├── scripts/prerender-shells.mjs  # postbuild: per-route static HTML shells + sitemap.xml/llms.txt
 ├── HYPERLIQUID_DEPLOY.md         # Edge Function + DB migration deploy guide
 ├── Procfile                      # Backend deploy (Railway-style)
 ├── vite.config.ts
@@ -330,7 +360,7 @@ In **Lovable**, set these under Project Settings → Environment Variables (not 
 
 ## 🗺️ Roadmap
 
-Both previously-open roadmap items are closed as of v9.7/v9.8 — see ✅ Done below. v9.9-v9.12 were separately-found gaps (mostly "logic exists, no UI consumer"; v9.12 was a fake-output variant of the same pattern), not roadmap items. Nothing currently outstanding; `subscribeToPush()`/`triggerBackgroundSync()` (see [What's New](#-whats-new)) are a real next candidate but need backend work (VAPID keys, a push-sending endpoint) first. Otherwise, next candidates would need a new gap identified (e.g. via a fresh pass over `freqtrade-develop` or a fresh look at what's stubbed vs. real in Nexus/Council).
+Both previously-open roadmap items are closed as of v9.7/v9.8 — see ✅ Done below. v9.9-v9.12 were separately-found gaps (mostly "logic exists, no UI consumer"; v9.12 was a fake-output variant of the same pattern), not roadmap items. v9.13/v9.14 were AI-discoverability additions (crawler-facing static shells, then an MCP tool server) rather than gap fixes. Nothing currently outstanding; `subscribeToPush()`/`triggerBackgroundSync()` (see [What's New](#-whats-new)) are a real next candidate but need backend work (VAPID keys, a push-sending endpoint) first. Otherwise, next candidates would need a new gap identified (e.g. via a fresh pass over `freqtrade-develop` or a fresh look at what's stubbed vs. real in Nexus/Council).
 
 ✅ Done (were previously listed here as roadmap items):
 - **Market Sentiment now calls real AI instead of a canned template** — see [What's New](#-whats-new) above.
