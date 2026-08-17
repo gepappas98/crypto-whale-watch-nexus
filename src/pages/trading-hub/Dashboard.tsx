@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { tradingApi, REFRESH } from "@/lib/trading-api";
+import { tradingApi, REFRESH, errText } from "@/lib/trading-api";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ export default function TradingDashboard() {
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold">Live Market Snapshot</h2>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            {snap.isError && <span className="text-destructive flex items-center gap-1"><AlertCircle className="w-3 h-3" /> {String(snap.error)}</span>}
+            {snap.isError && <span className="text-destructive flex items-center gap-1"><AlertCircle className="w-3 h-3" /> {errText(snap.error)}</span>}
             {snap.data && <span>Updated {new Date(snap.data.timestamp).toLocaleTimeString()}</span>}
             <Button size="sm" variant="ghost" onClick={() => snap.refetch()} disabled={snap.isFetching}>
               <RefreshCw className={`w-3 h-3 ${snap.isFetching ? "animate-spin" : ""}`} />
