@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { tradingApi, REFRESH } from "@/lib/trading-api";
+import { tradingApi, REFRESH, errText } from "@/lib/trading-api";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -57,7 +57,7 @@ export default function Sentiment() {
         <Card className="p-4">
           <div className="text-sm font-semibold mb-2">Reddit Sentiment</div>
           {sent.isLoading && <Skeleton className="h-40" />}
-          {sent.isError && <div className="text-xs text-destructive"><AlertCircle className="w-3 h-3 inline mr-1" />{String((sent.error as Error).message)}</div>}
+          {sent.isError && <div className="text-xs text-destructive"><AlertCircle className="w-3 h-3 inline mr-1" />{errText(sent.error)}</div>}
           {sent.data && (
             <>
               <div className="text-3xl font-bold">{sent.data.score.toFixed(2)}</div>
@@ -82,7 +82,7 @@ export default function Sentiment() {
         <Card className="p-4">
           <div className="text-sm font-semibold mb-2">Live News Feed</div>
           {news.isLoading && <Skeleton className="h-40" />}
-          {news.isError && <div className="text-xs text-destructive"><AlertCircle className="w-3 h-3 inline mr-1" />{String((news.error as Error).message)}</div>}
+          {news.isError && <div className="text-xs text-destructive"><AlertCircle className="w-3 h-3 inline mr-1" />{errText(news.error)}</div>}
           {news.data && news.data.items.length === 0 && (
             <div className="text-xs text-muted-foreground">No recent news for {symbol}</div>
           )}
@@ -109,7 +109,7 @@ export default function Sentiment() {
         <Card className="p-4">
           <div className="text-sm font-semibold mb-2">Combined Analysis</div>
           {combined.isLoading && <Skeleton className="h-40" />}
-          {combined.isError && <div className="text-xs text-destructive"><AlertCircle className="w-3 h-3 inline mr-1" />{String((combined.error as Error).message)}</div>}
+          {combined.isError && <div className="text-xs text-destructive"><AlertCircle className="w-3 h-3 inline mr-1" />{errText(combined.error)}</div>}
           {combined.data && (
             <>
               <div className={`px-3 py-2 rounded text-center font-bold text-lg text-white ${verdictColor(combined.data.verdict)}`}>
