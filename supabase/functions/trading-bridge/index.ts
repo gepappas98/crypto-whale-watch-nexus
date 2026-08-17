@@ -3,6 +3,27 @@
 // RSS feeds (news). All indicators + backtest computed in TypeScript.
 // No mocks. No placeholders. Failures bubble up as real errors.
 
+/** Turns a failed upstream response into a short, human-readable error —
+ *  never the raw body. Reddit's anti-bot block page and Yahoo's error
+ *  pages are full HTML/CSS documents, sometimes tens of KB; interpolating
+ *  that directly into `throw new Error(...)` used to mean the ENTIRE page
+ *  ended up as the error's .message, which then rendered verbatim in the
+ *  UI (a wall of raw CSS instead of an error) because nothing between here
+ *  and the render call (safeInvoke.ts, trading-api.ts, Sentiment.tsx) ever
+ *  capped it — every layer just faithfully passed the message through.
+ *  Strips tags/whitespace and caps length so that can't happen again,
+ *  regardless of what any upstream source returns on failure. */
+function describeUpstreamError(source: string, status: number, rawBody: string): string {
+  const stripped = rawBody
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const snippet = stripped.slice(0, 120);
+  return snippet ? `${source} ${status}: ${snippet}` : `${source} ${status}`;
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -39,7 +60,7 @@ async function yahooChart(
   const r = await fetch(url, {
     headers: { "User-Agent": "Mozilla/5.0 TradingBridge/1.0" },
   });
-  if (!r.ok) throw new Error(`Yahoo ${symbol} ${r.status}: ${await r.text()}`);
+  if (!r.ok) throw new Error(describeUpstreamError(`Yahoo ${symbol}`, r.status, await r.text()));
   const j = await r.json();
   const result = j?.chart?.result?.[0];
   if (!result) throw new Error(`Yahoo: no data for ${symbol}`);
@@ -426,8 +447,22 @@ const BEAR_WORDS = ["dump", "bearish", "sell", "short", "crash", "drop", "resist
 async function redditSentiment(symbol: string) {
   const token = symbol.replace(/-USD$/i, "").replace(/USDT$/i, "");
   const url = `https://www.reddit.com/r/CryptoCurrency/search.json?q=${encodeURIComponent(token)}&restrict_sr=1&sort=new&limit=25`;
-  const r = await fetch(url, { headers: { "User-Agent": "TradingBridge/1.0" } });
-  if (!r.ok) throw new Error(`Reddit ${r.status}: ${await r.text()}`);
+  // Reddit's public json endpoints have gotten aggressive about blocking
+  // non-browser traffic since their 2023 API changes — a bare fetch with
+  // just a User-Agent is enough to trip it, so this sends the fuller set
+  // of headers a real browser would. Not guaranteed: if the block is on
+  // Deno Deploy's IP range rather than the request shape, no header set
+  // fixes it from here — that would need Reddit's OAuth API (app
+  // registration + credentials) instead of the public json endpoint, a
+  // bigger change than this fix covers.
+  const r = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TradingBridge/1.0 (contact: trading-bridge@whale-radar.app)",
+      "Accept": "application/json",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+  });
+  if (!r.ok) throw new Error(describeUpstreamError("Reddit", r.status, await r.text()));
   const j = await r.json();
   const posts = (j?.data?.children ?? []).map((c: any) => c.data);
   let bull = 0, bear = 0;
@@ -796,7 +831,11 @@ Deno.serve(async (req) => {
     // crash the client. Return 200 + fallback flag so the UI can render an
     // empty-state instead of a blank screen.
     const isUpstreamData =
-      /Yahoo:|empty series|no data|Yahoo \w+ \d{3}|Binance \d{3}|Reddit \d{3}/i.test(msg);
+      // [\w-]+ not \w+ for the Yahoo symbol segment — this app's default
+      // symbols are hyphenated ("BTC-USD"), which \w+ alone doesn't match,
+      // so this classifier was silently never firing for the app's own
+      // default symbol format and falling through to a raw 500 instead.
+      /Yahoo:|empty series|no data|Yahoo [\w-]+ \d{3}|Binance \d{3}|Reddit \d{3}/i.test(msg);
     if (isUpstreamData) {
       console.warn("[trading-bridge] upstream fallback:", msg);
       return json({ error: msg, fallback: true, data: null });
