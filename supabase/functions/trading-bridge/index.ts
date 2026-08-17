@@ -444,25 +444,71 @@ function backtest(candles: Candle[], strategy: string, capital: number, commissi
 const BULL_WORDS = ["moon", "bullish", "buy", "long", "pump", "rally", "breakout", "support", "accumulate", "uptrend", "🚀", "ath", "hold", "hodl"];
 const BEAR_WORDS = ["dump", "bearish", "sell", "short", "crash", "drop", "resistance", "downtrend", "rug", "rekt", "bear", "fall", "tank"];
 
+const REDDIT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TradingBridge/1.0 (contact: trading-bridge@whale-radar.app)";
+
+let redditToken: { accessToken: string; expiresAt: number } | null = null;
+
+/** Reddit's anonymous www.reddit.com/*.json endpoints started rejecting
+ *  datacenter/edge-function traffic outright ("You've been blocked by
+ *  network security... use your developer token") — this isn't a header
+ *  or User-Agent problem, it's an IP-reputation block, so no request
+ *  shape fixes it. The actual fix Reddit's own error message points to:
+ *  authenticate via OAuth. Uses the "client_credentials" grant (a Reddit
+ *  "script"-type app's id+secret, no end-user login involved) — see this
+ *  repo's README's "Reddit Sentiment Setup" section for how to create one.
+ *  Returns null (not a thrown error) when REDDIT_CLIENT_ID/SECRET aren't
+ *  configured, so redditSentiment() can fall back to the anonymous
+ *  endpoint and produce an honest "needs a developer token" message
+ *  instead of a confusing raw block-page error. */
+async function getRedditToken(): Promise<string | null> {
+  const clientId = Deno.env.get("REDDIT_CLIENT_ID");
+  const clientSecret = Deno.env.get("REDDIT_CLIENT_SECRET");
+  if (!clientId || !clientSecret) return null;
+
+  if (redditToken && Date.now() < redditToken.expiresAt) return redditToken.accessToken;
+
+  const r = await fetch("https://www.reddit.com/api/v1/access_token", {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": REDDIT_UA,
+    },
+    body: "grant_type=client_credentials",
+  });
+  if (!r.ok) throw new Error(describeUpstreamError("Reddit OAuth", r.status, await r.text()));
+  const j = await r.json();
+  if (!j.access_token) throw new Error("Reddit OAuth: no access_token in response — check REDDIT_CLIENT_ID/SECRET");
+  // Refresh a minute early rather than exactly on expiry.
+  redditToken = { accessToken: j.access_token, expiresAt: Date.now() + Math.max(0, (j.expires_in ?? 3600) - 60) * 1000 };
+  return redditToken.accessToken;
+}
+
 async function redditSentiment(symbol: string) {
   const token = symbol.replace(/-USD$/i, "").replace(/USDT$/i, "");
-  const url = `https://www.reddit.com/r/CryptoCurrency/search.json?q=${encodeURIComponent(token)}&restrict_sr=1&sort=new&limit=25`;
-  // Reddit's public json endpoints have gotten aggressive about blocking
-  // non-browser traffic since their 2023 API changes — a bare fetch with
-  // just a User-Agent is enough to trip it, so this sends the fuller set
-  // of headers a real browser would. Not guaranteed: if the block is on
-  // Deno Deploy's IP range rather than the request shape, no header set
-  // fixes it from here — that would need Reddit's OAuth API (app
-  // registration + credentials) instead of the public json endpoint, a
-  // bigger change than this fix covers.
-  const r = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TradingBridge/1.0 (contact: trading-bridge@whale-radar.app)",
-      "Accept": "application/json",
-      "Accept-Language": "en-US,en;q=0.9",
-    },
-  });
-  if (!r.ok) throw new Error(describeUpstreamError("Reddit", r.status, await r.text()));
+  const accessToken = await getRedditToken();
+  const base = accessToken ? "https://oauth.reddit.com" : "https://www.reddit.com";
+  const url = `${base}/r/CryptoCurrency/search.json?q=${encodeURIComponent(token)}&restrict_sr=1&sort=new&limit=25`;
+
+  const headers: Record<string, string> = {
+    "User-Agent": REDDIT_UA,
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+  };
+  if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+
+  const r = await fetch(url, { headers });
+  if (!r.ok) {
+    if (!accessToken) {
+      // Anonymous request, no credentials configured — give an actionable
+      // message instead of Reddit's raw block-page text, since header
+      // tweaks alone can't fix this (see getRedditToken()'s docstring).
+      throw new Error(
+        `Reddit ${r.status}: blocked (no developer token configured — set REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET, see README's Reddit Sentiment Setup)`,
+      );
+    }
+    throw new Error(describeUpstreamError("Reddit", r.status, await r.text()));
+  }
   const j = await r.json();
   const posts = (j?.data?.children ?? []).map((c: any) => c.data);
   let bull = 0, bear = 0;
@@ -835,7 +881,10 @@ Deno.serve(async (req) => {
       // symbols are hyphenated ("BTC-USD"), which \w+ alone doesn't match,
       // so this classifier was silently never firing for the app's own
       // default symbol format and falling through to a raw 500 instead.
-      /Yahoo:|empty series|no data|Yahoo [\w-]+ \d{3}|Binance \d{3}|Reddit \d{3}/i.test(msg);
+      // "Reddit OAuth" covers getRedditToken()'s own failure shapes too
+      // (token-fetch 4xx/5xx, or a malformed token response) — those
+      // don't fit the plain "Reddit \d{3}" pattern.
+      /Yahoo:|empty series|no data|Yahoo [\w-]+ \d{3}|Binance \d{3}|Reddit \d{3}|Reddit OAuth/i.test(msg);
     if (isUpstreamData) {
       console.warn("[trading-bridge] upstream fallback:", msg);
       return json({ error: msg, fallback: true, data: null });
