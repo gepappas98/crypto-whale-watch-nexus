@@ -230,7 +230,7 @@ function supabaseAnon() {
 var list_council_decisions_default = defineTool4({
   name: "list_council_decisions",
   title: "List AI council decisions",
-  description: "Recent verdicts from this app's multi-agent AI trading council (bull/bear/risk/trader/PM), newest first. Optionally filter by asset symbol.",
+  description: "Recent verdicts from this app's multi-agent AI trading council (bull/bear/quant/risk/trader/PM \u2014 quant only runs at 'deep' depth), newest first. Optionally filter by asset symbol.",
   inputSchema: {
     symbol: z4.string().optional().describe("Filter by asset symbol, e.g. 'BTC'."),
     limit: z4.number().optional().describe("Max decisions to return, 1-25. Default 10.")
