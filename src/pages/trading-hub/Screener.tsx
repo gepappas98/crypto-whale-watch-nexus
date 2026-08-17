@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { tradingApi, REFRESH } from "@/lib/trading-api";
+import { tradingApi, REFRESH, errText } from "@/lib/trading-api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,7 +70,7 @@ export default function Screener() {
       {q.isError && (
         <Card className="p-4 border-destructive/40 bg-destructive/10 text-sm text-destructive">
           <AlertCircle className="w-4 h-4 inline mr-2" />
-          {String((q.error as Error)?.message)}
+          {errText(q.error)}
         </Card>
       )}
 
