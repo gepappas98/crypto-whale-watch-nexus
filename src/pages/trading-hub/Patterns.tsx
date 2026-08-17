@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { tradingApi, REFRESH } from "@/lib/trading-api";
+import { tradingApi, REFRESH, errText } from "@/lib/trading-api";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -46,7 +46,7 @@ export default function Patterns() {
 
       {q.isError && (
         <Card className="p-4 border-destructive/40 bg-destructive/10 text-sm text-destructive">
-          <AlertCircle className="w-4 h-4 inline mr-2" />{String((q.error as Error).message)}
+          <AlertCircle className="w-4 h-4 inline mr-2" />{errText(q.error)}
         </Card>
       )}
 
