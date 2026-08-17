@@ -6,7 +6,7 @@ export default defineTool({
   name: "list_council_decisions",
   title: "List AI council decisions",
   description:
-    "Recent verdicts from this app's multi-agent AI trading council (bull/bear/risk/trader/PM), newest first. Optionally filter by asset symbol.",
+    "Recent verdicts from this app's multi-agent AI trading council (bull/bear/quant/risk/trader/PM — quant only runs at 'deep' depth), newest first. Optionally filter by asset symbol.",
   inputSchema: {
     symbol: z.string().optional().describe("Filter by asset symbol, e.g. 'BTC'."),
     limit: z.number().optional().describe("Max decisions to return, 1-25. Default 10."),
