@@ -24,8 +24,14 @@ export interface StrategyTraderStatus {
   error?: string;
 }
 
-export function getStrategyTraderStatus() {
-  return call<StrategyTraderStatus>('GET', '/status');
+/** Never throws: an unconfigured bridge (503 from nexus-bot-proxy) is a normal
+ *  state, not an error — it just means no Express server is wired up yet. */
+export async function getStrategyTraderStatus(): Promise<StrategyTraderStatus> {
+  try {
+    return await call<StrategyTraderStatus>('GET', '/status');
+  } catch (err) {
+    return { configured: false, reachable: false, error: (err as Error).message };
+  }
 }
 
 export function getStrategyTraderLocks() {
