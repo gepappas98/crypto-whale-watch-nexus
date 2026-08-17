@@ -1,10 +1,14 @@
 const BINANCE = "https://api.binance.com";
 
-/** Normalize a user-supplied asset ("btc", "BTC/USDT", "BTCUSDT") to a Binance pair. */
+/**
+ * Normalize a user-supplied asset ("btc", "BTC/USDT", "BTCUSDT") to a Binance pair.
+ * Only stablecoin quotes (USDT/USDC/BUSD) are treated as already-paired.
+ * BTC and ETH are base assets, so "BTC" becomes "BTCUSDT", not "BTC".
+ */
 export function toPair(symbol: string): string {
   const raw = symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (!raw) throw new Error("symbol is required");
-  return /(USDT|USDC|BUSD|BTC|ETH)$/.test(raw) ? raw : `${raw}USDT`;
+  return /(USDT|USDC|BUSD)$/.test(raw) ? raw : `${raw}USDT`;
 }
 
 export async function binanceGet<T>(path: string, params: Record<string, string | number>): Promise<T> {

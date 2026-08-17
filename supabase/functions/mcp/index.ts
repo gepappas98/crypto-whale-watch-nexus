@@ -14,7 +14,7 @@ var BINANCE = "https://api.binance.com";
 function toPair(symbol) {
   const raw = symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (!raw) throw new Error("symbol is required");
-  return /(USDT|USDC|BUSD|BTC|ETH)$/.test(raw) ? raw : `${raw}USDT`;
+  return /(USDT|USDC|BUSD)$/.test(raw) ? raw : `${raw}USDT`;
 }
 async function binanceGet(path, params) {
   const url = new URL(`${BINANCE}${path}`);
