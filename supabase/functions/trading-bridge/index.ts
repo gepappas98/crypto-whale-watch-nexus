@@ -542,10 +542,25 @@ async function redditSentiment(symbol: string) {
 
 // ─── RSS news ──────────────────────────────────────────────────────────────
 const FEEDS = [
-  { src: "CoinDesk", url: "https://www.coindesk.com/arc/outboundfeeds/rss/" },
+  // No trailing slash — CoinDesk's own feed self-links without one (its
+  // <atom:link rel="self"> points to the no-slash URL), and that's the
+  // form confirmed to actually return the feed rather than a redirect/404.
+  { src: "CoinDesk", url: "https://www.coindesk.com/arc/outboundfeeds/rss" },
   { src: "CoinTelegraph", url: "https://cointelegraph.com/rss" },
   { src: "Decrypt", url: "https://decrypt.co/feed" },
 ];
+
+// Same fix as the Reddit endpoint: CoinDesk/CoinTelegraph sit behind CDN/bot
+// protection that was silently rejecting the bare "TradingBridge/1.0"
+// User-Agent with no other headers — only Decrypt's CDN let it through,
+// which is why only Decrypt was ever showing up. Both feeds fetch fine
+// with a fuller, browser-like header set (verified independently before
+// this fix).
+const NEWS_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 TradingBridge/1.0",
+  "Accept": "application/rss+xml, application/xml, text/xml, */*",
+  "Accept-Language": "en-US,en;q=0.9",
+};
 
 function tagSentiment(text: string): "Positive" | "Negative" | "Neutral" {
   const t = text.toLowerCase();
@@ -558,8 +573,14 @@ async function fetchNews(symbol?: string) {
   const all: any[] = [];
   for (const f of FEEDS) {
     try {
-      const r = await fetch(f.url, { headers: { "User-Agent": "TradingBridge/1.0" } });
-      if (!r.ok) continue;
+      const r = await fetch(f.url, { headers: NEWS_HEADERS });
+      if (!r.ok) {
+        // Was previously silent — a feed could fail forever with zero way
+        // to tell why. Logged, not thrown: one dead feed shouldn't fail
+        // the whole /news response when others are still live.
+        console.warn(`[trading-bridge] news feed ${f.src} failed: ${r.status}`);
+        continue;
+      }
       const xml = await r.text();
       const items = [...xml.matchAll(/<item[\s\S]*?<\/item>/g)].slice(0, 15);
       for (const m of items) {
@@ -578,7 +599,9 @@ async function fetchNews(symbol?: string) {
           sentiment: tagSentiment(title),
         });
       }
-    } catch (_) { /* skip dead feed */ }
+    } catch (e) {
+      console.warn(`[trading-bridge] news feed ${f.src} threw:`, (e as Error)?.message ?? e);
+    }
   }
   all.sort((a, b) => b.published - a.published);
   return all.slice(0, 30);
