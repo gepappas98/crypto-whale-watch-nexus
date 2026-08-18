@@ -461,7 +461,7 @@ var get_top_movers_default = defineTool7({
     const rank = kind ?? "gainers";
     const max = Math.min(Math.max(Math.trunc(limit ?? 10) || 10, 1), 25);
     const minVol = Number.isFinite(min_volume_usd) && min_volume_usd > 0 ? min_volume_usd : 5e6;
-    const all = await binanceGet("/api/v3/ticker/24hr", {});
+    const all = await binanceGet("/api/v3/ticker/24hr", {}, 3e4);
     const rows = all.filter((t) => t.symbol.endsWith("USDT") && !/(UP|DOWN|BULL|BEAR)USDT$/.test(t.symbol)).map((t) => ({
       pair: t.symbol,
       price: Number(t.lastPrice),
@@ -781,7 +781,7 @@ var search_assets_default = defineTool14({
   handler: async ({ query, limit }) => {
     const q = query.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
     const max = Math.min(Math.max(Math.trunc(limit ?? 10) || 10, 1), 25);
-    const all = await binanceGet("/api/v3/ticker/24hr", {});
+    const all = await binanceGet("/api/v3/ticker/24hr", {}, 3e4);
     const matches = all.filter((t) => t.symbol.endsWith("USDT") && t.symbol.replace(/USDT$/, "").includes(q)).map((t) => ({
       pair: t.symbol,
       asset: t.symbol.replace(/USDT$/, ""),
