@@ -33,7 +33,7 @@ export default defineTool({
       ? (min_volume_usd as number)
       : 5_000_000;
 
-    const all = await binanceGet<Ticker[]>("/api/v3/ticker/24hr", {});
+    const all = await binanceGet<Ticker[]>("/api/v3/ticker/24hr", {}, 30_000);
     const rows = all
       .filter((t) => t.symbol.endsWith("USDT") && !/(UP|DOWN|BULL|BEAR)USDT$/.test(t.symbol))
       .map((t) => ({

@@ -18,7 +18,7 @@ export default defineTool({
     const q = query.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
     const max = Math.min(Math.max(Math.trunc(limit ?? 10) || 10, 1), 25);
 
-    const all = await binanceGet<Ticker[]>("/api/v3/ticker/24hr", {});
+    const all = await binanceGet<Ticker[]>("/api/v3/ticker/24hr", {}, 30_000);
     const matches = all
       .filter((t) => t.symbol.endsWith("USDT") && t.symbol.replace(/USDT$/, "").includes(q))
       .map((t) => ({
