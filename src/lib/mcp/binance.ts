@@ -1,5 +1,7 @@
 import { cached, withBudget } from "./guard";
 
+export { cached } from "./guard";
+
 const BINANCE = "https://api.binance.com";
 
 /** Default cache TTL for upstream market reads (ms). */
