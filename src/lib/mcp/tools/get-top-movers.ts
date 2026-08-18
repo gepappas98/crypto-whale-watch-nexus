@@ -1,6 +1,6 @@
 import { defineTool } from "@lovable.dev/mcp-js";
 import { z } from "zod";
-import { binanceGet } from "../binance";
+import { binanceGet, cached } from "../binance";
 
 type Ticker = {
   symbol: string;
@@ -33,7 +33,10 @@ export default defineTool({
       ? (min_volume_usd as number)
       : 5_000_000;
 
-    const all = await binanceGet<Ticker[]>("/api/v3/ticker/24hr", {}, 30_000);
+    // Cached — see binance.ts's cached() docstring. This is a full-market
+    // dataset fetch; without the cache, every call to this tool (or
+    // search_assets, which fetches the same dataset) hit Binance fresh.
+    const all = await cached("binance:ticker24hr", 8_000, () => binanceGet<Ticker[]>("/api/v3/ticker/24hr", {}));
     const rows = all
       .filter((t) => t.symbol.endsWith("USDT") && !/(UP|DOWN|BULL|BEAR)USDT$/.test(t.symbol))
       .map((t) => ({

@@ -1,6 +1,6 @@
 import { defineTool, ToolError } from "@lovable.dev/mcp-js";
 import { z } from "zod";
-import { jsonFetch } from "../binance";
+import { jsonFetch, cached } from "../binance";
 
 type Meta = { universe: { name: string; maxLeverage?: number }[] };
 type Ctx = {
@@ -23,11 +23,14 @@ export default defineTool({
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
   handler: async ({ symbol, limit }) => {
-    const res = await jsonFetch<[Meta, Ctx[]]>("https://api.hyperliquid.xyz/info", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type: "metaAndAssetCtxs" }),
-    });
+    // Cached — see binance.ts's cached() docstring. metaAndAssetCtxs
+    // returns the entire Hyperliquid market universe every time.
+    const res = await cached("hyperliquid:metaAndAssetCtxs", 8_000, () =>
+      jsonFetch<[Meta, Ctx[]]>("https://api.hyperliquid.xyz/info", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "metaAndAssetCtxs" }),
+      }));
     const [meta, ctxs] = res;
     if (!meta?.universe?.length) throw new ToolError("Hyperliquid returned no market metadata");
 

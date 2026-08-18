@@ -6,6 +6,13 @@ function base(symbol: string): string {
   return symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/(USDT|USDC|USD|BUSD)$/, "") || "BTC";
 }
 
+// Each of these returns the venue's last-trade price, not its bid/ask —
+// there's no order-book depth involved here (get_orderbook_pressure is the
+// tool for that, on a single venue). The description and response `note`
+// are worded around that: this is a cross-venue price-spread signal, not
+// an executable arbitrage calculation (no fees, slippage, depth, or
+// withdrawal/transfer time factored in).
+
 async function binance(b: string) {
   const r = await jsonFetch<{ price: string }>(`https://api.binance.com/api/v3/ticker/price?symbol=${b}USDT`);
   return Number(r.price);
@@ -50,7 +57,7 @@ export default defineTool({
   name: "compare_exchange_prices",
   title: "Compare prices across exchanges",
   description:
-    "Live price of an asset on Binance, OKX, Bybit, Kraken and Hyperliquid side by side, with the best bid/ask venues and the cross-exchange spread in percent (arbitrage lead, not a verified opportunity).",
+    "Live price of an asset on Binance, OKX, Bybit, Kraken and Hyperliquid side by side, with the cheapest/priciest venues and the cross-exchange spread in percent (arbitrage lead, not a verified opportunity — see the response's own note field).",
   inputSchema: {
     symbol: z.string().describe("Base asset, e.g. 'BTC', 'ETH', 'SOL'."),
   },

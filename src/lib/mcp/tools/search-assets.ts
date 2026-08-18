@@ -1,6 +1,6 @@
 import { defineTool } from "@lovable.dev/mcp-js";
 import { z } from "zod";
-import { binanceGet } from "../binance";
+import { binanceGet, cached } from "../binance";
 
 type Ticker = { symbol: string; lastPrice: string; priceChangePercent: string; quoteVolume: string };
 
@@ -18,7 +18,8 @@ export default defineTool({
     const q = query.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
     const max = Math.min(Math.max(Math.trunc(limit ?? 10) || 10, 1), 25);
 
-    const all = await binanceGet<Ticker[]>("/api/v3/ticker/24hr", {}, 30_000);
+    // Same cached dataset get_top_movers uses — see binance.ts's cached().
+    const all = await cached("binance:ticker24hr", 8_000, () => binanceGet<Ticker[]>("/api/v3/ticker/24hr", {}));
     const matches = all
       .filter((t) => t.symbol.endsWith("USDT") && t.symbol.replace(/USDT$/, "").includes(q))
       .map((t) => ({

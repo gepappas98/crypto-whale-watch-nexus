@@ -18,41 +18,45 @@ function ema(values: number[], period: number): number | null {
   return prev;
 }
 
-// Wilder's smoothed RSI: seed with the simple average of the first `period`
-// changes, then smooth each subsequent change with 1/period weighting.
 function rsi(values: number[], period = 14): number | null {
+  // Wilder's smoothed RSI, not a naive sum over the last `period` bars —
+  // the old version summed raw gains/losses over just the last N
+  // differences, which is a cruder approximation. This matches what
+  // TradingView/TA-Lib label RSI(14): a seed SMA over the first `period`
+  // gains/losses, then Wilder's exponential smoothing (alpha = 1/period)
+  // through the rest of the series.
   if (values.length < period + 1) return null;
-  let avgGain = 0;
-  let avgLoss = 0;
-  for (let i = 1; i <= period; i++) {
+  const gains: number[] = [];
+  const losses: number[] = [];
+  for (let i = 1; i < values.length; i++) {
     const diff = values[i] - values[i - 1];
-    if (diff >= 0) avgGain += diff;
-    else avgLoss -= diff;
+    gains.push(diff > 0 ? diff : 0);
+    losses.push(diff < 0 ? -diff : 0);
   }
-  avgGain /= period;
-  avgLoss /= period;
-  for (let i = period + 1; i < values.length; i++) {
-    const diff = values[i] - values[i - 1];
-    const gain = diff > 0 ? diff : 0;
-    const loss = diff < 0 ? -diff : 0;
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
+  let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < gains.length; i++) {
+    avgGain = (avgGain * (period - 1) + gains[i]) / period;
+    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
   }
-  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
+  if (avgLoss === 0) return 100;
   const rs = avgGain / avgLoss;
   return 100 - 100 / (1 + rs);
 }
 
-// Wilder's smoothed average (used for ATR).
-function wilderSmooth(values: number[], period = 14): number | null {
-  if (values.length < period) return null;
-  let avg = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  for (let i = period; i < values.length; i++) {
-    avg = (avg * (period - 1) + values[i]) / period;
+/** Wilder's smoothed ATR (seed SMA, then exponential smoothing at
+ *  alpha = 1/period) — the old version used a plain SMA of the true range
+ *  over the whole series, which understates how TradingView/TA-Lib's
+ *  ATR(14) actually behaves (it weights recent true-range values more,
+ *  same smoothing Wilder's RSI uses above). */
+function atr(trueRanges: number[], period = 14): number | null {
+  if (trueRanges.length < period) return null;
+  let value = trueRanges.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < trueRanges.length; i++) {
+    value = (value * (period - 1) + trueRanges[i]) / period;
   }
-  return avg;
+  return value;
 }
-
 
 export default defineTool({
   name: "get_technical_indicators",
@@ -110,7 +114,7 @@ export default defineTool({
       ema_12: ema12,
       ema_26: ema26,
       macd: ema12 !== null && ema26 !== null ? ema12 - ema26 : null,
-      atr_14: wilderSmooth(trs, 14),
+      atr_14: atr(trs, 14),
       trend,
     };
     return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
