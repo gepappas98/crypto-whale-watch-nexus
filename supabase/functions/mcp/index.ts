@@ -9,51 +9,72 @@ import { defineMcp } from "npm:@lovable.dev/mcp-js@0.26.2";
 import { defineTool } from "npm:@lovable.dev/mcp-js@0.26.2";
 import { z } from "npm:zod@^3.25.76";
 
+// src/lib/mcp/guard.ts
+var MAX_CONCURRENT = 8;
+var REFILL_PER_SEC = 12;
+var BUCKET_CAPACITY = 24;
+var MAX_WAIT_MS = 8e3;
+var MAX_CACHE_ENTRIES = 300;
+var tokens = BUCKET_CAPACITY;
+var lastRefill = Date.now();
+var inFlight = 0;
+function refill() {
+  const now = Date.now();
+  const elapsed = (now - lastRefill) / 1e3;
+  if (elapsed <= 0) return;
+  tokens = Math.min(BUCKET_CAPACITY, tokens + elapsed * REFILL_PER_SEC);
+  lastRefill = now;
+}
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function withBudget(fn) {
+  const deadline = Date.now() + MAX_WAIT_MS;
+  for (; ; ) {
+    refill();
+    if (tokens >= 1 && inFlight < MAX_CONCURRENT) break;
+    if (Date.now() > deadline) {
+      throw new Error("Upstream market data is rate limited right now \u2014 retry in a few seconds");
+    }
+    await sleep(80);
+  }
+  tokens -= 1;
+  inFlight += 1;
+  try {
+    return await fn();
+  } finally {
+    inFlight -= 1;
+  }
+}
+var cache = /* @__PURE__ */ new Map();
+function prune() {
+  const now = Date.now();
+  for (const [k, v] of cache) if (v.expires <= now) cache.delete(k);
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest === void 0) break;
+    cache.delete(oldest);
+  }
+}
+function cached(key, ttlMs, fn) {
+  const hit = cache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.value;
+  const value = fn().catch((err) => {
+    cache.delete(key);
+    throw err;
+  });
+  cache.set(key, { expires: Date.now() + ttlMs, value });
+  prune();
+  return value;
+}
+
 // src/lib/mcp/binance.ts
 var BINANCE = "https://api.binance.com";
+var DEFAULT_TTL = 5e3;
 function toPair(symbol) {
   const raw = symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (!raw) throw new Error("symbol is required");
   return /(USDT|USDC|BUSD)$/.test(raw) ? raw : `${raw}USDT`;
 }
-async function binanceGet(path, params) {
-  const url = new URL(`${BINANCE}${path}`);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1e4);
-  try {
-    const res = await fetch(url.toString(), {
-      headers: { accept: "application/json" },
-      signal: controller.signal
-    });
-    if (!res.ok) {
-      throw new Error(`Binance ${path} failed (${res.status}) \u2014 the pair may not be listed`);
-    }
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
-var BINANCE_FUTURES = "https://fapi.binance.com";
-async function binanceFuturesGet(path, params = {}) {
-  const url = new URL(`${BINANCE_FUTURES}${path}`);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1e4);
-  try {
-    const res = await fetch(url.toString(), {
-      headers: { accept: "application/json" },
-      signal: controller.signal
-    });
-    if (!res.ok) {
-      throw new Error(`Binance futures ${path} failed (${res.status}) \u2014 the perpetual may not be listed`);
-    }
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
-async function jsonFetch(url, init, timeoutMs = 1e4) {
+async function fetchJson(url, label, init, timeoutMs = 1e4) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -62,11 +83,46 @@ async function jsonFetch(url, init, timeoutMs = 1e4) {
       headers: { accept: "application/json", ...init?.headers ?? {} },
       signal: controller.signal
     });
-    if (!res.ok) throw new Error(`Request to ${new URL(url).host} failed (${res.status})`);
+    if (!res.ok) throw new Error(label.replace("{status}", String(res.status)));
     return await res.json();
   } finally {
     clearTimeout(timer);
   }
+}
+function buildUrl(base2, path, params) {
+  const url = new URL(`${base2}${path}`);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+  return url.toString();
+}
+async function binanceGet(path, params, ttlMs = DEFAULT_TTL) {
+  const url = buildUrl(BINANCE, path, params);
+  return cached(
+    url,
+    ttlMs,
+    () => withBudget(
+      () => fetchJson(url, `Binance ${path} failed ({status}) \u2014 the pair may not be listed`)
+    )
+  );
+}
+var BINANCE_FUTURES = "https://fapi.binance.com";
+async function binanceFuturesGet(path, params = {}, ttlMs = DEFAULT_TTL) {
+  const url = buildUrl(BINANCE_FUTURES, path, params);
+  return cached(
+    url,
+    ttlMs,
+    () => withBudget(
+      () => fetchJson(url, `Binance futures ${path} failed ({status}) \u2014 the perpetual may not be listed`)
+    )
+  );
+}
+async function jsonFetch(url, init, timeoutMs = 1e4, ttlMs = DEFAULT_TTL) {
+  const host = new URL(url).host;
+  const key = `${init?.method ?? "GET"} ${url} ${typeof init?.body === "string" ? init.body : ""}`;
+  return cached(
+    key,
+    ttlMs,
+    () => withBudget(() => fetchJson(url, `Request to ${host} failed ({status})`, init, timeoutMs))
+  );
 }
 
 // src/lib/mcp/tools/get-market-snapshot.ts
