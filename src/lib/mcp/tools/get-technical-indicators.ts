@@ -110,7 +110,7 @@ export default defineTool({
       ema_12: ema12,
       ema_26: ema26,
       macd: ema12 !== null && ema26 !== null ? ema12 - ema26 : null,
-      atr_14: sma(trs, 14),
+      atr_14: wilderSmooth(trs, 14),
       trend,
     };
     return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };

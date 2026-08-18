@@ -333,6 +333,14 @@ function rsi(values, period = 14) {
   const rs = avgGain / avgLoss;
   return 100 - 100 / (1 + rs);
 }
+function wilderSmooth(values, period = 14) {
+  if (values.length < period) return null;
+  let avg = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < values.length; i++) {
+    avg = (avg * (period - 1) + values[i]) / period;
+  }
+  return avg;
+}
 var get_technical_indicators_default = defineTool6({
   name: "get_technical_indicators",
   title: "Get technical indicators",
@@ -373,7 +381,7 @@ var get_technical_indicators_default = defineTool6({
       ema_12: ema12,
       ema_26: ema26,
       macd: ema12 !== null && ema26 !== null ? ema12 - ema26 : null,
-      atr_14: sma(trs, 14),
+      atr_14: wilderSmooth(trs, 14),
       trend
     };
     return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
