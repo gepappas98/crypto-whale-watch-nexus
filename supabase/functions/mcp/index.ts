@@ -313,16 +313,33 @@ function ema(values, period) {
 }
 function rsi(values, period = 14) {
   if (values.length < period + 1) return null;
-  let gains = 0;
-  let losses = 0;
-  for (let i = values.length - period; i < values.length; i++) {
+  let avgGain = 0;
+  let avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
     const diff = values[i] - values[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
+    if (diff >= 0) avgGain += diff;
+    else avgLoss -= diff;
   }
-  if (losses === 0) return 100;
-  const rs = gains / losses;
+  avgGain /= period;
+  avgLoss /= period;
+  for (let i = period + 1; i < values.length; i++) {
+    const diff = values[i] - values[i - 1];
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? -diff : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+  }
+  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
+  const rs = avgGain / avgLoss;
   return 100 - 100 / (1 + rs);
+}
+function wilderSmooth(values, period = 14) {
+  if (values.length < period) return null;
+  let avg = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < values.length; i++) {
+    avg = (avg * (period - 1) + values[i]) / period;
+  }
+  return avg;
 }
 var get_technical_indicators_default = defineTool6({
   name: "get_technical_indicators",
@@ -364,7 +381,7 @@ var get_technical_indicators_default = defineTool6({
       ema_12: ema12,
       ema_26: ema26,
       macd: ema12 !== null && ema26 !== null ? ema12 - ema26 : null,
-      atr_14: sma(trs, 14),
+      atr_14: wilderSmooth(trs, 14),
       trend
     };
     return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
