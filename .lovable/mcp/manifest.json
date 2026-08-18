@@ -149,7 +149,7 @@
       {
         "name": "compare_exchange_prices",
         "title": "Compare prices across exchanges",
-        "description": "Live price of an asset on Binance, OKX, Bybit, Kraken and Hyperliquid side by side, with the best bid/ask venues and the cross-exchange spread in percent (arbitrage lead, not a verified opportunity).",
+        "description": "Live price of an asset on Binance, OKX, Bybit, Kraken and Hyperliquid side by side, with the cheapest/priciest venues and the cross-exchange spread in percent (arbitrage lead, not a verified opportunity — see the response's own note field).",
         "annotations": {
           "readOnlyHint": true,
           "openWorldHint": true

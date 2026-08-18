@@ -369,33 +369,30 @@ function ema(values, period) {
 }
 function rsi(values, period = 14) {
   if (values.length < period + 1) return null;
-  let avgGain = 0;
-  let avgLoss = 0;
-  for (let i = 1; i <= period; i++) {
+  const gains = [];
+  const losses = [];
+  for (let i = 1; i < values.length; i++) {
     const diff = values[i] - values[i - 1];
-    if (diff >= 0) avgGain += diff;
-    else avgLoss -= diff;
+    gains.push(diff > 0 ? diff : 0);
+    losses.push(diff < 0 ? -diff : 0);
   }
-  avgGain /= period;
-  avgLoss /= period;
-  for (let i = period + 1; i < values.length; i++) {
-    const diff = values[i] - values[i - 1];
-    const gain = diff > 0 ? diff : 0;
-    const loss = diff < 0 ? -diff : 0;
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
+  let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < gains.length; i++) {
+    avgGain = (avgGain * (period - 1) + gains[i]) / period;
+    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
   }
-  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
+  if (avgLoss === 0) return 100;
   const rs = avgGain / avgLoss;
   return 100 - 100 / (1 + rs);
 }
-function wilderSmooth(values, period = 14) {
-  if (values.length < period) return null;
-  let avg = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  for (let i = period; i < values.length; i++) {
-    avg = (avg * (period - 1) + values[i]) / period;
+function atr(trueRanges, period = 14) {
+  if (trueRanges.length < period) return null;
+  let value = trueRanges.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < trueRanges.length; i++) {
+    value = (value * (period - 1) + trueRanges[i]) / period;
   }
-  return avg;
+  return value;
 }
 var get_technical_indicators_default = defineTool6({
   name: "get_technical_indicators",
@@ -437,7 +434,7 @@ var get_technical_indicators_default = defineTool6({
       ema_12: ema12,
       ema_26: ema26,
       macd: ema12 !== null && ema26 !== null ? ema12 - ema26 : null,
-      atr_14: wilderSmooth(trs, 14),
+      atr_14: atr(trs, 14),
       trend
     };
     return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
@@ -461,7 +458,7 @@ var get_top_movers_default = defineTool7({
     const rank = kind ?? "gainers";
     const max = Math.min(Math.max(Math.trunc(limit ?? 10) || 10, 1), 25);
     const minVol = Number.isFinite(min_volume_usd) && min_volume_usd > 0 ? min_volume_usd : 5e6;
-    const all = await binanceGet("/api/v3/ticker/24hr", {}, 3e4);
+    const all = await cached("binance:ticker24hr", 8e3, () => binanceGet("/api/v3/ticker/24hr", {}));
     const rows = all.filter((t) => t.symbol.endsWith("USDT") && !/(UP|DOWN|BULL|BEAR)USDT$/.test(t.symbol)).map((t) => ({
       pair: t.symbol,
       price: Number(t.lastPrice),
@@ -562,7 +559,7 @@ var SOURCES = {
 var compare_exchange_prices_default = defineTool9({
   name: "compare_exchange_prices",
   title: "Compare prices across exchanges",
-  description: "Live price of an asset on Binance, OKX, Bybit, Kraken and Hyperliquid side by side, with the best bid/ask venues and the cross-exchange spread in percent (arbitrage lead, not a verified opportunity).",
+  description: "Live price of an asset on Binance, OKX, Bybit, Kraken and Hyperliquid side by side, with the cheapest/priciest venues and the cross-exchange spread in percent (arbitrage lead, not a verified opportunity \u2014 see the response's own note field).",
   inputSchema: {
     symbol: z9.string().describe("Base asset, e.g. 'BTC', 'ETH', 'SOL'.")
   },
@@ -652,11 +649,11 @@ var get_hyperliquid_market_default = defineTool11({
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
   handler: async ({ symbol, limit }) => {
-    const res = await jsonFetch("https://api.hyperliquid.xyz/info", {
+    const res = await cached("hyperliquid:metaAndAssetCtxs", 8e3, () => jsonFetch("https://api.hyperliquid.xyz/info", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ type: "metaAndAssetCtxs" })
-    });
+    }));
     const [meta, ctxs] = res;
     if (!meta?.universe?.length) throw new ToolError5("Hyperliquid returned no market metadata");
     const markets = meta.universe.map((u, i) => {
@@ -781,7 +778,7 @@ var search_assets_default = defineTool14({
   handler: async ({ query, limit }) => {
     const q = query.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
     const max = Math.min(Math.max(Math.trunc(limit ?? 10) || 10, 1), 25);
-    const all = await binanceGet("/api/v3/ticker/24hr", {}, 3e4);
+    const all = await cached("binance:ticker24hr", 8e3, () => binanceGet("/api/v3/ticker/24hr", {}));
     const matches = all.filter((t) => t.symbol.endsWith("USDT") && t.symbol.replace(/USDT$/, "").includes(q)).map((t) => ({
       pair: t.symbol,
       asset: t.symbol.replace(/USDT$/, ""),
