@@ -21,7 +21,12 @@ export default defineTool({
       .limit(max);
 
     if (symbol?.trim()) {
-      query = query.ilike("symbol", `%${symbol.trim()}%`);
+      // Was `.ilike("symbol", `%${symbol}%`)` — a substring wildcard match,
+      // so filtering by "BTC" could also return "SBTC", "BTCX", or any
+      // other symbol merely containing "BTC". Case-insensitive exact match
+      // (ilike with no % wildcards) is what "filter by asset symbol" as
+      // documented in this tool's inputSchema actually means.
+      query = query.ilike("symbol", symbol.trim());
     }
 
     const { data, error } = await query;
