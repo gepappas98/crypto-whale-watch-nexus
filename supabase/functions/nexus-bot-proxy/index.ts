@@ -44,7 +44,14 @@ Deno.serve(async (req) => {
   const baseUrl = Deno.env.get('NEXUS_BOT_API_URL');
   const token = Deno.env.get('API_AUTH_TOKEN');
   if (!baseUrl || !token) {
-    return json({ error: 'Nexus bot bridge is not configured — set NEXUS_BOT_API_URL and API_AUTH_TOKEN as Supabase secrets' }, 503);
+    // This bridge is optional. Returning a 5xx here makes the platform report
+    // a runtime failure (and can trip the app error boundary) even though an
+    // unconfigured bot is a valid disabled state.
+    return json({
+      configured: false,
+      reachable: false,
+      error: 'Nexus bot bridge is not configured',
+    });
   }
 
   try {
