@@ -40,7 +40,17 @@
 
     /* Text */
     --wr-white: 130 100% 90%;
-    --wr-muted: 140 28% 23%;
+    /* Was 140 28% 23% — 2.08:1 contrast against --wr-bg, well under WCAG AA's
+     * 4.5:1 minimum for text. Real feedback (Reddit): "some dark green text
+     * is unreadable" — this is what that was. Same lightness bump applied
+     * to .theme-matrix and .theme-dark below, since both had the identical
+     * problem (1.5:1, 1.5:1) despite different hue/saturation. Hue/sat kept
+     * as-is, only lightness raised — keeps the "muted" tier visually
+     * distinct from --wr-green-dim (6.5-9.2:1 in all three themes) while
+     * actually being readable. Verified via WCAG relative-luminance contrast
+     * ratio, not eyeballed.
+     */
+    --wr-muted: 140 28% 41%;
     --wr-border: 150 34% 7%;
 
     /* Semantic mapping for shadcn */
@@ -79,7 +89,7 @@
     --wr-green-dim: 120 100% 40%;
     --wr-green-ghost: 120 100% 50%;
     --wr-white: 120 100% 90%;
-    --wr-muted: 120 33% 16%;
+    --wr-muted: 120 33% 41%; /* was 16% — see :root's --wr-muted comment */
     --wr-border: 120 47% 8%;
   }
 
@@ -92,7 +102,7 @@
     --wr-green-dim: 142 50% 45%;
     --wr-green-ghost: 142 70% 62%;
     --wr-white: 152 68% 90%;
-    --wr-muted: 160 15% 17%;
+    --wr-muted: 160 15% 45%; /* was 17% — see :root's --wr-muted comment */
     --wr-border: 220 20% 12%;
   }
 
