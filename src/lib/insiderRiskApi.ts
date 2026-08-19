@@ -9,8 +9,8 @@ import {
   TokenHolder, 
   TransferEvent, 
   DEFAULT_CEX_ADDRESSES,
-  SOLANA_CEX_ADDRESSES,
 } from '@/types/insiderRisk';
+import { SOLANA_CEX_ADDRESSES } from './insiderRisk';
 import { detectCEX, detectWalletType, detectPrePumpPattern } from './insiderRiskUtils';
 
 // ── Fetch with timeout (no AbortSignal.timeout — broad browser compat) ────────
