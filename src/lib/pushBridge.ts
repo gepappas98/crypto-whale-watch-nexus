@@ -8,9 +8,33 @@
 import { safeInvoke } from '@/lib/safeInvoke';
 import { requestNotificationPermission, subscribeToPush } from '@/lib/pwa';
 
+/** True once the proxy has told us the push bridge has no server secrets
+ *  configured. Push is an optional, self-hosted feature — when it isn't set
+ *  up we must degrade quietly instead of throwing on every alert. */
+let pushUnavailable = false;
+
+export class PushNotConfiguredError extends Error {}
+
+function isNotConfigured(message: string): boolean {
+  return /not configured|NEXUS_BOT_API_URL|503/i.test(message);
+}
+
+export function isPushConfigured(): boolean {
+  return !pushUnavailable;
+}
+
 async function call<T>(method: 'GET' | 'POST', path: string, payload?: unknown): Promise<T> {
+  if (pushUnavailable) {
+    throw new PushNotConfiguredError('Push notifications are not configured on the server');
+  }
   const { data, error } = await safeInvoke<T>('push-proxy', { body: { method, path, payload } });
-  if (error) throw error;
+  if (error) {
+    if (isNotConfigured(error.message)) {
+      pushUnavailable = true;
+      throw new PushNotConfiguredError('Push notifications are not configured on the server');
+    }
+    throw error;
+  }
   return data as T;
 }
 
@@ -61,8 +85,16 @@ export interface PushPayload {
   url?: string;
 }
 
-export function sendPush(payload: PushPayload) {
-  return call<{ ok: boolean; sent: number; pruned: number; failed: number }>('POST', '/send', payload);
+/** Broadcast a push. Resolves to a zero-delivery result (never rejects) when
+ *  the push bridge isn't configured — auto-pushes on critical alerts must not
+ *  surface as runtime errors on a deployment without push secrets. */
+export async function sendPush(payload: PushPayload) {
+  try {
+    return await call<{ ok: boolean; sent: number; pruned: number; failed: number }>('POST', '/send', payload);
+  } catch (e) {
+    if (e instanceof PushNotConfiguredError) return { ok: false, sent: 0, pruned: 0, failed: 0 };
+    throw e;
+  }
 }
 
 export function sendTestPush(url = '/') {
