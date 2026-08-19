@@ -54,8 +54,17 @@ export async function getCurrentPushSubscription(): Promise<PushSubscription | n
   return registration.pushManager.getSubscription();
 }
 
+export interface PushPayload {
+  title: string;
+  body: string;
+  tag?: string;
+  url?: string;
+}
+
+export function sendPush(payload: PushPayload) {
+  return call<{ ok: boolean; sent: number; pruned: number; failed: number }>('POST', '/send', payload);
+}
+
 export function sendTestPush(url = '/') {
-  return call<{ ok: boolean; sent: number; pruned: number; failed: number }>('POST', '/send', {
-    title: 'Whale Radar', body: 'Test push — if you can see this, it works.', tag: 'whale-radar-test', url,
-  });
+  return sendPush({ title: 'Whale Radar', body: 'Test push — if you can see this, it works.', tag: 'whale-radar-test', url });
 }
