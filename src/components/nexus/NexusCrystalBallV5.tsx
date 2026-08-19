@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { proxied } from '@/lib/binanceProxy';
 import {
   TrendingUp,
   TrendingDown,
@@ -721,7 +722,7 @@ async function fetchCoinCapMarketData(coinId: string): Promise<any | null> {
  */
 async function fetchBinanceTicker(symbol: string): Promise<any | null> {
   try {
-    const url = `https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}USDT`;
+    const url = proxied(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}USDT`);
     const res = await fetch(url);
     if (!res.ok) return null;
     return await res.json();
