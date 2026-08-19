@@ -31,7 +31,13 @@ Deno.serve(async (req) => {
   const baseUrl = Deno.env.get('NEXUS_BOT_API_URL');
   const token = Deno.env.get('API_AUTH_TOKEN');
   if (!baseUrl || !token) {
-    return json({ error: 'Push bridge is not configured — set NEXUS_BOT_API_URL and API_AUTH_TOKEN as Supabase secrets' }, 503);
+    // Push is an OPTIONAL self-hosted feature. Returning 503 here made every
+    // call surface as a hard edge-function error in the client; a 200 with an
+    // `error` field lets the app treat it as "push disabled" and degrade.
+    return json({
+      configured: false,
+      error: 'Push bridge is not configured — set NEXUS_BOT_API_URL and API_AUTH_TOKEN as Supabase secrets',
+    });
   }
 
   try {
