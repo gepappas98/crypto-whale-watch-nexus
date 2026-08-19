@@ -250,7 +250,7 @@ function technicalAnalysis(symbol: string, candles: Candle[], timeframe: string)
   votes.push(e20[last] > e50[last] ? 1 : -1);
   votes.push(e50[last] > e200[last] ? 1 : -1);
   votes.push(st.dir[last] === 1 ? 1 : -1);
-  const score = votes.reduce((a, b) => a + b, 0);
+  const score = votes.reduce<number>((a, b) => a + b, 0);
   const bull = votes.filter(v => v === 1).length;
   const bear = votes.filter(v => v === -1).length;
   let signal: string;
