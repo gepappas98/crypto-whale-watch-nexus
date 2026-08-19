@@ -85,8 +85,16 @@ export interface PushPayload {
   url?: string;
 }
 
-export function sendPush(payload: PushPayload) {
-  return call<{ ok: boolean; sent: number; pruned: number; failed: number }>('POST', '/send', payload);
+/** Broadcast a push. Resolves to a zero-delivery result (never rejects) when
+ *  the push bridge isn't configured — auto-pushes on critical alerts must not
+ *  surface as runtime errors on a deployment without push secrets. */
+export async function sendPush(payload: PushPayload) {
+  try {
+    return await call<{ ok: boolean; sent: number; pruned: number; failed: number }>('POST', '/send', payload);
+  } catch (e) {
+    if (e instanceof PushNotConfiguredError) return { ok: false, sent: 0, pruned: 0, failed: 0 };
+    throw e;
+  }
 }
 
 export function sendTestPush(url = '/') {
