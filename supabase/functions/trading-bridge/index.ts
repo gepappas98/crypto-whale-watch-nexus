@@ -895,7 +895,7 @@ Deno.serve(async (req) => {
 
     return err(`Unknown path: ${path}`, 404);
   } catch (e) {
-    const msg = String(e?.message ?? e);
+    const msg = e instanceof Error ? e.message : String(e);
     // Upstream data issues (Yahoo empty/no-data, transient 4xx/5xx) should not
     // crash the client. Return 200 + fallback flag so the UI can render an
     // empty-state instead of a blank screen.
