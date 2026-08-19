@@ -458,7 +458,7 @@ var get_top_movers_default = defineTool7({
     const rank = kind ?? "gainers";
     const max = Math.min(Math.max(Math.trunc(limit ?? 10) || 10, 1), 25);
     const minVol = Number.isFinite(min_volume_usd) && min_volume_usd > 0 ? min_volume_usd : 5e6;
-    const all = await cached("binance:ticker24hr", 8e3, () => binanceGet("/api/v3/ticker/24hr", {}));
+    const all = await binanceGet("/api/v3/ticker/24hr", {});
     const rows = all.filter((t) => t.symbol.endsWith("USDT") && !/(UP|DOWN|BULL|BEAR)USDT$/.test(t.symbol)).map((t) => ({
       pair: t.symbol,
       price: Number(t.lastPrice),
@@ -649,11 +649,11 @@ var get_hyperliquid_market_default = defineTool11({
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
   handler: async ({ symbol, limit }) => {
-    const res = await cached("hyperliquid:metaAndAssetCtxs", 8e3, () => jsonFetch("https://api.hyperliquid.xyz/info", {
+    const res = await jsonFetch("https://api.hyperliquid.xyz/info", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ type: "metaAndAssetCtxs" })
-    }));
+    });
     const [meta, ctxs] = res;
     if (!meta?.universe?.length) throw new ToolError5("Hyperliquid returned no market metadata");
     const markets = meta.universe.map((u, i) => {
@@ -778,7 +778,7 @@ var search_assets_default = defineTool14({
   handler: async ({ query, limit }) => {
     const q = query.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
     const max = Math.min(Math.max(Math.trunc(limit ?? 10) || 10, 1), 25);
-    const all = await cached("binance:ticker24hr", 8e3, () => binanceGet("/api/v3/ticker/24hr", {}));
+    const all = await binanceGet("/api/v3/ticker/24hr", {});
     const matches = all.filter((t) => t.symbol.endsWith("USDT") && t.symbol.replace(/USDT$/, "").includes(q)).map((t) => ({
       pair: t.symbol,
       asset: t.symbol.replace(/USDT$/, ""),
