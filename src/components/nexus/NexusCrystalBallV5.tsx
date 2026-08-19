@@ -706,12 +706,11 @@ async function fetchBinanceKlinesDirect(
  */
 async function fetchCoinCapMarketData(coinId: string): Promise<any | null> {
   try {
-    const url = `https://api.coincap.io/v2/assets/${coinId}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data || !data.data) return null;
-    return data.data;
+    // api.coincap.io v2 is retired (now key-gated and CORS-blocked); calling it
+    // only produced "Failed to fetch" noise. Skip straight to the Binance/CoinGecko
+    // fallbacks below.
+    void coinId;
+    return null;
   } catch {
     return null;
   }

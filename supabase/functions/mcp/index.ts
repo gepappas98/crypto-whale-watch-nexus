@@ -296,7 +296,7 @@ var list_council_decisions_default = defineTool4({
     const max = Math.min(Math.max(Math.trunc(limit ?? 10) || 10, 1), 25);
     let query = supabaseAnon().from("council_decisions").select("id,symbol,depth,final_verdict,conviction,price_at,reflection,created_at").order("created_at", { ascending: false }).limit(max);
     if (symbol?.trim()) {
-      query = query.ilike("symbol", `%${symbol.trim()}%`);
+      query = query.ilike("symbol", symbol.trim());
     }
     const { data, error } = await query;
     if (error) throw new ToolError(error.message);
