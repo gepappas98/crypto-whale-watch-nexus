@@ -45,10 +45,11 @@ pushRouter.post('/unsubscribe', async (req: Request, res: Response) => {
   }
 });
 
-// POST /send — broadcast to every subscribed browser. Currently only reachable
-// via the "Send Test Push" button in Settings; nothing calls this
-// automatically yet (e.g. on a CRITICAL alert) — that's a separate,
-// deliberate follow-up, not bundled into this patch. See README.
+// POST /send — broadcast to every subscribed browser. Reachable from the
+// "Send Test Push" button in Settings, and automatically from a CRITICAL
+// alert (client-side throttled to at most once/60s — see Index.tsx's
+// addAlert). Anything more targeted than "everyone subscribed" would need
+// real auth first — see push_subscriptions migration's comment.
 pushRouter.post('/send', async (req: Request, res: Response) => {
   if (!isPushConfigured()) return res.status(503).json({ error: 'push not configured' });
   const { title, body, tag, url } = req.body as { title?: string; body?: string; tag?: string; url?: string };
