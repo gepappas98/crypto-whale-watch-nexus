@@ -1,26 +1,28 @@
 import { Card } from "@/components/ui/card";
-import type { ReactNode } from "react";
+import { forwardRef, type ReactNode } from "react";
 
-export function NexusEmptyState({
-  icon,
-  title,
-  message,
-  action,
-}: {
+interface NexusEmptyStateProps {
   icon: ReactNode;
   title: string;
   message: string;
   action?: ReactNode;
-}) {
+}
+
+export const NexusEmptyState = forwardRef<HTMLDivElement, NexusEmptyStateProps>(function NexusEmptyState({
+  icon,
+  title,
+  message,
+  action,
+}, ref) {
   return (
-    <Card className="p-10 text-center bg-card/50 border-dashed">
+    <Card ref={ref} className="p-10 text-center bg-card/50 border-dashed">
       <div className="flex justify-center mb-3 text-muted-foreground">{icon}</div>
       <h3 className="font-semibold mb-1">{title}</h3>
       <p className="text-xs text-muted-foreground max-w-md mx-auto">{message}</p>
       {action && <div className="mt-4">{action}</div>}
     </Card>
   );
-}
+});
 
 export function StatCard({
   label,
