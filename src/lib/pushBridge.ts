@@ -8,9 +8,33 @@
 import { safeInvoke } from '@/lib/safeInvoke';
 import { requestNotificationPermission, subscribeToPush } from '@/lib/pwa';
 
+/** True once the proxy has told us the push bridge has no server secrets
+ *  configured. Push is an optional, self-hosted feature — when it isn't set
+ *  up we must degrade quietly instead of throwing on every alert. */
+let pushUnavailable = false;
+
+export class PushNotConfiguredError extends Error {}
+
+function isNotConfigured(message: string): boolean {
+  return /not configured|NEXUS_BOT_API_URL|503/i.test(message);
+}
+
+export function isPushConfigured(): boolean {
+  return !pushUnavailable;
+}
+
 async function call<T>(method: 'GET' | 'POST', path: string, payload?: unknown): Promise<T> {
+  if (pushUnavailable) {
+    throw new PushNotConfiguredError('Push notifications are not configured on the server');
+  }
   const { data, error } = await safeInvoke<T>('push-proxy', { body: { method, path, payload } });
-  if (error) throw error;
+  if (error) {
+    if (isNotConfigured(error.message)) {
+      pushUnavailable = true;
+      throw new PushNotConfiguredError('Push notifications are not configured on the server');
+    }
+    throw error;
+  }
   return data as T;
 }
 
