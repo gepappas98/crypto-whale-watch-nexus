@@ -8,9 +8,10 @@ import {
   InsiderRiskData, 
   TokenHolder, 
   TransferEvent, 
-  DEFAULT_CEX_ADDRESSES 
+  DEFAULT_CEX_ADDRESSES,
+  SOLANA_CEX_ADDRESSES,
 } from '@/types/insiderRisk';
-import { detectCEX, detectWalletType } from './insiderRiskUtils';
+import { detectCEX, detectWalletType, detectPrePumpPattern } from './insiderRiskUtils';
 
 // ── Fetch with timeout (no AbortSignal.timeout — broad browser compat) ────────
 function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 15_000): Promise<Response> {
@@ -223,7 +224,7 @@ export class EtherscanService {
       ).length;
 
       // Detect pre-pump patterns
-      const prePumpTransfer = this.detectPrePumpPattern(largeTransfers);
+      const prePumpTransfer = detectPrePumpPattern(largeTransfers);
 
       // Detect wallet type
       const deployerCode = await this.getCode(deployerAddress);
@@ -248,26 +249,10 @@ export class EtherscanService {
     }
   }
 
-  private detectPrePumpPattern(transfers: TransferEvent[]): InsiderRiskData['prePumpTransfer'] {
-    const suspicious = transfers.find(t => 
-      t.isToCEX && 
-      t.value > 1e6 &&
-      (Date.now() / 1000 - t.timestamp) < 86400
-    );
-
-    if (suspicious) {
-      return {
-        detected: true,
-        amount: suspicious.value,
-        timestamp: suspicious.timestamp,
-        toExchange: suspicious.cexName || 'Unknown',
-        hoursBeforePump: Math.floor((Date.now() / 1000 - suspicious.timestamp) / 3600)
-      };
-    }
-
-    return null;
-  }
 }
+// detectPrePumpPattern (formerly a private method here) now lives in
+// insiderRiskUtils.ts, shared with BirdeyeService.analyzeToken below —
+// same >$1M-to-CEX-within-24h rule on both chains, one implementation.
 
 // Birdeye API Service
 export class BirdeyeService {
@@ -338,17 +323,92 @@ export class BirdeyeService {
     });
   }
 
-  async analyzeToken(mintAddress: string): Promise<Partial<InsiderRiskData>> {
+  /** Raw on-chain transfer records for one Solana mint, POST /token/v1/transfer
+   *  (not a DEX-swap endpoint — a swap's counterparty is an AMM pool, not a
+   *  CEX wallet, so it can never show a "sent to Binance" pattern; this is
+   *  the wallet-to-wallet transfer feed, the Solana analog of Etherscan's
+   *  getRecentTransfers). from_value filters server-side to transfers worth
+   *  at least $500k, matching the Ethereum path's threshold. */
+  async getTokenTransfers(mintAddress: string, minUsdValue = 500_000): Promise<any[]> {
+    const cacheKey = `birdeye:transfers:${mintAddress}:${minUsdValue}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
+    return birdeyeLimiter.add(async () => {
+      const response = await fetchWithTimeout(
+        `${this.baseUrl}/token/v1/transfer`,
+        {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': this.apiKey,
+            'x-chain': 'solana',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            token_address: mintAddress,
+            from_value: minUsdValue,
+            limit: 50,
+          }),
+        }
+      );
+
+      if (!response.ok) throw new Error('Birdeye API error');
+
+      const data = await response.json();
+      const items = data.data?.items || data.data?.transfers || [];
+      setCached(cacheKey, items);
+      return items;
+    });
+  }
+
+  async analyzeToken(mintAddress: string, cexAddresses: Record<string, string[]> = {}): Promise<Partial<InsiderRiskData>> {
     try {
-      const [overview, holders] = await Promise.all([
+      const [overview, holders, rawTransfers] = await Promise.all([
         this.getTokenOverview(mintAddress),
-        this.getTokenHolders(mintAddress)
+        this.getTokenHolders(mintAddress),
+        // A transfer-history fetch failure (endpoint down, plan doesn't
+        // include it, etc.) shouldn't fail the whole scan — holders/overview
+        // are still useful on their own — so this one degrades to [].
+        this.getTokenTransfers(mintAddress, 500_000).catch((err) => {
+          console.warn('Birdeye transfer history unavailable, CEX detection skipped:', err);
+          return [];
+        }),
       ]);
 
       const top10Concentration = holders.reduce((sum, h) => sum + h.percentage, 0);
       const circulatingPct = overview.circulatingSupply && overview.totalSupply 
         ? (overview.circulatingSupply / overview.totalSupply) * 100 
         : 0;
+
+      // Field names below cover the variants seen across Birdeye's transfer
+      // endpoints (to/to_wallet/toAddress, value/valueUsd, block_unix_time/
+      // blockTime) since the exact shape isn't pinned down without a live
+      // key to test against — this degrades to "no CEX match" per-row
+      // rather than throwing if a given row doesn't have the field.
+      const largeTransfers: TransferEvent[] = rawTransfers.map((tx: any) => {
+        const to = tx.to_wallet ?? tx.to ?? tx.toAddress ?? tx.destination ?? '';
+        const from = tx.from_wallet ?? tx.from ?? tx.fromAddress ?? tx.source ?? '';
+        const value = Number(tx.value_usd ?? tx.valueUsd ?? tx.value ?? 0);
+        const timestamp = Number(tx.block_unix_time ?? tx.blockTime ?? tx.time ?? tx.timestamp ?? 0);
+        const cexInfo = detectCEX(to, cexAddresses);
+        return {
+          from,
+          to,
+          value,
+          timestamp,
+          txHash: tx.tx_hash ?? tx.txHash ?? tx.signature ?? '',
+          isToCEX: cexInfo.isCEX,
+          cexName: cexInfo.name,
+        };
+      });
+
+      const cexTransfers24h = largeTransfers.filter(t =>
+        (Date.now() / 1000 - t.timestamp) < 86400
+      ).length;
+      const cexTransfers72h = largeTransfers.filter(t =>
+        (Date.now() / 1000 - t.timestamp) < 259200
+      ).length;
+      const prePumpTransfer = detectPrePumpPattern(largeTransfers);
 
       return {
         totalSupply: overview.totalSupply || 0,
@@ -359,10 +419,10 @@ export class BirdeyeService {
         deployerAddress: holders[0]?.address || '',
         deployerBalance: holders[0]?.balance || 0,
         deployerWalletType: holders[0]?.isContract ? 'MULTISIG' : 'EOA',
-        largeTransfers: [], // Birdeye requires separate tx history API
-        cexTransfers24h: 0,
-        cexTransfers72h: 0,
-        prePumpTransfer: null
+        largeTransfers,
+        cexTransfers24h,
+        cexTransfers72h,
+        prePumpTransfer,
       };
     } catch (error) {
       console.error('Birdeye analysis error:', error);
@@ -374,7 +434,7 @@ export class BirdeyeService {
 // Main analysis orchestrator
 export async function analyzeTokenRisk(
   coin: any,
-  settings: { etherscanKey?: string; birdeyeKey?: string }
+  settings: { etherscanKey?: string; birdeyeKey?: string; solanaCexAddresses?: Record<string, string[]> }
 ): Promise<Partial<InsiderRiskData>> {
   const isSolana = coin.chain === 'solana' || coin.platforms?.solana;
 
@@ -382,7 +442,10 @@ export async function analyzeTokenRisk(
     const service = new BirdeyeService(settings.birdeyeKey);
     const mintAddress = coin.platforms?.solana || coin.contract_address;
     if (mintAddress) {
-      return await service.analyzeToken(mintAddress);
+      // settings.solanaCexAddresses is user-supplied (Settings UI) and
+      // takes priority since SOLANA_CEX_ADDRESSES ships empty — see its
+      // definition in types/insiderRisk.ts for why.
+      return await service.analyzeToken(mintAddress, settings.solanaCexAddresses ?? SOLANA_CEX_ADDRESSES);
     }
   }
 

@@ -2,6 +2,31 @@
 
 import { InsiderRiskData, TransferEvent, TokenHolder } from '@/types/insiderRisk';
 
+/** Shared by EtherscanService and BirdeyeService's analyzeToken() — same
+ *  pattern used on both chains: a large (>$1M) transfer TO a known CEX
+ *  address within the last 24h counts as a pre-pump signal. Previously this
+ *  lived only inside EtherscanService as a private method, so the Solana
+ *  path had no equivalent and always returned null regardless of activity. */
+export function detectPrePumpPattern(transfers: TransferEvent[]): InsiderRiskData['prePumpTransfer'] {
+  const suspicious = transfers.find(t =>
+    t.isToCEX &&
+    t.value > 1e6 &&
+    (Date.now() / 1000 - t.timestamp) < 86400
+  );
+
+  if (suspicious) {
+    return {
+      detected: true,
+      amount: suspicious.value,
+      timestamp: suspicious.timestamp,
+      toExchange: suspicious.cexName || 'Unknown',
+      hoursBeforePump: Math.floor((Date.now() / 1000 - suspicious.timestamp) / 3600)
+    };
+  }
+
+  return null;
+}
+
 /**
  * Calculate insider risk score based on various factors
  */
@@ -71,10 +96,20 @@ export function detectCEX(address: string, cexAddresses: Record<string, string[]
   isCEX: boolean;
   name?: string;
 } {
-  const normalized = address.toLowerCase();
+  // EVM addresses (0x...) are case-insensitive (the mixed case some
+  // addresses ship with is just EIP-55 checksumming, not distinct
+  // characters), so lowercasing both sides before comparing is correct
+  // there. Solana addresses are base58 — case IS significant, two
+  // addresses differing only by case are different addresses — so they
+  // must compare exactly as given, not lowercased.
+  const isEvm = address.startsWith('0x') || address.startsWith('0X');
+  const normalized = isEvm ? address.toLowerCase() : address;
 
   for (const [cex, addresses] of Object.entries(cexAddresses)) {
-    if (addresses.some(addr => addr.toLowerCase() === normalized)) {
+    const match = addresses.some(addr =>
+      isEvm ? addr.toLowerCase() === normalized : addr === normalized
+    );
+    if (match) {
       return { isCEX: true, name: cex };
     }
   }
