@@ -249,7 +249,7 @@ export function useWhaleWebSocket({
     if (!pairs.size) { setBinanceReady(false); return; }
     if (wsRetries.current >= MAX_WS_RECONNECTS) { openWsCircuit(); return; }
 
-    const ws = new WebSocket('wss://stream.binance.com:9443/stream');
+    const ws = new WebSocket('wss://stream.binance.com:9443/ws');
     wsRef.current = ws;
     setBinanceReady(false);
 
@@ -259,9 +259,8 @@ export function useWhaleWebSocket({
       wsRetries.current = 0;
       setReconnectAttempts(0);
       ws.send(JSON.stringify({ method: 'SUBSCRIBE', params: [...pairs].map(p => p.toLowerCase() + '@aggTrade'), id: 1 }));
-      pingInterval.current = setInterval(() => {
-        if (wsRef.current === ws && ws.readyState === 1) ws.send(JSON.stringify({ method: 'ping' }));
-      }, PING_MS);
+      // Binance answers browser-level pings itself; an app-level {method:'ping'}
+      // is an invalid request and gets the socket closed with 1008.
       startWsWatchdog(ws);
     };
 
