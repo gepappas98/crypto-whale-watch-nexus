@@ -30,6 +30,7 @@ import {
 } from '@/lib/whaleRadarState';
 import { handleRateLimit, getActiveCooldowns, onRateLimitChange } from '@/lib/rateLimit';
 import { saveWhaleEvent, initBackendCheck, saveAlert, loadAlerts, toggleAlertPin, savePortfolioEntry, deletePortfolioEntry, loadPortfolio, saveTrackedToken, deleteTrackedToken, loadTracked } from '@/lib/db';
+import { sendPush } from '@/lib/pushBridge';
 import { fillSignalPrices } from '@/lib/signalStore';
 import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
 import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
@@ -198,6 +199,18 @@ export default function WhaleRadarApp() {
   }, []);
 
   // ══ ALERTS (declared before useMarketData so it can inject the alert sink) ═
+  // Throttled auto-push for CRITICAL alerts — server/routes/push.ts's own
+  // comment flagged this as the one deliberate follow-up not bundled with
+  // the push-notification feature itself: "nothing calls this
+  // automatically yet (e.g. on a CRITICAL alert)". Client-side throttle
+  // only (not per-subscriber, not persisted across reloads) — enough to
+  // stop a burst of critical alerts from firing a dozen pushes in a few
+  // seconds. sendPush() is a broadcast no-op when nobody's subscribed, so
+  // an occasional call with zero subscribers just costs one HTTP round
+  // trip, not an error.
+  const lastCriticalPushRef = useRef(0);
+  const CRITICAL_PUSH_MIN_GAP_MS = 60_000;
+
   const addAlert = useCallback((level: AlertItem['level'], tag: string, text: string, sizing?: string) => {
     const tc = level === 'critical' ? 'C' : level === 'high' ? 'H' : level === 'medium' ? 'M' : 'I';
     const newItem: AlertItem = { ts: Date.now(), level, tag, text, tc, sizing, pinned: false };
@@ -210,6 +223,11 @@ export default function WhaleRadarApp() {
       if (dbId == null) return;
       setAlerts(prev => prev.map(a => (a.ts === newItem.ts ? { ...a, dbId } : a)));
     }).catch(() => {});
+
+    if (level === 'critical' && Date.now() - lastCriticalPushRef.current > CRITICAL_PUSH_MIN_GAP_MS) {
+      lastCriticalPushRef.current = Date.now();
+      sendPush({ title: `🚨 ${tag}`, body: text.slice(0, 160), tag: 'whale-radar-critical', url: '/' }).catch(() => {});
+    }
   }, []);
 
   // ══ SCAN ENGINE (extracted to useMarketData hook) ═════════════════════════
