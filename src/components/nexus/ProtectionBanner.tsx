@@ -2,7 +2,7 @@ import { ShieldAlert, Unlock } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useProtections } from "@/hooks/useProtections";
-import { clearLock, type ProtectionLock } from "@/lib/nexus/protections";
+import { clearLock, clearAllLocks, type ProtectionLock } from "@/lib/nexus/protections";
 
 const SOURCE_LABEL: Record<ProtectionLock["source"], string> = {
   cooldown: "Cooldown",
@@ -28,9 +28,28 @@ export function ProtectionBanner() {
 
   return (
     <Card className="p-3 border-yellow-500/40 bg-yellow-500/5 space-y-2">
-      <div className="flex items-center gap-2 text-xs font-semibold text-yellow-500">
-        <ShieldAlert className="w-4 h-4" />
-        Protection engine has blocked {locks.length} scope{locks.length > 1 ? "s" : ""} from trading
+      <div className="flex items-center justify-between gap-2 text-xs font-semibold text-yellow-500">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="w-4 h-4" />
+          Protection engine has blocked {locks.length} scope{locks.length > 1 ? "s" : ""} from trading
+        </div>
+        {/* clearAllLocks() already existed in protections.ts with no caller —
+         *  only per-lock Clear was wired below. With several locks active at
+         *  once (e.g. a MaxDrawdown ALL-PAIRS lock plus a few per-pair
+         *  cooldowns) clearing them one at a time was the only option. */}
+        {locks.length > 1 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 shrink-0 text-yellow-500 hover:text-yellow-400"
+            onClick={() => {
+              clearAllLocks();
+              refresh();
+            }}
+          >
+            <Unlock className="w-3 h-3 mr-1" /> Clear All
+          </Button>
+        )}
       </div>
       <div className="space-y-1.5">
         {locks.map((lock, i) => (
