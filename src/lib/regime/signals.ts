@@ -1,0 +1,333 @@
+/* ══ REGIME ENGINE — signal collection ═════════════════════════════════════
+ *  Every input here is real, already-available market data. Nothing is
+ *  invented or simulated: if an upstream read fails, the signal's score is
+ *  null and it drops out of the weighted average instead of faking neutral.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+import { proxied } from '@/lib/binanceProxy';
+import type { RegimeSignal } from './types';
+
+const clamp = (v: number, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, v));
+
+async function getJson<T>(url: string, timeoutMs = 12_000): Promise<T | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(proxied(url), { signal: ctrl.signal, headers: { accept: 'application/json' } });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function ema(values: number[], period: number): number[] {
+  const k = 2 / (period + 1);
+  const out: number[] = [];
+  let prev = values[0];
+  for (let i = 0; i < values.length; i++) {
+    prev = i === 0 ? values[0] : values[i] * k + prev * (1 - k);
+    out.push(prev);
+  }
+  return out;
+}
+
+const pct = (n: number, d = 1) => `${n >= 0 ? '+' : ''}${n.toFixed(d)}%`;
+
+/* ── BTC trend + momentum (daily closes) ─────────────────────────────────── */
+async function btcTrendSignals(): Promise<RegimeSignal[]> {
+  const raw = await getJson<unknown[][]>('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=260');
+  const closes = (raw ?? []).map((c) => Number(c[4])).filter(Number.isFinite);
+  if (closes.length < 60) {
+    return [
+      { id: 'btc_trend', label: 'BTC trend (EMA50/200)', score: null, value: '—', detail: 'BTC daily candles unavailable' },
+      { id: 'btc_momentum', label: 'BTC momentum (EMA50 slope)', score: null, value: '—', detail: 'BTC daily candles unavailable' },
+    ];
+  }
+  const price = closes[closes.length - 1];
+  const e50 = ema(closes, 50);
+  const e200 = closes.length >= 200 ? ema(closes, 200) : null;
+  const ema50 = e50[e50.length - 1];
+  const ema200 = e200 ? e200[e200.length - 1] : null;
+  const distPct = (price / ema50 - 1) * 100;
+  const cross = ema200 == null ? 0 : ema50 > ema200 ? 1 : -1;
+  const trendScore = clamp(0.6 * clamp(distPct / 6) + 0.4 * cross);
+
+  const slopeRef = e50[Math.max(0, e50.length - 11)];
+  const slopePct = (ema50 / slopeRef - 1) * 100;
+
+  return [
+    {
+      id: 'btc_trend',
+      label: 'BTC trend (EMA50/200)',
+      score: trendScore,
+      value: `${pct(distPct)} vs EMA50`,
+      detail:
+        ema200 == null
+          ? `BTC is ${pct(distPct)} from its 50-day EMA (200-day history incomplete)`
+          : `BTC is ${pct(distPct)} from its 50-day EMA and the 50 EMA is ${ema50 > ema200 ? 'above' : 'below'} the 200 EMA`,
+    },
+    {
+      id: 'btc_momentum',
+      label: 'BTC momentum (EMA50 slope)',
+      score: clamp(slopePct / 3),
+      value: `${pct(slopePct, 2)} / 10d`,
+      detail: `The 50-day EMA itself has moved ${pct(slopePct, 2)} over the last 10 days`,
+    },
+  ];
+}
+
+/* ── Derivatives: open interest rate-of-change + funding ─────────────────── */
+async function derivativeSignals(): Promise<RegimeSignal[]> {
+  const [oi, prem] = await Promise.all([
+    getJson<{ sumOpenInterest: string }[]>(
+      'https://fapi.binance.com/futures/data/openInterestHist?symbol=BTCUSDT&period=1h&limit=24',
+    ),
+    getJson<{ lastFundingRate: string }>('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT'),
+  ]);
+
+  let oiSignal: RegimeSignal = {
+    id: 'oi_roc',
+    label: 'Open interest (24h ROC)',
+    score: null,
+    value: '—',
+    detail: 'Binance futures open-interest history unavailable',
+  };
+  if (oi && oi.length >= 2) {
+    const first = Number(oi[0].sumOpenInterest);
+    const last = Number(oi[oi.length - 1].sumOpenInterest);
+    if (first > 0 && Number.isFinite(last)) {
+      const roc = (last / first - 1) * 100;
+      oiSignal = {
+        id: 'oi_roc',
+        label: 'Open interest (24h ROC)',
+        score: clamp(roc / 6),
+        value: pct(roc),
+        detail: `BTC perp open interest is ${roc >= 0 ? 'building' : 'unwinding'} — ${pct(roc)} over 24h`,
+      };
+    }
+  }
+
+  let fundSignal: RegimeSignal = {
+    id: 'funding',
+    label: 'Funding rate',
+    score: null,
+    value: '—',
+    detail: 'Binance futures funding rate unavailable',
+  };
+  if (prem) {
+    const rate = Number(prem.lastFundingRate) * 100; // percent per 8h
+    if (Number.isFinite(rate)) {
+      // Mildly positive funding is healthy trend participation; extreme
+      // positive is crowded leverage, which reads late-cycle, not bullish.
+      const score = rate <= 0 ? clamp(rate / 0.02) : rate <= 0.03 ? clamp(rate / 0.03) : clamp(1 - (rate - 0.03) / 0.04);
+      fundSignal = {
+        id: 'funding',
+        label: 'Funding rate',
+        score,
+        value: `${rate.toFixed(4)}%/8h`,
+        detail:
+          rate > 0.05
+            ? `Funding at ${rate.toFixed(4)}%/8h — longs are crowded and paying up (late-cycle read)`
+            : rate < 0
+              ? `Funding is negative (${rate.toFixed(4)}%/8h) — shorts are paying, positioning is bearish`
+              : `Funding at ${rate.toFixed(4)}%/8h — healthy long participation without crowding`,
+      };
+    }
+  }
+
+  return [oiSignal, fundSignal];
+}
+
+/* ── Aggressive spot flow on BTC (taker buy vs sell notional) ────────────── */
+async function aggressiveFlowSignal(): Promise<RegimeSignal> {
+  const trades = await getJson<{ p: string; q: string; m: boolean }[]>(
+    'https://api.binance.com/api/v3/aggTrades?symbol=BTCUSDT&limit=1000',
+  );
+  if (!trades || trades.length < 50) {
+    return {
+      id: 'aggressive_flow',
+      label: 'Aggressive BTC flow',
+      score: null,
+      value: '—',
+      detail: 'Binance aggregate trades unavailable',
+    };
+  }
+  let buy = 0;
+  let sell = 0;
+  for (const t of trades) {
+    const usd = Number(t.p) * Number(t.q);
+    if (!Number.isFinite(usd)) continue;
+    if (t.m) sell += usd;
+    else buy += usd;
+  }
+  const total = buy + sell;
+  if (total <= 0) {
+    return { id: 'aggressive_flow', label: 'Aggressive BTC flow', score: null, value: '—', detail: 'No trade notional' };
+  }
+  const imbalance = (buy - sell) / total;
+  return {
+    id: 'aggressive_flow',
+    label: 'Aggressive BTC flow',
+    score: clamp(imbalance * 4),
+    value: `${(imbalance * 100).toFixed(1)}% ${imbalance >= 0 ? 'buy' : 'sell'}`,
+    detail: `Market-order flow on BTC is ${Math.abs(imbalance * 100).toFixed(1)}% skewed to the ${imbalance >= 0 ? 'buy' : 'sell'} side over the last 1000 trades`,
+  };
+}
+
+/* ── Fear & Greed (level + rate of change) ───────────────────────────────── */
+async function sentimentSignals(): Promise<RegimeSignal[]> {
+  const fng = await getJson<{ data?: { value: string }[] }>('https://api.alternative.me/fng/?limit=8');
+  const series = (fng?.data ?? []).map((d) => Number(d.value)).filter(Number.isFinite);
+  if (!series.length) {
+    return [
+      { id: 'fng_level', label: 'Fear & Greed level', score: null, value: '—', detail: 'Fear & Greed index unavailable' },
+      { id: 'fng_roc', label: 'Fear & Greed 7d change', score: null, value: '—', detail: 'Fear & Greed index unavailable' },
+    ];
+  }
+  const now = series[0];
+  // Greed is bullish up to a point; extreme greed (>80) is a late-cycle read.
+  const level = now <= 50 ? (now - 50) / 50 : now <= 80 ? (now - 50) / 30 : clamp(1 - (now - 80) / 12);
+  const prev = series[series.length - 1];
+  const roc = now - prev;
+
+  return [
+    {
+      id: 'fng_level',
+      label: 'Fear & Greed level',
+      score: clamp(level),
+      value: String(now),
+      detail:
+        now > 80
+          ? `Fear & Greed at ${now} — extreme greed, historically a late-cycle condition`
+          : `Fear & Greed at ${now} (${now >= 50 ? 'greed' : 'fear'} side of neutral)`,
+    },
+    {
+      id: 'fng_roc',
+      label: 'Fear & Greed 7d change',
+      score: clamp(roc / 20),
+      value: `${roc >= 0 ? '+' : ''}${roc.toFixed(0)} pts`,
+      detail: `Sentiment has moved ${roc >= 0 ? 'up' : 'down'} ${Math.abs(roc).toFixed(0)} points over ~7 days (${prev} → ${now})`,
+    },
+  ];
+}
+
+/* ── BTC dominance trend (needs its own local history) ───────────────────── */
+const DOM_KEY = 'wr_regime_dominance_history';
+type DomPoint = { ts: number; dom: number };
+
+function readDomHistory(): DomPoint[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DOM_KEY) ?? '[]') as DomPoint[];
+    return Array.isArray(raw) ? raw.filter((p) => typeof p?.dom === 'number') : [];
+  } catch {
+    return [];
+  }
+}
+
+async function dominanceSignal(): Promise<RegimeSignal> {
+  const global = await getJson<{ data?: { market_cap_percentage?: Record<string, number> } }>(
+    'https://api.coingecko.com/api/v3/global',
+  );
+  const dom = global?.data?.market_cap_percentage?.btc;
+  if (typeof dom !== 'number') {
+    return { id: 'btc_dominance', label: 'BTC dominance trend', score: null, value: '—', detail: 'CoinGecko global data unavailable' };
+  }
+
+  const cutoff = Date.now() - 7 * 24 * 3_600_000;
+  const history = [...readDomHistory().filter((p) => p.ts > cutoff), { ts: Date.now(), dom }].slice(-500);
+  try {
+    localStorage.setItem(DOM_KEY, JSON.stringify(history));
+  } catch {
+    /* ignore */
+  }
+
+  // Compare against the oldest point at least 6h old; until we have one, the
+  // signal is honestly unavailable rather than a guessed zero.
+  const ref = history.find((p) => Date.now() - p.ts >= 6 * 3_600_000);
+  if (!ref) {
+    return {
+      id: 'btc_dominance',
+      label: 'BTC dominance trend',
+      score: null,
+      value: `${dom.toFixed(2)}%`,
+      detail: 'Building dominance history — needs 6h of samples before it can read a trend',
+    };
+  }
+  const delta = dom - ref.dom;
+  return {
+    id: 'btc_dominance',
+    label: 'BTC dominance trend',
+    score: clamp(-delta / 1.5),
+    value: `${dom.toFixed(2)}% (${delta >= 0 ? '+' : ''}${delta.toFixed(2)})`,
+    detail: `BTC dominance is ${delta <= 0 ? 'falling' : 'rising'} (${delta >= 0 ? '+' : ''}${delta.toFixed(2)} pts) — capital is rotating ${delta <= 0 ? 'into alts' : 'back into BTC'}`,
+  };
+}
+
+/* ── Local inputs: breadth + whale flow (already in the app's own state) ─── */
+export interface LocalInputs {
+  /** Live scanner rows — used for market breadth. */
+  coins: { change: number }[];
+  /** Live whale feed — used for the whale buy/sell notional ratio. */
+  whales: { side: string; usdt: number; ts: number }[];
+}
+
+function breadthSignal(coins: LocalInputs['coins']): RegimeSignal {
+  const usable = coins.filter((c) => Number.isFinite(c.change));
+  if (usable.length < 10) {
+    return { id: 'breadth', label: 'Market breadth', score: null, value: '—', detail: 'Not enough scanned assets yet' };
+  }
+  const up = usable.filter((c) => c.change > 0).length;
+  const share = (up / usable.length) * 100;
+  return {
+    id: 'breadth',
+    label: 'Market breadth',
+    score: clamp((share - 50) / 25),
+    value: `${share.toFixed(0)}% up`,
+    detail: `${up} of ${usable.length} tracked assets are green on 24h — participation is ${share >= 60 ? 'broad' : share >= 45 ? 'mixed' : 'narrow'}`,
+  };
+}
+
+function whaleFlowSignal(whales: LocalInputs['whales']): RegimeSignal {
+  const cutoff = Date.now() - 60 * 60_000;
+  const recent = whales.filter((w) => w.ts >= cutoff && Number.isFinite(w.usdt));
+  if (recent.length < 8) {
+    return { id: 'whale_flow', label: 'Whale buy/sell flow', score: null, value: '—', detail: 'Too few whale trades in the last hour' };
+  }
+  let buy = 0;
+  let sell = 0;
+  for (const w of recent) (w.side?.toUpperCase() === 'BUY' ? (buy += w.usdt) : (sell += w.usdt));
+  const total = buy + sell;
+  if (total <= 0) {
+    return { id: 'whale_flow', label: 'Whale buy/sell flow', score: null, value: '—', detail: 'No whale notional in window' };
+  }
+  const imbalance = (buy - sell) / total;
+  return {
+    id: 'whale_flow',
+    label: 'Whale buy/sell flow',
+    score: clamp(imbalance * 3),
+    value: `${(imbalance * 100).toFixed(0)}% ${imbalance >= 0 ? 'buy' : 'sell'}`,
+    detail: `Whale prints in the last hour are ${Math.abs(imbalance * 100).toFixed(0)}% skewed to the ${imbalance >= 0 ? 'accumulation' : 'distribution'} side across ${recent.length} trades`,
+  };
+}
+
+/** Collect every regime signal for one tick. Never throws. */
+export async function collectSignals(local: LocalInputs): Promise<RegimeSignal[]> {
+  const [trend, derivs, aggressive, sentiment, dominance] = await Promise.all([
+    btcTrendSignals(),
+    derivativeSignals(),
+    aggressiveFlowSignal(),
+    sentimentSignals(),
+    dominanceSignal(),
+  ]);
+  return [
+    ...trend,
+    breadthSignal(local.coins),
+    whaleFlowSignal(local.whales),
+    aggressive,
+    ...derivs,
+    ...sentiment,
+    dominance,
+  ];
+}
