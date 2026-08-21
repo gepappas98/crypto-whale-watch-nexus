@@ -1,0 +1,141 @@
+/* ══ REGIME ENGINE — scoring, classification, persistence ══════════════════ */
+import type { RegimeName, RegimeReading, RegimeSignal, RegimeSnapshot, RegimeWeights } from './types';
+
+const HISTORY_KEY = 'wr_regime_history';
+const MAX_HISTORY = 400;
+/** A regime must hold across this many consecutive snapshots before it is
+ *  "confirmed" — the single-spike false-positive suppressor. */
+export const PERSISTENCE_SNAPSHOTS = 3;
+
+export function scoreOf(signals: RegimeSignal[], weights: RegimeWeights): { score: number; active: number; agreeing: number } {
+  let wSum = 0;
+  let acc = 0;
+  let active = 0;
+  for (const s of signals) {
+    if (s.score == null) continue;
+    const w = weights[s.id] ?? 0;
+    if (w <= 0) continue;
+    wSum += w;
+    acc += w * s.score;
+    active++;
+  }
+  const norm = wSum > 0 ? acc / wSum : 0;
+  const score = Math.round(Math.max(0, Math.min(100, 50 + norm * 50)));
+  const dir = norm >= 0 ? 1 : -1;
+  const agreeing = signals.filter((s) => s.score != null && (weights[s.id] ?? 0) > 0 && s.score * dir > 0.2).length;
+  return { score, active, agreeing };
+}
+
+export function classify(score: number, acceleration: number | null): RegimeName {
+  if (score >= 68 && acceleration != null && acceleration <= -4) return 'DISTRIBUTION';
+  if (score >= 82) return 'LATE BULL';
+  if (score >= 68) return 'BULL';
+  if (score >= 57) return 'EARLY BULL';
+  if (score >= 43) return 'NEUTRAL';
+  if (score >= 28) return 'RECOVERY';
+  return 'BEAR';
+}
+
+export const REGIME_COLORS: Record<RegimeName, string> = {
+  BEAR: 'text-wr-red',
+  RECOVERY: 'text-wr-amber',
+  NEUTRAL: 'text-wr-muted',
+  'EARLY BULL': 'text-wr-cyan',
+  BULL: 'text-wr-green',
+  'LATE BULL': 'text-wr-amber',
+  DISTRIBUTION: 'text-wr-red',
+};
+
+function readHistory(): RegimeSnapshot[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]') as RegimeSnapshot[];
+    return Array.isArray(raw) ? raw.filter((s) => typeof s?.score === 'number') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeHistory(history: RegimeSnapshot[]) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-MAX_HISTORY)));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getHistory(): RegimeSnapshot[] {
+  return readHistory();
+}
+
+function deltaOver(history: RegimeSnapshot[], current: RegimeSnapshot, ms: number): number | null {
+  const target = current.ts - ms;
+  // Oldest snapshot at or before the target — null if history isn't deep enough
+  // yet, rather than comparing against a window we don't actually have.
+  const ref = [...history].reverse().find((s) => s.ts <= target);
+  return ref ? current.score - ref.score : null;
+}
+
+function buildReasons(reading: Omit<RegimeReading, 'reasons'>): string[] {
+  const dir = reading.score >= 50 ? 1 : -1;
+  const contributing = reading.signals
+    .filter((s) => s.score != null && s.score * dir > 0.2)
+    .sort((a, b) => Math.abs(b.score ?? 0) - Math.abs(a.score ?? 0))
+    .slice(0, 5)
+    .map((s) => s.detail);
+
+  const head = `${reading.agreeing} of ${reading.active} live signals agree on a ${dir > 0 ? 'bullish' : 'bearish'} read (score ${reading.score}/100).`;
+  const persistence =
+    reading.confirmedRegime
+      ? `${reading.regime} has held for ${reading.heldSnapshots} consecutive checks — treated as confirmed.`
+      : `${reading.regime} has only held for ${reading.heldSnapshots} check${reading.heldSnapshots === 1 ? '' : 's'} — not confirmed yet, so it can't raise alert severity on its own.`;
+  const accel =
+    reading.acceleration == null
+      ? 'Not enough history yet to read acceleration.'
+      : `Regime score is moving ${reading.acceleration >= 0 ? '+' : ''}${reading.acceleration.toFixed(1)} pts/hour.`;
+
+  return [head, persistence, accel, ...contributing];
+}
+
+/** Score a fresh set of signals, append it to persisted history, and return the
+ *  full reading (deltas, acceleration, confirmed regime, trigger reasons). */
+export function evaluate(signals: RegimeSignal[], weights: RegimeWeights): RegimeReading {
+  const history = readHistory();
+  const { score, active, agreeing } = scoreOf(signals, weights);
+  const ts = Date.now();
+
+  const provisional: RegimeSnapshot = { ts, score, regime: 'NEUTRAL', agreeing, active, signals };
+  const d30 = deltaOver(history, provisional, 30 * 60_000);
+  const acceleration = d30 == null ? null : d30 * 2; // pts per hour from the 30m window
+
+  const regime = classify(score, acceleration);
+  const snapshot: RegimeSnapshot = { ...provisional, regime };
+
+  const next = [...history, snapshot];
+  writeHistory(next);
+
+  let held = 1;
+  for (let i = next.length - 2; i >= 0; i--) {
+    if (next[i].regime === regime) held++;
+    else break;
+  }
+
+  const base: Omit<RegimeReading, 'reasons'> = {
+    ...snapshot,
+    delta5m: deltaOver(history, snapshot, 5 * 60_000),
+    delta30m: d30,
+    delta2h: deltaOver(history, snapshot, 2 * 3_600_000),
+    acceleration,
+    confirmedRegime: held >= PERSISTENCE_SNAPSHOTS ? regime : null,
+    heldSnapshots: held,
+  };
+
+  return { ...base, reasons: buildReasons(base) };
+}
+
+export function clearHistory() {
+  try {
+    localStorage.removeItem(HISTORY_KEY);
+  } catch {
+    /* ignore */
+  }
+}
