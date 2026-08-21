@@ -4,6 +4,7 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 import type { CoinData, WhaleTrade } from '@/lib/whaleRadarState';
 import type { CouncilContext } from '@/types/council';
+import type { RegimeReading } from '@/lib/regime/types';
 
 export function getCeoSignalLabel(score: number, threat: string, category: string | null, vmcap: number): string {
   if (threat === 'CRITICAL' && (category === 'WASH' || vmcap > 800)) return 'AVOID — wash/manipulation';
@@ -23,6 +24,7 @@ export function buildCouncilContext(
   opts: {
     whaleTrades?: WhaleTrade[];
     hyperliquid?: { fundingRate?: number; openInterest?: number; markPrice?: number } | null;
+    regime?: RegimeReading | null;
   } = {},
 ): CouncilContext {
   const sym = (coin.symbol || '').toUpperCase();
@@ -61,5 +63,16 @@ export function buildCouncilContext(
     hyperliquid: opts.hyperliquid ?? null,
     recentWhaleTrades: trades,
     isSol: coin.isSol,
+    regime: opts.regime
+      ? {
+          score: opts.regime.score,
+          regime: opts.regime.regime,
+          confirmedRegime: opts.regime.confirmedRegime,
+          heldSnapshots: opts.regime.heldSnapshots,
+          agreeing: opts.regime.agreeing,
+          active: opts.regime.active,
+          reasons: opts.regime.reasons,
+        }
+      : null,
   };
 }
