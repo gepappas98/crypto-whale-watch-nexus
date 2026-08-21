@@ -16,6 +16,12 @@ function signalTone(s: RegimeSignal) {
   return 'text-wr-amber';
 }
 
+function barColor(score: number) {
+  if (score >= 57) return 'hsl(var(--wr-green))';
+  if (score >= 43) return 'hsl(var(--wr-amber))';
+  return 'hsl(var(--wr-red))';
+}
+
 function Delta({ label, value }: { label: string; value: number | null }) {
   return (
     <span className="text-[9px] tracking-widest">
@@ -26,6 +32,8 @@ function Delta({ label, value }: { label: string; value: number | null }) {
     </span>
   );
 }
+
+const BTN = 'text-[9px] tracking-widest border border-wr-border px-2 py-0.5 text-wr-muted hover:text-wr-cyan';
 
 export function RegimePanel({ coins, whales }: RegimePanelProps) {
   const local = useMemo(() => ({ coins, whales }), [coins, whales]);
@@ -38,29 +46,30 @@ export function RegimePanel({ coins, whales }: RegimePanelProps) {
 
   return (
     <section aria-label="Market regime" className="border-b border-wr-border bg-wr-bg2">
-      <div className="flex flex-wrap items-center gap-3 px-4 py-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
         <span className="text-[9px] tracking-widest text-wr-muted">🧠 REGIME</span>
         <span className={`text-sm font-bold tracking-widest ${regimeColor}`}>
           {reading ? reading.regime : loading ? 'READING…' : '—'}
         </span>
-        <span className="text-[10px] text-wr-muted">
-          {reading ? `${reading.score}/100` : ''}
-        </span>
+        <span className="text-[10px] text-wr-muted">{reading ? `${reading.score}/100` : ''}</span>
+
         {reading && (
           <span
-            className={`text-[9px] tracking-widest px-1.5 py-0.5 border ${
-              reading.confirmedRegime ? 'border-wr-green/50 text-wr-green' : 'border-wr-amber/50 text-wr-amber'
-            }`}
+            className={`text-[9px] tracking-widest px-1.5 py-0.5 border border-wr-border ${reading.confirmedRegime ? 'text-wr-green' : 'text-wr-amber'}`}
             title={`A regime must hold ${PERSISTENCE_SNAPSHOTS} consecutive checks before it counts as confirmed`}
           >
-            {reading.confirmedRegime ? `CONFIRMED ×${reading.heldSnapshots}` : `UNCONFIRMED ${reading.heldSnapshots}/${PERSISTENCE_SNAPSHOTS}`}
+            {reading.confirmedRegime
+              ? `CONFIRMED ×${reading.heldSnapshots}`
+              : `UNCONFIRMED ${reading.heldSnapshots}/${PERSISTENCE_SNAPSHOTS}`}
           </span>
         )}
+
         {reading && (
           <span className="text-[9px] tracking-widest text-wr-cyan" title="Independent signals agreeing with the dominant direction">
             ⛓ {reading.agreeing}/{reading.active} AGREE
           </span>
         )}
+
         {reading && (
           <span className="flex items-center gap-2">
             <Delta label="5m" value={reading.delta5m} />
@@ -74,33 +83,25 @@ export function RegimePanel({ coins, whales }: RegimePanelProps) {
             {spark.map((s) => (
               <span
                 key={s.ts}
-                className={`w-[3px] ${s.score >= 57 ? 'bg-wr-green' : s.score >= 43 ? 'bg-wr-amber' : 'bg-wr-red'}`}
-                style={{ height: `${Math.max(2, (s.score / 100) * 16)}px` }}
+                className="w-[3px]"
+                style={{ height: `${Math.max(2, (s.score / 100) * 16)}px`, background: barColor(s.score) }}
               />
             ))}
           </span>
         )}
 
         <div className="flex-1" />
-        <button
-          onClick={() => refresh()}
-          aria-label="Re-read market regime now"
-          className="text-[9px] tracking-widest text-wr-muted hover:text-wr-cyan border border-wr-border px-2 py-0.5"
-        >
+        <button onClick={() => refresh()} aria-label="Re-read market regime now" className={BTN}>
           {loading ? '…' : '↻'}
         </button>
-        <button
-          onClick={() => setTuning((p) => !p)}
-          aria-label="Tune regime signal weights"
-          className="text-[9px] tracking-widest text-wr-muted hover:text-wr-cyan border border-wr-border px-2 py-0.5"
-        >
+        <button onClick={() => setTuning((p) => !p)} aria-label="Tune regime signal weights" className={BTN}>
           ⚖ WEIGHTS
         </button>
         <button
           onClick={() => setOpen((p) => !p)}
           aria-expanded={open}
           aria-label="Show why the regime reads this way"
-          className="text-[9px] tracking-widest text-wr-cyan hover:text-wr-green border border-wr-cyan/40 px-2 py-0.5"
+          className="text-[9px] tracking-widest border border-wr-border px-2 py-0.5 text-wr-cyan hover:text-wr-green"
         >
           {open ? 'HIDE WHY' : 'WHY?'}
         </button>
@@ -112,7 +113,7 @@ export function RegimePanel({ coins, whales }: RegimePanelProps) {
             <h2 className="text-[9px] tracking-widest text-wr-muted mb-1">WHY THIS READING</h2>
             <ul className="space-y-1">
               {reading.reasons.map((r, i) => (
-                <li key={i} className="text-[10px] text-wr-text leading-snug">• {r}</li>
+                <li key={i} className="text-[10px] text-wr-white leading-snug">• {r}</li>
               ))}
             </ul>
           </div>
@@ -134,15 +135,10 @@ export function RegimePanel({ coins, whales }: RegimePanelProps) {
       )}
 
       {tuning && (
-        <div className="px-4 pb-3 border-t border-wr-border/50 pt-2">
+        <div className="px-4 pb-3 border-t border-wr-border pt-2">
           <div className="flex items-center gap-2 mb-2">
             <h2 className="text-[9px] tracking-widest text-wr-muted">SIGNAL WEIGHTS (rescores instantly)</h2>
-            <button
-              onClick={restoreDefaults}
-              className="text-[9px] tracking-widest text-wr-amber hover:text-wr-cyan border border-wr-border px-2 py-0.5"
-            >
-              RESET
-            </button>
+            <button onClick={restoreDefaults} className={BTN}>RESET</button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
             {SIGNAL_ORDER.map((id) => (
@@ -157,7 +153,7 @@ export function RegimePanel({ coins, whales }: RegimePanelProps) {
                   step={1}
                   value={weights[id]}
                   onChange={(e) => setWeights({ ...weights, [id]: Number(e.target.value) })}
-                  className="flex-1 accent-wr-cyan"
+                  className="flex-1"
                   aria-label={`Weight for ${id}`}
                 />
                 <span className="text-wr-cyan w-6 text-right">{weights[id]}</span>
