@@ -13,6 +13,7 @@ import { WRModal } from '@/components/whale-radar/WRModal';
 import { WRKeyboardHelp } from '@/components/whale-radar/WRKeyboardHelp';
 import { WRAlertBell } from '@/components/whale-radar/WRAlertBell';
 import { WRCoinGeckoStatus } from '@/components/whale-radar/WRCoinGeckoStatus';
+import { RegimePanel } from '@/components/regime/RegimePanel';
 import { WRMobileFilterSheet } from '@/components/whale-radar/WRMobileFilterSheet';
 import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
 import { useWhaleStream, type StreamSignal } from '@/hooks/useWhaleStream';
