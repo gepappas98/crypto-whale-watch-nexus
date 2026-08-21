@@ -14,6 +14,7 @@ import { WRKeyboardHelp } from '@/components/whale-radar/WRKeyboardHelp';
 import { WRAlertBell } from '@/components/whale-radar/WRAlertBell';
 import { WRCoinGeckoStatus } from '@/components/whale-radar/WRCoinGeckoStatus';
 import { RegimePanel } from '@/components/regime/RegimePanel';
+import { useRegimeEngine } from '@/hooks/useRegimeEngine';
 import { WRMobileFilterSheet } from '@/components/whale-radar/WRMobileFilterSheet';
 import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
 import { useWhaleStream, type StreamSignal } from '@/hooks/useWhaleStream';
@@ -246,6 +247,20 @@ export default function WhaleRadarApp() {
     getAlertLocks,
     lastFiltered,
   } = useMarketData({ apiKey, getBirdKey, addAlert });
+
+  // ══ REGIME ENGINE — lifted here (not owned by RegimePanel) so the same
+  // reading can also feed the AI Council's REGIME DESK agent below without
+  // running collectSignals() a second time. ═══════════════════════════════
+  const regimeLocal = useMemo(() => ({ coins, whales: whaleFeed }), [coins, whaleFeed]);
+  const {
+    reading: regimeReading,
+    history: regimeHistory,
+    weights: regimeWeights,
+    setWeights: setRegimeWeights,
+    restoreDefaults: restoreRegimeDefaults,
+    loading: regimeLoading,
+    refresh: refreshRegime,
+  } = useRegimeEngine(regimeLocal);
 
   // ══ ALERT COOLDOWN STATUS (polled — module-level state, not reactive) ═════
   const [alertLocks, setAlertLocks] = useState<ReturnType<typeof getAlertLocks>>([]);
@@ -607,7 +622,16 @@ export default function WhaleRadarApp() {
 
       <WRTicker coins={coins.slice(0, 30)} />
 
-      <RegimePanel coins={coins} whales={whaleFeed} addAlert={addAlert} />
+      <RegimePanel
+        reading={regimeReading}
+        history={regimeHistory}
+        weights={regimeWeights}
+        setWeights={setRegimeWeights}
+        restoreDefaults={restoreRegimeDefaults}
+        loading={regimeLoading}
+        refresh={refreshRegime}
+        addAlert={addAlert}
+      />
 
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] flex-1 min-h-0">
@@ -694,6 +718,7 @@ export default function WhaleRadarApp() {
         <WRCouncilPanel
           coin={councilCoin}
           whaleTrades={whaleFeed}
+          regime={regimeReading}
           llm={councilLlm}
           onClose={() => setCouncilCoin(null)}
         />
