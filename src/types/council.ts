@@ -37,6 +37,7 @@ export type AgentId =
   | 'bull'
   | 'bear'
   | 'quant'
+  | 'regime'
   | 'risk'
   | 'trader'
   | 'pm';
@@ -53,6 +54,7 @@ export const AGENT_META: Record<AgentId, AgentMeta> = {
   bull: { id: 'bull', label: 'BULL RESEARCHER', role: 'Long thesis', color: 'text-wr-green', glyph: '▲' },
   bear: { id: 'bear', label: 'BEAR RESEARCHER', role: 'Short / risk thesis', color: 'text-wr-red', glyph: '▼' },
   quant: { id: 'quant', label: 'QUANT DESK', role: 'Orderflow · derivatives positioning', color: 'text-wr-blue', glyph: '∑' },
+  regime: { id: 'regime', label: 'REGIME DESK', role: 'What regime are we in · what invalidates it', color: 'text-wr-purple', glyph: '◈' },
   risk: { id: 'risk', label: 'RISK DESK', role: 'Aggressive · Neutral · Conservative', color: 'text-wr-amber', glyph: '⚖' },
   trader: { id: 'trader', label: 'TRADER AGENT', role: 'Execution synthesis', color: 'text-wr-cyan', glyph: '⌁' },
   pm: { id: 'pm', label: 'PORTFOLIO MANAGER', role: 'Final verdict · memory', color: 'text-wr-purple', glyph: '★' },
@@ -64,8 +66,8 @@ export const AGENT_META: Record<AgentId, AgentMeta> = {
  *  authority on which agents run; this is display-only. */
 export const DEPTH_AGENTS: Record<CouncilDepth, AgentId[]> = {
   quick: ['bull', 'bear', 'pm'],
-  standard: ['bull', 'bear', 'risk', 'trader', 'pm'],
-  deep: ['bull', 'bear', 'quant', 'risk', 'trader', 'pm'],
+  standard: ['bull', 'bear', 'regime', 'risk', 'trader', 'pm'],
+  deep: ['bull', 'bear', 'quant', 'regime', 'risk', 'trader', 'pm'],
 };
 
 export interface AgentMessage {
@@ -104,6 +106,19 @@ export interface CouncilContext {
   hyperliquid?: { fundingRate?: number; openInterest?: number; markPrice?: number } | null;
   recentWhaleTrades: { sym: string; side: string; usdt: number; ex: string; ts: number }[];
   isSol?: boolean;
+  /** Market-wide regime read from the Regime Engine (P0), if available.
+   *  Distinct from per-token whale/manipulation signals above — this is
+   *  what the REGIME DESK agent reads to answer "what regime are we in /
+   *  what would invalidate this" rather than "is this coin bullish". */
+  regime?: {
+    score: number;
+    regime: string;
+    confirmedRegime: string | null;
+    heldSnapshots: number;
+    agreeing: number;
+    active: number;
+    reasons: string[];
+  } | null;
 }
 
 export interface CouncilMemoryEntry {
