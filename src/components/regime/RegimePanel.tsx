@@ -1,12 +1,23 @@
-import { useMemo, useState } from 'react';
-import { useRegimeEngine } from '@/hooks/useRegimeEngine';
+import { useState } from 'react';
 import { REGIME_COLORS, PERSISTENCE_SNAPSHOTS } from '@/lib/regime/engine';
 import { SIGNAL_ORDER } from '@/lib/regime/weights';
-import type { RegimeSignal } from '@/lib/regime/types';
+import type { RegimeReading, RegimeSignal, RegimeSnapshot, RegimeWeights } from '@/lib/regime/types';
 
 interface RegimePanelProps {
-  coins: { change: number }[];
-  whales: { side: string; usdt: number; ts: number }[];
+  /** Lifted to the page so the same reading can also feed the AI Council's
+   *  REGIME DESK agent without a second, duplicate useRegimeEngine poll
+   *  loop — see useRegimeEngine(local) in Index.tsx. */
+  reading: RegimeReading | null;
+  history: RegimeSnapshot[];
+  weights: RegimeWeights;
+  setWeights: (w: RegimeWeights) => void;
+  restoreDefaults: () => void;
+  loading: boolean;
+  refresh: () => void;
+  /** Unused today — kept for the (not-yet-built) regime-change alert
+   *  wiring; useRegimeAlerts.ts currently imports a missing
+   *  '@/lib/regime/regimeAlerts' module, a separate pre-existing gap. */
+  addAlert?: (level: 'high' | 'medium' | 'critical' | 'info', tag: string, text: string, sizing?: string) => void;
 }
 
 function signalTone(s: RegimeSignal) {
@@ -35,9 +46,7 @@ function Delta({ label, value }: { label: string; value: number | null }) {
 
 const BTN = 'text-[9px] tracking-widest border border-wr-border px-2 py-0.5 text-wr-muted hover:text-wr-cyan';
 
-export function RegimePanel({ coins, whales }: RegimePanelProps) {
-  const local = useMemo(() => ({ coins, whales }), [coins, whales]);
-  const { reading, history, weights, setWeights, restoreDefaults, loading, refresh } = useRegimeEngine(local);
+export function RegimePanel({ reading, history, weights, setWeights, restoreDefaults, loading, refresh }: RegimePanelProps) {
   const [open, setOpen] = useState(false);
   const [tuning, setTuning] = useState(false);
 
