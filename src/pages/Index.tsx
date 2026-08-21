@@ -607,7 +607,7 @@ export default function WhaleRadarApp() {
 
       <WRTicker coins={coins.slice(0, 30)} />
 
-      <RegimePanel coins={coins} whales={whaleFeed} />
+      <RegimePanel coins={coins} whales={whaleFeed} addAlert={addAlert} />
 
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] flex-1 min-h-0">
