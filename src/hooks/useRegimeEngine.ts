@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { collectSignals, type LocalInputs } from '@/lib/regime/signals';
-import { evaluate, getHistory } from '@/lib/regime/engine';
+import { evaluate, rescore, getHistory } from '@/lib/regime/engine';
 import { loadWeights, saveWeights, resetWeights } from '@/lib/regime/weights';
 import type { RegimeReading, RegimeSnapshot, RegimeWeights } from '@/lib/regime/types';
 
@@ -49,12 +49,17 @@ export function useRegimeEngine(local: LocalInputs, enabled = true) {
   }, [enabled, run]);
 
   /** Weight changes rescore the current signals immediately — no refetch, so
-   *  tuning stays interactive and doesn't hammer upstream APIs. */
+   *  tuning stays interactive and doesn't hammer upstream APIs. Uses
+   *  rescore(), not evaluate(): a slider fires onChange per pixel dragged,
+   *  and evaluate() persists every call it's given — that would flood the
+   *  history with entries sharing stale signal data on every drag, which
+   *  corrupts the persistence/confirmation count these readings feed. Only
+   *  the real polling tick in run() above should ever persist a reading. */
   const setWeights = useCallback((next: RegimeWeights) => {
     setWeightsState(next);
     saveWeights(next);
     weightsRef.current = next;
-    setReading((prev) => (prev ? evaluate(prev.signals, next) : prev));
+    setReading((prev) => (prev ? rescore(prev.signals, next) : prev));
   }, []);
 
   const restoreDefaults = useCallback(() => {
