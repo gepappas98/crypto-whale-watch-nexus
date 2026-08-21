@@ -5,7 +5,7 @@ import { corsHeaders } from '../_shared/cors.ts';
 const LOVABLE_URL = 'https://ai.gateway.lovable.dev/v1/responses';
 const DEFAULT_MODEL = 'openai/gpt-5.6-sol';
 
-type AgentId = 'bull' | 'bear' | 'quant' | 'risk' | 'trader' | 'pm';
+type AgentId = 'bull' | 'bear' | 'quant' | 'regime' | 'risk' | 'trader' | 'pm';
 
 interface LlmConfig {
   provider?: 'lovable' | 'anthropic' | 'openai' | 'openrouter' | 'groq' | 'custom';
@@ -51,12 +51,12 @@ function resolveBaseUrl(provider: string, baseUrl?: string): string {
 
 const DEPTH_AGENTS: Record<string, AgentId[]> = {
   quick: ['bull', 'bear', 'pm'],
-  standard: ['bull', 'bear', 'risk', 'trader', 'pm'],
+  standard: ['bull', 'bear', 'regime', 'risk', 'trader', 'pm'],
   // 'deep' previously ran the exact same five agents as 'standard' — only
   // the per-agent word limit differed. QUANT gives deep a genuinely
   // distinct roster: a dedicated orderflow/derivatives-positioning read
   // that bull/bear only touch in passing today.
-  deep: ['bull', 'bear', 'quant', 'risk', 'trader', 'pm'],
+  deep: ['bull', 'bear', 'quant', 'regime', 'risk', 'trader', 'pm'],
 };
 
 const LENGTH: Record<string, string> = {
@@ -78,6 +78,8 @@ function agentPrompt(agent: AgentId, depth: string): string {
       return base + ' ROLE: BEAR RESEARCHER. Build the short / do-not-touch case: wash trading, rug vectors, holder concentration, mint/freeze authority, manipulation patterns, thin liquidity, distribution.';
     case 'quant':
       return base + ' ROLE: QUANT DESK. Ignore narrative — read pure orderflow and derivatives positioning: perp funding rate (positive = longs paying shorts, crowded-long tell), open interest trend, and the buy/sell $ imbalance in RECENT WHALE TRADES. State the imbalance ratio and funding number explicitly, then one line on what the positioning implies (squeeze risk, crowded trade, neutral). Say "NO EDGE — insufficient orderflow data" if funding/OI/whale-trade data is too thin to read.';
+    case 'regime':
+      return base + ' ROLE: REGIME DESK. Ignore this token\'s own chart — read the market-WIDE regime block in DESK DATA (score, confirmed regime, held snapshots, agreeing/active signals, reasons). State plainly what regime we are in right now, how long it has held, and — critically — what would INVALIDATE that read (which signal(s) flipping, or the score crossing which threshold, would flip the regime). Then one line on how that regime context should color this specific token\'s setup (e.g. late-bull distribution regime makes an aggressive long riskier even if the token-level signal is strong). Say "REGIME UNAVAILABLE — no market-wide read this tick" if the regime block is missing.';
     case 'risk':
       return base + ' ROLE: RISK DESK. Output three labelled voices that actually disagree: "AGGRESSIVE:", "NEUTRAL:", "CONSERVATIVE:" — each 1-3 sentences on position size and risk, then "RISK DESK CONSENSUS:" with one line.';
     case 'trader':
@@ -110,6 +112,9 @@ function buildBrief(ctx: Record<string, any>, memory: any[]): string {
         .map((t: any) => `${t.side} $${Math.round(t.usdt)} @${t.ex}`)
         .join(', ') || 'none in feed'
     }`,
+    ctx.regime
+      ? `MARKET REGIME: ${ctx.regime.confirmedRegime ?? ctx.regime.regime} (score ${ctx.regime.score}/100, held ${ctx.regime.heldSnapshots} snapshots, ${ctx.regime.agreeing}/${ctx.regime.active} signals agreeing)${ctx.regime.confirmedRegime && ctx.regime.confirmedRegime !== ctx.regime.regime ? ` [live read currently flickering to ${ctx.regime.regime}]` : ''} | REASONS: ${(ctx.regime.reasons ?? []).join(' | ') || 'none'}`
+      : 'MARKET REGIME: unavailable this tick',
   ].filter(Boolean);
 
   if (memory?.length) {
