@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { REGIME_COLORS, PERSISTENCE_SNAPSHOTS } from '@/lib/regime/engine';
 import { SIGNAL_ORDER } from '@/lib/regime/weights';
+import { useRegimeAlerts } from '@/hooks/useRegimeAlerts';
 import type { RegimeReading, RegimeSignal, RegimeSnapshot, RegimeWeights } from '@/lib/regime/types';
+
+const NOOP_ADD_ALERT = () => {};
 
 interface RegimePanelProps {
   /** Lifted to the page so the same reading can also feed the AI Council's
@@ -14,9 +17,10 @@ interface RegimePanelProps {
   restoreDefaults: () => void;
   loading: boolean;
   refresh: () => void;
-  /** Unused today — kept for the (not-yet-built) regime-change alert
-   *  wiring; useRegimeAlerts.ts currently imports a missing
-   *  '@/lib/regime/regimeAlerts' module, a separate pre-existing gap. */
+  /** Wired into useRegimeAlerts below — fires a Telegram/Discord/in-app
+   *  alert only when confirmedRegime actually changes. Optional so the
+   *  panel still renders (alert-free) if a caller doesn't have addAlert
+   *  in scope. */
   addAlert?: (level: 'high' | 'medium' | 'critical' | 'info', tag: string, text: string, sizing?: string) => void;
 }
 
@@ -46,7 +50,8 @@ function Delta({ label, value }: { label: string; value: number | null }) {
 
 const BTN = 'text-[9px] tracking-widest border border-wr-border px-2 py-0.5 text-wr-muted hover:text-wr-cyan';
 
-export function RegimePanel({ reading, history, weights, setWeights, restoreDefaults, loading, refresh }: RegimePanelProps) {
+export function RegimePanel({ reading, history, weights, setWeights, restoreDefaults, loading, refresh, addAlert }: RegimePanelProps) {
+  useRegimeAlerts(reading, addAlert ?? NOOP_ADD_ALERT);
   const [open, setOpen] = useState(false);
   const [tuning, setTuning] = useState(false);
 
