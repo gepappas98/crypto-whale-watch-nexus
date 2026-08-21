@@ -96,10 +96,30 @@ function buildReasons(reading: Omit<RegimeReading, 'reasons'>): string[] {
   return [head, persistence, accel, ...contributing];
 }
 
+/** Score signals against history WITHOUT persisting — used when the read is
+ *  a rescore of already-collected signals (e.g. dragging a weight slider),
+ *  not a genuine new market observation. Persisting every rescore would let
+ *  a single slider drag (an onChange per pixel moved) flood the history
+ *  with near-duplicate entries sharing stale signal data, which corrupts
+ *  both `heldSnapshots`/`confirmedRegime` (the actual false-positive
+ *  suppressor) and the 5m/30m/2h delta windows with entries that don't
+ *  represent real ticks. Reads `history` (immutably) to compute deltas and
+ *  persistence exactly like `evaluate()` does, it just never writes. */
+export function rescore(signals: RegimeSignal[], weights: RegimeWeights): RegimeReading {
+  const history = readHistory();
+  return buildReading(signals, weights, history);
+}
+
 /** Score a fresh set of signals, append it to persisted history, and return the
  *  full reading (deltas, acceleration, confirmed regime, trigger reasons). */
 export function evaluate(signals: RegimeSignal[], weights: RegimeWeights): RegimeReading {
   const history = readHistory();
+  const reading = buildReading(signals, weights, history);
+  writeHistory([...history, reading]);
+  return reading;
+}
+
+function buildReading(signals: RegimeSignal[], weights: RegimeWeights, history: RegimeSnapshot[]): RegimeReading {
   const { score, active, agreeing } = scoreOf(signals, weights);
   const ts = Date.now();
 
@@ -110,12 +130,9 @@ export function evaluate(signals: RegimeSignal[], weights: RegimeWeights): Regim
   const regime = classify(score, acceleration);
   const snapshot: RegimeSnapshot = { ...provisional, regime };
 
-  const next = [...history, snapshot];
-  writeHistory(next);
-
   let held = 1;
-  for (let i = next.length - 2; i >= 0; i--) {
-    if (next[i].regime === regime) held++;
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].regime === regime) held++;
     else break;
   }
 
