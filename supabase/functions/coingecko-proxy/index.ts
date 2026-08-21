@@ -14,6 +14,7 @@ const ALLOWED_HOSTS = new Set([
   'api.binance.com',
   'fapi.binance.com',
   'api.bybit.com',
+  'api.alternative.me',
 ]);
 
 Deno.serve(async (req) => {
