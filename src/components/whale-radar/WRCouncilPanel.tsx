@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AGENT_META, DEPTH_AGENTS, type AgentId, type CouncilDecision, type CouncilDepth, type CouncilMemoryEntry } from '@/types/council';
 import type { CoinData, WhaleTrade } from '@/lib/whaleRadarState';
 import { buildCouncilContext } from '@/lib/council/context';
+import type { RegimeReading } from '@/lib/regime/types';
 import {
   buildReflection,
   computeDeskTrackRecord,
@@ -19,6 +20,10 @@ import {
 interface Props {
   coin: CoinData;
   whaleTrades: WhaleTrade[];
+  /** Current market-wide regime reading (from useRegimeEngine, lifted in
+   *  Index.tsx). Optional/nullable — the council still runs without it,
+   *  the REGIME DESK agent just says so. */
+  regime?: RegimeReading | null;
   llm: CouncilLlmSettings;
   onClose: () => void;
   autoRun?: boolean;
@@ -33,7 +38,7 @@ const VERDICT_CLS: Record<string, string> = {
   AVOID: 'text-wr-red border-wr-red/60 bg-wr-red/10',
 };
 
-export function WRCouncilPanel({ coin, whaleTrades, llm, onClose, autoRun }: Props) {
+export function WRCouncilPanel({ coin, whaleTrades, regime, llm, onClose, autoRun }: Props) {
   const [depth, setDepth] = useState<CouncilDepth>('standard');
   const [running, setRunning] = useState(false);
   const [active, setActive] = useState<AgentId | null>(null);
@@ -71,7 +76,7 @@ export function WRCouncilPanel({ coin, whaleTrades, llm, onClose, autoRun }: Pro
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
-    const ctx = buildCouncilContext(coin, { whaleTrades });
+    const ctx = buildCouncilContext(coin, { whaleTrades, regime });
     const mem = await loadCouncilMemory(coin.symbol);
     const memWithPerf = await refreshMemoryPerformance(mem, coin.price);
     const reflection = buildReflection(memWithPerf);
@@ -125,7 +130,7 @@ export function WRCouncilPanel({ coin, whaleTrades, llm, onClose, autoRun }: Pro
 
     setRunning(false);
     setActive(null);
-  }, [coin, whaleTrades, depth, llm, running]);
+  }, [coin, whaleTrades, regime, depth, llm, running]);
 
   useEffect(() => {
     if (autoRun && !startedRef.current) {
