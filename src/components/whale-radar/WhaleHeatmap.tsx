@@ -1,12 +1,23 @@
 /* ══ WHALE NET-FLOW HEATMAP ═══════════════════════════════════════════════════
- *  Real data only — aggregates the live whale trade feed (Binance/Bybit/OKX/
- *  Kraken/Hyperliquid) into per-asset BUY vs SELL net notional per timeframe.
+ *  Real data only — per-asset net taker buy/sell notional from Binance klines,
+ *  refreshed every 15s by useWhaleNetFlow. Assets are ranked from the live
+ *  whale feed, falling back to the top scanner coins.
  * ═══════════════════════════════════════════════════════════════════════════ */
 import React, { useMemo, useState } from 'react';
-import { Activity, ArrowDownRight, ArrowUpRight, Filter, Info } from 'lucide-react';
+import { Activity, ArrowDownRight, ArrowUpRight, Filter, Info, Loader2 } from 'lucide-react';
 import { WhaleTrade, CoinData } from '@/lib/whaleRadarState';
+import { useWhaleNetFlow, TimeFrame } from '@/hooks/useWhaleNetFlow';
 
-const POLL_LABEL = '15s';
+const TFS: TimeFrame[] = ['1h', '4h', '24h', '7d'];
+
+const fmtFlow = (val: number) => {
+  const a = Math.abs(val);
+  const sign = val < 0 ? '-' : '+';
+  if (a >= 1e9) return `${sign}$${(a / 1e9).toFixed(2)}B`;
+  if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(1)}M`;
+  if (a >= 1e3) return `${sign}$${(a / 1e3).toFixed(0)}K`;
+  return `${sign}$${a.toFixed(0)}`;
+};
 
 interface Props {
   whaleFeed: WhaleTrade[];
@@ -14,39 +25,30 @@ interface Props {
 }
 
 export const WhaleHeatmap: React.FC<Props> = ({ whaleFeed, coins }) => {
-  const [timeframe, setTimeframe] = useState<TimeFrame>('15m');
+  const [timeframe, setTimeframe] = useState<TimeFrame>('24h');
 
-  const meta = useMemo(() => {
-    const m = new Map<string, CoinData>();
-    coins.forEach(c => m.set(c.symbol.toUpperCase(), c));
-    return m;
-  }, [coins]);
-
-  const data = useMemo<AssetFlow[]>(() => {
-    const cutoff = Date.now() - TF_MS[timeframe];
-    const acc = new Map<string, { net: number; vol: number; n: number }>();
+  // Rank assets by live whale activity; fall back to top scanner coins.
+  const assets = useMemo(() => {
+    const counts = new Map<string, number>();
     for (const t of whaleFeed) {
-      if (t.ts < cutoff) continue;
-      const sym = (t.sym || '').toUpperCase();
-      if (!sym) continue;
-      const cur = acc.get(sym) ?? { net: 0, vol: 0, n: 0 };
-      cur.net += t.side === 'SELL' ? -t.usdt : t.usdt;
-      cur.vol += t.usdt;
-      cur.n += 1;
-      acc.set(sym, cur);
+      const s = (t.sym || '').toUpperCase();
+      if (s) counts.set(s, (counts.get(s) ?? 0) + t.usdt);
     }
-    return [...acc.entries()]
-      .map(([symbol, v]) => ({
-        symbol,
-        name: meta.get(symbol)?.name ?? symbol,
-        netFlow: v.net,
-        volume: v.vol,
-        change24h: meta.get(symbol)?.change ?? null,
-        whaleCount: v.n,
-      }))
-      .sort((a, b) => Math.abs(b.netFlow) - Math.abs(a.netFlow))
-      .slice(0, 12);
-  }, [whaleFeed, timeframe, meta]);
+    const names = new Map(coins.map(c => [c.symbol.toUpperCase(), c.name]));
+    const ranked = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([symbol]) => ({ symbol, name: names.get(symbol) ?? symbol }));
+    if (ranked.length >= 6) return ranked.slice(0, 12);
+    const seen = new Set(ranked.map(r => r.symbol));
+    for (const c of coins) {
+      const s = c.symbol.toUpperCase();
+      if (!seen.has(s)) { ranked.push({ symbol: s, name: c.name }); seen.add(s); }
+      if (ranked.length >= 12) break;
+    }
+    return ranked;
+  }, [whaleFeed, coins]);
+
+  const { data, loading, error } = useWhaleNetFlow(timeframe, assets);
 
   const maxFlow = useMemo(
     () => Math.max(1, ...data.map(d => Math.abs(d.netFlow))),
@@ -76,9 +78,10 @@ export const WhaleHeatmap: React.FC<Props> = ({ whaleFeed, coins }) => {
             <h2 className="text-base font-bold tracking-tight" style={{ color: 'hsl(var(--wr-white))' }}>
               WHALE NET FLOW HEATMAP
             </h2>
+            {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: 'hsl(var(--wr-muted))' }} />}
           </div>
           <p className="text-[11px] mt-1" style={{ color: 'hsl(var(--wr-muted))' }}>
-            Live aggregated whale buys vs sells from the streaming trade feed
+            Net taker buy vs sell notional per asset · refreshes every 15s
           </p>
         </div>
 
@@ -87,7 +90,7 @@ export const WhaleHeatmap: React.FC<Props> = ({ whaleFeed, coins }) => {
           style={{ borderColor: 'hsl(var(--wr-border))' }}
         >
           <Filter className="w-3.5 h-3.5 ml-1 mr-1" style={{ color: 'hsl(var(--wr-muted))' }} />
-          {(Object.keys(TF_MS) as TimeFrame[]).map(tf => (
+          {TFS.map(tf => (
             <button
               key={tf}
               onClick={() => setTimeframe(tf)}
@@ -110,7 +113,7 @@ export const WhaleHeatmap: React.FC<Props> = ({ whaleFeed, coins }) => {
           className="text-xs py-8 text-center rounded-lg border border-dashed"
           style={{ color: 'hsl(var(--wr-muted))', borderColor: 'hsl(var(--wr-border))' }}
         >
-          No whale trades in the last {timeframe.toUpperCase()} window — waiting for live flow…
+          {loading ? 'Loading net flow…' : error ?? 'No net-flow data available yet.'}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -132,24 +135,22 @@ export const WhaleHeatmap: React.FC<Props> = ({ whaleFeed, coins }) => {
                     {asset.name}
                   </h3>
                 </div>
-                {asset.change24h !== null && (
-                  <div
-                    className="flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                    style={{
-                      background: 'hsl(var(--wr-bg) / 0.5)',
-                      color: asset.change24h >= 0 ? 'hsl(var(--wr-green))' : 'hsl(var(--wr-red))',
-                    }}
-                  >
-                    {asset.change24h >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                    {asset.change24h.toFixed(1)}%
-                  </div>
-                )}
+                <div
+                  className="flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                  style={{
+                    background: 'hsl(var(--wr-bg) / 0.5)',
+                    color: asset.change24h >= 0 ? 'hsl(var(--wr-green))' : 'hsl(var(--wr-red))',
+                  }}
+                >
+                  {asset.change24h >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {asset.change24h.toFixed(1)}%
+                </div>
               </div>
 
               <div className="mt-3 flex items-end justify-between gap-2">
                 <div>
                   <p className="text-[9px] uppercase tracking-wider font-bold" style={{ color: 'hsl(var(--wr-muted))' }}>
-                    Net Flow
+                    Net Flow · {timeframe.toUpperCase()}
                   </p>
                   <p className="text-xl font-black" style={{ color: 'hsl(var(--wr-white))' }}>
                     {fmtFlow(asset.netFlow)}
@@ -157,13 +158,13 @@ export const WhaleHeatmap: React.FC<Props> = ({ whaleFeed, coins }) => {
                 </div>
                 <div className="text-right">
                   <span className="text-[9px] block" style={{ color: 'hsl(var(--wr-muted))' }}>
-                    Whale prints
+                    Trades
                   </span>
                   <span
                     className="text-xs font-bold px-1.5 py-0.5 rounded"
                     style={{ background: 'hsl(var(--wr-bg) / 0.4)', color: 'hsl(var(--wr-white))' }}
                   >
-                    {asset.whaleCount} 🐋
+                    {asset.whaleCount.toLocaleString()} 🐋
                   </span>
                 </div>
               </div>
