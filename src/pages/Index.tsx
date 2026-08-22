@@ -14,6 +14,7 @@ import { WRKeyboardHelp } from '@/components/whale-radar/WRKeyboardHelp';
 import { WRAlertBell } from '@/components/whale-radar/WRAlertBell';
 import { WRCoinGeckoStatus } from '@/components/whale-radar/WRCoinGeckoStatus';
 import { RegimePanel } from '@/components/regime/RegimePanel';
+import { WhaleHeatmap } from '@/components/whale-radar/WhaleHeatmap';
 import { useRegimeEngine } from '@/hooks/useRegimeEngine';
 import { WRMobileFilterSheet } from '@/components/whale-radar/WRMobileFilterSheet';
 import { useWhaleWebSocket } from '@/hooks/useWhaleWebSocket';
@@ -632,6 +633,8 @@ export default function WhaleRadarApp() {
         refresh={refreshRegime}
         addAlert={addAlert}
       />
+
+      <WhaleHeatmap whaleFeed={whaleFeed} coins={coins} />
 
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] flex-1 min-h-0">
