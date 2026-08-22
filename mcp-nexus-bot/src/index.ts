@@ -150,6 +150,90 @@ server.registerTool(
   },
 );
 
+interface WhalePerformanceMetrics {
+  userAddress: string;
+  totalPnL: number;
+  winRatePercentage: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  averageTradePnL: number;
+  profitFactor: number;
+}
+
+type HyperliquidFill = {
+  closedPnl?: string;
+  time: number;
+};
+
+async function calculateWhalePerformance(
+  userAddress: string,
+  timeframeDays = 30,
+): Promise<WhalePerformanceMetrics> {
+  const response = await fetch('https://api.hyperliquid.xyz/info', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'userFills', user: userAddress }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hyperliquid API error: ${response.status} ${response.statusText}`);
+  }
+
+  const fills = (await response.json()) as HyperliquidFill[];
+  const cutoffTime = Date.now() - timeframeDays * 24 * 60 * 60 * 1000;
+  let totalPnL = 0;
+  let winningTrades = 0;
+  let losingTrades = 0;
+  let grossProfit = 0;
+  let grossLoss = 0;
+
+  for (const fill of fills) {
+    if (fill.time < cutoffTime || fill.closedPnl === undefined) continue;
+    const pnl = Number.parseFloat(fill.closedPnl);
+    if (!Number.isFinite(pnl) || pnl === 0) continue;
+    totalPnL += pnl;
+    if (pnl > 0) {
+      winningTrades += 1;
+      grossProfit += pnl;
+    } else {
+      losingTrades += 1;
+      grossLoss += Math.abs(pnl);
+    }
+  }
+
+  const totalTrades = winningTrades + losingTrades;
+  return {
+    userAddress,
+    totalPnL: Number(totalPnL.toFixed(2)),
+    winRatePercentage: Number((totalTrades ? (winningTrades / totalTrades) * 100 : 0).toFixed(2)),
+    totalTrades,
+    winningTrades,
+    losingTrades,
+    averageTradePnL: Number((totalTrades ? totalPnL / totalTrades : 0).toFixed(2)),
+    profitFactor: Number((grossLoss > 0 ? grossProfit / grossLoss : grossProfit).toFixed(2)),
+  };
+}
+
+server.registerTool(
+  'analyze_whale_performance',
+  {
+    title: 'Analyze whale performance',
+    description: 'Read-only. Analyzes Hyperliquid fills for a wallet and returns PnL, win rate, trade counts, average trade PnL, and profit factor.',
+    inputSchema: {
+      userAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/).describe('Hyperliquid wallet address (0x...)'),
+      timeframeDays: z.number().finite().positive().max(3650).default(30).describe('Analysis window in days'),
+    },
+  },
+  async ({ userAddress, timeframeDays }) => {
+    try {
+      return textResult(await calculateWhalePerformance(userAddress, timeframeDays));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
 // ── Mutating tools — every one of these can place a real order once the
 // server operator has opted into live trading. Call nexus_get_safety_model
 // first if you have not already, and re-read a fresh nexus_scan_arbitrage/
