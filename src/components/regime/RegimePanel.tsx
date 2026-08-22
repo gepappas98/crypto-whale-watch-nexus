@@ -65,7 +65,9 @@ export function RegimePanel({ reading, history, weights, setWeights, restoreDefa
         <span className={`text-sm font-bold tracking-widest ${regimeColor}`}>
           {reading ? reading.regime : loading ? 'READING…' : '—'}
         </span>
-        <span className="text-[10px] text-wr-muted">{reading ? `${reading.score}/100` : ''}</span>
+        <span className="text-[10px] text-wr-muted" title="Composite weighted-signal score, 0-100 — not a probability">
+          {reading ? `${reading.score}/100` : ''}
+        </span>
 
         {reading && (
           <span
