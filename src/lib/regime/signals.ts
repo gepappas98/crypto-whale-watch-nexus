@@ -273,7 +273,39 @@ export interface LocalInputs {
   whales: { side: string; usdt: number; ts: number }[];
 }
 
-function breadthSignal(coins: LocalInputs['coins']): RegimeSignal {
+const STABLE_BASES = new Set(['USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'FDUSD', 'USDP', 'EUR', 'GBP', 'TRY', 'BRL', 'ARS']);
+const LEVERAGED_TOKEN_RE = /(UP|DOWN|BULL|BEAR)USDT$/;
+
+/** Real market-wide breadth: % of top-volume USDT spot pairs on Binance
+ *  green on 24h, not just the user's own scanned/watchlist coins. Ranked by
+ *  quoteVolume so illiquid noise doesn't dilute the read. Falls back to the
+ *  old watchlist-scoped proxy (clearly labeled as a fallback in `detail`,
+ *  not silently) if the market-wide fetch fails — missing/degraded data
+ *  still shouldn't just vanish into a null score when a usable proxy exists. */
+async function marketBreadthSignal(fallbackCoins: LocalInputs['coins']): Promise<RegimeSignal> {
+  const raw = await getJson<{ symbol: string; priceChangePercent: string; quoteVolume: string }[]>(
+    'https://api.binance.com/api/v3/ticker/24hr',
+  );
+  const usdtPairs = (raw ?? []).filter((t) => {
+    if (!t.symbol.endsWith('USDT') || LEVERAGED_TOKEN_RE.test(t.symbol)) return false;
+    if (STABLE_BASES.has(t.symbol.slice(0, -4))) return false;
+    return Number.isFinite(Number(t.priceChangePercent)) && Number.isFinite(Number(t.quoteVolume));
+  });
+  if (usdtPairs.length < 30) return watchlistBreadthSignal(fallbackCoins, true);
+
+  const top = usdtPairs.sort((a, b) => Number(b.quoteVolume) - Number(a.quoteVolume)).slice(0, 150);
+  const up = top.filter((t) => Number(t.priceChangePercent) > 0).length;
+  const share = (up / top.length) * 100;
+  return {
+    id: 'breadth',
+    label: 'Market breadth',
+    score: clamp((share - 50) / 25),
+    value: `${share.toFixed(0)}% up`,
+    detail: `${up} of top ${top.length} USDT pairs by volume on Binance are green on 24h (market-wide, not just your watchlist) — participation is ${share >= 60 ? 'broad' : share >= 45 ? 'mixed' : 'narrow'}`,
+  };
+}
+
+function watchlistBreadthSignal(coins: LocalInputs['coins'], isFallback = false): RegimeSignal {
   const usable = coins.filter((c) => Number.isFinite(c.change));
   if (usable.length < 10) {
     return { id: 'breadth', label: 'Market breadth', score: null, value: '—', detail: 'Not enough scanned assets yet' };
@@ -285,7 +317,9 @@ function breadthSignal(coins: LocalInputs['coins']): RegimeSignal {
     label: 'Market breadth',
     score: clamp((share - 50) / 25),
     value: `${share.toFixed(0)}% up`,
-    detail: `${up} of ${usable.length} tracked assets are green on 24h — participation is ${share >= 60 ? 'broad' : share >= 45 ? 'mixed' : 'narrow'}`,
+    detail: isFallback
+      ? `Market-wide breadth fetch failed — falling back to your own watchlist: ${up} of ${usable.length} tracked assets are green on 24h`
+      : `${up} of ${usable.length} tracked assets are green on 24h — participation is ${share >= 60 ? 'broad' : share >= 45 ? 'mixed' : 'narrow'}`,
   };
 }
 
@@ -297,7 +331,10 @@ function whaleFlowSignal(whales: LocalInputs['whales']): RegimeSignal {
   }
   let buy = 0;
   let sell = 0;
-  for (const w of recent) (w.side?.toUpperCase() === 'BUY' ? (buy += w.usdt) : (sell += w.usdt));
+  for (const w of recent) {
+    if (w.side?.toUpperCase() === 'BUY') buy += w.usdt;
+    else sell += w.usdt;
+  }
   const total = buy + sell;
   if (total <= 0) {
     return { id: 'whale_flow', label: 'Whale buy/sell flow', score: null, value: '—', detail: 'No whale notional in window' };
@@ -314,16 +351,17 @@ function whaleFlowSignal(whales: LocalInputs['whales']): RegimeSignal {
 
 /** Collect every regime signal for one tick. Never throws. */
 export async function collectSignals(local: LocalInputs): Promise<RegimeSignal[]> {
-  const [trend, derivs, aggressive, sentiment, dominance] = await Promise.all([
+  const [trend, derivs, aggressive, sentiment, dominance, breadth] = await Promise.all([
     btcTrendSignals(),
     derivativeSignals(),
     aggressiveFlowSignal(),
     sentimentSignals(),
     dominanceSignal(),
+    marketBreadthSignal(local.coins),
   ]);
   return [
     ...trend,
-    breadthSignal(local.coins),
+    breadth,
     whaleFlowSignal(local.whales),
     aggressive,
     ...derivs,
