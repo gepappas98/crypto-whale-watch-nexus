@@ -25,10 +25,12 @@ const ENV_PREFIX: Record<string, string> = {
   backpack: 'BACKPACK',
 };
 
-const instances = new Map<string, ccxt.Exchange>();
+type Exchange = InstanceType<typeof ccxt.Exchange>;
+
+const instances = new Map<string, Exchange>();
 
 /** Lazily builds + caches one authenticated ccxt instance per exchange id. */
-function getExchange(exchangeId: string): ccxt.Exchange {
+function getExchange(exchangeId: string): Exchange {
   const cached = instances.get(exchangeId);
   if (cached) return cached;
 
@@ -41,7 +43,7 @@ function getExchange(exchangeId: string): ccxt.Exchange {
     throw new Error(`No API credentials for "${exchangeId}" — set ${prefix}_API_KEY and ${prefix}_API_SECRET in server/.env`);
   }
 
-  const ExchangeClass = (ccxt as unknown as Record<string, new (cfg: Record<string, unknown>) => ccxt.Exchange>)[exchangeId];
+  const ExchangeClass = (ccxt as unknown as Record<string, new (cfg: Record<string, unknown>) => Exchange>)[exchangeId];
   if (!ExchangeClass) {
     throw new Error(`ccxt has no exchange named "${exchangeId}" (checked at runtime — see the ccxt.exchanges list for supported ids)`);
   }
@@ -177,7 +179,8 @@ export async function fetchPortfolioBalances(): Promise<Array<{ name: string; ba
     try {
       const ex = getExchange(exchangeId);
       const balance = await ex.fetchBalance();
-      const totalUsd = typeof balance.total?.USDT === 'number' ? balance.total.USDT : 0;
+      const totals = balance.total as unknown as Record<string, unknown>;
+      const totalUsd = typeof totals.USDT === 'number' ? totals.USDT : 0;
       results.push({ name: exchangeId, balanceUsd: totalUsd, connected: true });
     } catch (err) {
       console.error(`[ccxtExecutor] balance fetch failed for ${exchangeId}`, (err as Error).message);

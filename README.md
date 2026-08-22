@@ -1,4 +1,4 @@
-# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.28
+# Whale Radar (crypto-whale-watch-nexus) — v9.28
 
 ![Version](https://img.shields.io/badge/version-9.28-blue)
 ![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)
