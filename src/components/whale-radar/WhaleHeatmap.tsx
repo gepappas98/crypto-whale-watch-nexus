@@ -6,32 +6,7 @@ import React, { useMemo, useState } from 'react';
 import { Activity, ArrowDownRight, ArrowUpRight, Filter, Info } from 'lucide-react';
 import { WhaleTrade, CoinData } from '@/lib/whaleRadarState';
 
-type TimeFrame = '5m' | '15m' | '1h' | 'all';
-
-const TF_MS: Record<TimeFrame, number> = {
-  '5m': 5 * 60_000,
-  '15m': 15 * 60_000,
-  '1h': 60 * 60_000,
-  all: Number.POSITIVE_INFINITY,
-};
-
-interface AssetFlow {
-  symbol: string;
-  name: string;
-  netFlow: number;
-  volume: number;
-  change24h: number | null;
-  whaleCount: number;
-}
-
-const fmtFlow = (val: number) => {
-  const a = Math.abs(val);
-  const sign = val < 0 ? '-' : '+';
-  if (a >= 1e9) return `${sign}$${(a / 1e9).toFixed(2)}B`;
-  if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(1)}M`;
-  if (a >= 1e3) return `${sign}$${(a / 1e3).toFixed(0)}K`;
-  return `${sign}$${a.toFixed(0)}`;
-};
+const POLL_LABEL = '15s';
 
 interface Props {
   whaleFeed: WhaleTrade[];
