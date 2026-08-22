@@ -30,10 +30,16 @@ export function useRegimeAlerts(reading: RegimeReading | null, addAlert: AddAler
       // Same fan-out point scanner alerts use — silently no-ops for any
       // channel the user hasn't configured.
       dispatchNotification(level, 'REGIME', text);
-    }
 
-    lastRef.current = reading.confirmedRegime;
-    setLastAlertedRegime(reading.confirmedRegime);
+      // Only mark this transition as alerted once it actually fired. If the
+      // cooldown blocked it, lastRef/localStorage deliberately stay on the
+      // PREVIOUS regime, so the next poll still sees confirmedRegime !==
+      // lastRef.current and retries once the cooldown clears — otherwise a
+      // single cooldown-suppressed tick would permanently swallow this
+      // transition's alert.
+      lastRef.current = reading.confirmedRegime;
+      setLastAlertedRegime(reading.confirmedRegime);
+    }
     // Only confirmedRegime changing should re-run this — re-checking it
     // via lastRef against every reading (even unconfirmed/unchanged ones)
     // on each 5-minute poll is intentional and cheap, not a bug.
