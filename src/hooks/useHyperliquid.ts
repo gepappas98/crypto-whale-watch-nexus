@@ -48,8 +48,8 @@ export function useAllMids() {
       try {
         const res = await hlFetch<{ symbol: string; price: number }[]>('allMids');
         if (!cancelled) setData(res.data);
-      } catch (e: any) {
-        if (!cancelled) setError(e.message);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
         if (!cancelled) setLoading(false);
       }

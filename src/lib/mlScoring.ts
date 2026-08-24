@@ -131,7 +131,7 @@ function sigmoid(z: number): number {
 
 function trainLogisticRegression(rows: TrainingRow[], epochs = 300, lr = 0.3, l2 = 0.01): { weights: number[]; bias: number } {
   const nFeatures = rows[0].x.length;
-  let weights = new Array(nFeatures).fill(0);
+  const weights = new Array(nFeatures).fill(0);
   let bias = 0;
   const n = rows.length;
 

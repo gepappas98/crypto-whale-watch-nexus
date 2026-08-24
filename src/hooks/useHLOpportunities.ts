@@ -9,6 +9,7 @@
 
 import { useMemo } from 'react';
 import { useHLMarkets } from '@/hooks/useHyperliquid';
+import type { HLMarket } from '@/lib/hyperliquid';
 
 const FUNDING_THRESHOLD = 0.0008;
 const EXTREME_FUNDING = 0.002;
@@ -70,7 +71,7 @@ export function useHLOpportunities({
 
     const opps: HLOppSignal[] = [];
 
-    markets.forEach((m: any) => {
+    markets.forEach((m: HLMarket) => {
       // ── Null-safety: skip malformed market data ────────────────────────
       if (!m || typeof m !== 'object') return;
 

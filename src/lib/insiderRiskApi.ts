@@ -12,6 +12,26 @@ import {
 } from '@/types/insiderRisk';
 import { SOLANA_CEX_ADDRESSES } from './insiderRisk';
 import { detectCEX, detectWalletType, detectPrePumpPattern } from './insiderRiskUtils';
+import type { CoinData } from './whaleRadarState';
+
+/** What analyzeTokenRisk actually reads off a "coin" beyond CoinData's real
+ *  fields. IMPORTANT — found while removing `any` here, not fixed: nothing
+ *  in this app's CoinData pipeline (useMarketData.ts) ever sets chain/
+ *  platforms/contract_address — coin.id is a CoinGecko slug like "bitcoin",
+ *  never a contract address. That means isSolana below is always false and
+ *  contractAddress is always undefined for every real coin this app scans,
+ *  so the Etherscan/Birdeye "real data" path always throws and every scan
+ *  silently falls back to generateMockInsiderData() in
+ *  WRInsiderRiskScanner.tsx's catch block — regardless of the useRealData
+ *  toggle or whether API keys are configured. This type change doesn't fix
+ *  that; it just stops `any` from hiding it. A real fix needs a decision
+ *  about where a per-coin contract address should come from (e.g. an extra
+ *  CoinGecko /coins/{id} lookup per scanned coin) — not made here. */
+type InsiderRiskCoin = CoinData & {
+  chain?: string;
+  platforms?: { solana?: string; ethereum?: string };
+  contract_address?: string;
+};
 
 // ── Fetch with timeout (no AbortSignal.timeout — broad browser compat) ────────
 function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 15_000): Promise<Response> {
@@ -22,7 +42,7 @@ function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 15
 
 // Rate limiting queues
 class RateLimiter {
-  private queue: (() => Promise<any>)[] = [];
+  private queue: (() => Promise<unknown>)[] = [];
   private running = false;
   private lastCall = 0;
   private minDelay: number;
@@ -66,20 +86,28 @@ const etherscanLimiter = new RateLimiter(5); // 5 calls/sec for free tier
 const birdeyeLimiter = new RateLimiter(1.6); // 100 calls/minute
 
 // Cache implementation
-const cache = new Map<string, { data: any; timestamp: number }>();
+const cache = new Map<string, { data: unknown; timestamp: number }>();
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
-function getCached(key: string): any | null {
+function getCached<T>(key: string): T | null {
   const entry = cache.get(key);
   if (entry && Date.now() - entry.timestamp < CACHE_DURATION) {
-    return entry.data;
+    return entry.data as T;
   }
   cache.delete(key);
   return null;
 }
 
-function setCached(key: string, data: any) {
+function setCached<T>(key: string, data: T) {
   cache.set(key, { data, timestamp: Date.now() });
+}
+
+interface EtherscanTx {
+  from: string;
+  to: string;
+  value: string;
+  timeStamp: string;
+  hash: string;
 }
 
 // Etherscan API Service
@@ -98,7 +126,7 @@ export class EtherscanService {
     symbol: string;
   }> {
     const cacheKey = `etherscan:info:${contractAddress}`;
-    const cached = getCached(cacheKey);
+    const cached = getCached<{ totalSupply: string; decimals: string; name: string; symbol: string }>(cacheKey);
     if (cached) return cached;
 
     return etherscanLimiter.add(async () => {
@@ -115,7 +143,7 @@ export class EtherscanService {
 
   async getTokenHolders(contractAddress: string): Promise<TokenHolder[]> {
     const cacheKey = `etherscan:holders:${contractAddress}`;
-    const cached = getCached(cacheKey);
+    const cached = getCached<TokenHolder[]>(cacheKey);
     if (cached) return cached;
 
     return etherscanLimiter.add(async () => {
@@ -161,9 +189,9 @@ export class EtherscanService {
     });
   }
 
-  async getRecentTransfers(contractAddress: string): Promise<any[]> {
+  async getRecentTransfers(contractAddress: string): Promise<EtherscanTx[]> {
     const cacheKey = `etherscan:transfers:${contractAddress}`;
-    const cached = getCached(cacheKey);
+    const cached = getCached<EtherscanTx[]>(cacheKey);
     if (cached) return cached;
 
     return etherscanLimiter.add(async () => {
@@ -180,7 +208,7 @@ export class EtherscanService {
 
   async getCode(address: string): Promise<string> {
     const cacheKey = `etherscan:code:${address}`;
-    const cached = getCached(cacheKey);
+    const cached = getCached<string>(cacheKey);
     if (cached) return cached;
 
     return etherscanLimiter.add(async () => {
@@ -205,8 +233,8 @@ export class EtherscanService {
 
       // Analyze transfers for CEX patterns
       const largeTransfers: TransferEvent[] = transfers
-        .filter((tx: any) => parseFloat(tx.value) > 500000)
-        .map((tx: any) => {
+        .filter((tx) => parseFloat(tx.value) > 500000)
+        .map((tx) => {
           const cexInfo = detectCEX(tx.to, DEFAULT_CEX_ADDRESSES);
           return {
             from: tx.from,
@@ -254,6 +282,32 @@ export class EtherscanService {
 // insiderRiskUtils.ts, shared with BirdeyeService.analyzeToken below —
 // same >$1M-to-CEX-within-24h rule on both chains, one implementation.
 
+interface BirdeyeTokenOverview {
+  totalSupply?: number;
+  circulatingSupply?: number;
+  [key: string]: unknown;
+}
+
+interface BirdeyeHolderRow {
+  owner: string;
+  uiAmount?: number;
+  ownerProgram?: boolean;
+}
+
+/** Field names below cover the variants seen across Birdeye's transfer
+ *  endpoints (to/to_wallet/toAddress, value/valueUsd, block_unix_time/
+ *  blockTime) since the exact shape isn't pinned down without a live key to
+ *  test against — kept as a wide optional-field interface rather than a
+ *  single pinned shape, matching the existing per-row fallback logic below
+ *  instead of fabricating one canonical shape. */
+interface BirdeyeTransferRow {
+  to?: string; to_wallet?: string; toAddress?: string; destination?: string;
+  from?: string; from_wallet?: string; fromAddress?: string; source?: string;
+  value?: number; value_usd?: number; valueUsd?: number;
+  block_unix_time?: number; blockTime?: number; time?: number; timestamp?: number;
+  tx_hash?: string; txHash?: string; signature?: string;
+}
+
 // Birdeye API Service
 export class BirdeyeService {
   private apiKey: string;
@@ -263,9 +317,9 @@ export class BirdeyeService {
     this.apiKey = apiKey;
   }
 
-  async getTokenOverview(mintAddress: string): Promise<any> {
+  async getTokenOverview(mintAddress: string): Promise<BirdeyeTokenOverview> {
     const cacheKey = `birdeye:overview:${mintAddress}`;
-    const cached = getCached(cacheKey);
+    const cached = getCached<BirdeyeTokenOverview>(cacheKey);
     if (cached) return cached;
 
     return birdeyeLimiter.add(async () => {
@@ -281,7 +335,7 @@ export class BirdeyeService {
 
       if (!response.ok) throw new Error('Birdeye API error');
 
-      const data = await response.json();
+      const data = await response.json() as { data: BirdeyeTokenOverview };
       setCached(cacheKey, data.data);
       return data.data;
     });
@@ -289,7 +343,7 @@ export class BirdeyeService {
 
   async getTokenHolders(mintAddress: string): Promise<TokenHolder[]> {
     const cacheKey = `birdeye:holders:${mintAddress}`;
-    const cached = getCached(cacheKey);
+    const cached = getCached<TokenHolder[]>(cacheKey);
     if (cached) return cached;
 
     return birdeyeLimiter.add(async () => {
@@ -305,12 +359,12 @@ export class BirdeyeService {
 
       if (!response.ok) throw new Error('Birdeye API error');
 
-      const data = await response.json();
+      const data = await response.json() as { data?: { items?: BirdeyeHolderRow[] } };
       const holders = data.data?.items || [];
 
-      const totalSupply = holders.reduce((sum: number, h: any) => sum + (h.uiAmount || 0), 0);
+      const totalSupply = holders.reduce((sum, h) => sum + (h.uiAmount || 0), 0);
 
-      const formatted: TokenHolder[] = holders.map((h: any, index: number) => ({
+      const formatted: TokenHolder[] = holders.map((h, index) => ({
         address: h.owner,
         balance: h.uiAmount || 0,
         percentage: totalSupply > 0 ? ((h.uiAmount || 0) / totalSupply) * 100 : 0,
@@ -329,9 +383,9 @@ export class BirdeyeService {
    *  the wallet-to-wallet transfer feed, the Solana analog of Etherscan's
    *  getRecentTransfers). from_value filters server-side to transfers worth
    *  at least $500k, matching the Ethereum path's threshold. */
-  async getTokenTransfers(mintAddress: string, minUsdValue = 500_000): Promise<any[]> {
+  async getTokenTransfers(mintAddress: string, minUsdValue = 500_000): Promise<BirdeyeTransferRow[]> {
     const cacheKey = `birdeye:transfers:${mintAddress}:${minUsdValue}`;
-    const cached = getCached(cacheKey);
+    const cached = getCached<BirdeyeTransferRow[]>(cacheKey);
     if (cached) return cached;
 
     return birdeyeLimiter.add(async () => {
@@ -354,7 +408,7 @@ export class BirdeyeService {
 
       if (!response.ok) throw new Error('Birdeye API error');
 
-      const data = await response.json();
+      const data = await response.json() as { data?: { items?: BirdeyeTransferRow[]; transfers?: BirdeyeTransferRow[] } };
       const items = data.data?.items || data.data?.transfers || [];
       setCached(cacheKey, items);
       return items;
@@ -385,7 +439,7 @@ export class BirdeyeService {
       // blockTime) since the exact shape isn't pinned down without a live
       // key to test against — this degrades to "no CEX match" per-row
       // rather than throwing if a given row doesn't have the field.
-      const largeTransfers: TransferEvent[] = rawTransfers.map((tx: any) => {
+      const largeTransfers: TransferEvent[] = rawTransfers.map((tx) => {
         const to = tx.to_wallet ?? tx.to ?? tx.toAddress ?? tx.destination ?? '';
         const from = tx.from_wallet ?? tx.from ?? tx.fromAddress ?? tx.source ?? '';
         const value = Number(tx.value_usd ?? tx.valueUsd ?? tx.value ?? 0);
@@ -433,7 +487,7 @@ export class BirdeyeService {
 
 // Main analysis orchestrator
 export async function analyzeTokenRisk(
-  coin: any,
+  coin: InsiderRiskCoin,
   settings: { etherscanKey?: string; birdeyeKey?: string; solanaCexAddresses?: Record<string, string[]> }
 ): Promise<Partial<InsiderRiskData>> {
   const isSolana = coin.chain === 'solana' || coin.platforms?.solana;
@@ -462,7 +516,7 @@ export async function analyzeTokenRisk(
 
 // Batch analysis with progress
 export async function analyzeBatchRisk(
-  coins: any[],
+  coins: InsiderRiskCoin[],
   settings: { etherscanKey?: string; birdeyeKey?: string },
   onProgress?: (current: number, total: number) => void
 ): Promise<Partial<InsiderRiskData>[]> {

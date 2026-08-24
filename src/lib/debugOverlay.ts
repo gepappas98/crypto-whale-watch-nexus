@@ -211,8 +211,8 @@ export function installDebugOverlay(): void {
     'error',
     (event) => {
       const target = event.target as HTMLElement | null;
-      if (target && target !== (window as any) && (target.tagName === 'SCRIPT' || target.tagName === 'LINK' || target.tagName === 'IMG')) {
-        const src = (target as any).src || (target as any).href || '';
+      if (target && target !== (window as unknown as HTMLElement) && (target.tagName === 'SCRIPT' || target.tagName === 'LINK' || target.tagName === 'IMG')) {
+        const src = (target as HTMLScriptElement).src || (target as HTMLLinkElement).href || '';
         push('resource', `Failed to load <${target.tagName.toLowerCase()}>`, src);
         return;
       }
@@ -229,9 +229,11 @@ export function installDebugOverlay(): void {
 
   // 2) Unhandled promise rejections
   window.addEventListener('unhandledrejection', (event) => {
-    const reason: any = event.reason;
-    const title = reason?.message || (typeof reason === 'string' ? reason : 'Unhandled rejection');
-    push('rejection', title, reason ? safeStringify(reason) : '', reason?.stack);
+    const reason: unknown = event.reason;
+    const message = reason && typeof reason === 'object' && 'message' in reason ? String((reason as { message: unknown }).message) : undefined;
+    const stack = reason && typeof reason === 'object' && 'stack' in reason ? String((reason as { stack: unknown }).stack) : undefined;
+    const title = message || (typeof reason === 'string' ? reason : 'Unhandled rejection');
+    push('rejection', title, reason ? safeStringify(reason) : '', stack);
   });
 
   // 3) console.error — React render errors come through here
@@ -239,7 +241,7 @@ export function installDebugOverlay(): void {
   console.error = (...args: unknown[]) => {
     try {
       const first = args[0];
-      const title = typeof first === 'string' ? first : (first as any)?.message || 'console.error';
+      const title = typeof first === 'string' ? first : (first && typeof first === 'object' && 'message' in first ? String((first as { message: unknown }).message) : 'console.error');
       if (IGNORED_CONSOLE_MESSAGES.some((message) => String(title).includes(message))) {
         origErr(...args);
         return;
@@ -271,8 +273,9 @@ export function installDebugOverlay(): void {
           push('fetch', `${method} ${res.status} ${shortUrl(url)}`, res.statusText || '');
         }
         return res;
-      } catch (err: any) {
-        push('fetch', `${method} FAILED ${shortUrl(url)}`, err?.message || String(err), err?.stack);
+      } catch (err) {
+        const e = err instanceof Error ? err : undefined;
+        push('fetch', `${method} FAILED ${shortUrl(url)}`, e?.message || String(err), e?.stack);
         throw err;
       }
     };
@@ -281,8 +284,16 @@ export function installDebugOverlay(): void {
   // 5) WebSocket — connection / message / close errors
   if (typeof window.WebSocket === 'function') {
     const OrigWS = window.WebSocket;
-    function PatchedWS(this: any, url: string | URL, protocols?: string | string[]) {
-      const ws = new OrigWS(url as any, protocols as any);
+    interface PatchedWebSocketCtor {
+      new (url: string | URL, protocols?: string | string[]): WebSocket;
+      prototype: WebSocket;
+      CONNECTING: number;
+      OPEN: number;
+      CLOSING: number;
+      CLOSED: number;
+    }
+    function PatchedWSImpl(url: string | URL, protocols?: string | string[]): WebSocket {
+      const ws = new OrigWS(url, protocols);
       const u = typeof url === 'string' ? url : url.toString();
       ws.addEventListener('error', () => push('websocket', `WS error ${shortUrl(u)}`));
       ws.addEventListener('close', (ev) => {
@@ -292,12 +303,13 @@ export function installDebugOverlay(): void {
       });
       return ws;
     }
-    PatchedWS.prototype = OrigWS.prototype;
-    (PatchedWS as any).CONNECTING = OrigWS.CONNECTING;
-    (PatchedWS as any).OPEN = OrigWS.OPEN;
-    (PatchedWS as any).CLOSING = OrigWS.CLOSING;
-    (PatchedWS as any).CLOSED = OrigWS.CLOSED;
-    (window as any).WebSocket = PatchedWS;
+    PatchedWSImpl.prototype = OrigWS.prototype;
+    const PatchedWS = PatchedWSImpl as unknown as PatchedWebSocketCtor;
+    PatchedWS.CONNECTING = OrigWS.CONNECTING;
+    PatchedWS.OPEN = OrigWS.OPEN;
+    PatchedWS.CLOSING = OrigWS.CLOSING;
+    PatchedWS.CLOSED = OrigWS.CLOSED;
+    window.WebSocket = PatchedWS as unknown as typeof WebSocket;
   }
 
   push('console', 'Debug overlay installed', 'Ctrl/Cmd+Shift+D to toggle');

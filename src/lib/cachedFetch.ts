@@ -58,7 +58,7 @@ function writeCache(url: string, data: unknown): void {
       const toRemove = Math.ceil(keys.length * 0.2);
       keys.slice(0, toRemove).forEach(k => sessionStorage.removeItem(k));
       sessionStorage.setItem(cacheKey(url), JSON.stringify({ data, ts: Date.now() }));
-    } catch { }
+    } catch { /* sessionStorage full or unavailable — cache write skipped */ }
   }
 }
 
@@ -161,7 +161,7 @@ export async function cachedFetch<T = unknown>(
           .then(result => { if (result.data) writeCache(url, result.data); return result; })
           .catch(() => ({ data: null, fromCache: false as const }))
           .finally(() => inFlightRequests.delete(swrDedupKey));
-        inFlightRequests.set(swrDedupKey, swrPromise as any);
+        inFlightRequests.set(swrDedupKey, swrPromise);
       }
       return { data: cached.data as T, fromCache: true };
     }
@@ -414,7 +414,7 @@ export async function raceProviders<T>(
         );
       });
     });
-    controllers.forEach(c => { try { c.abort(); } catch {} });
+    controllers.forEach(c => { try { c.abort(); } catch { /* already aborted/settled */ } });
     return winner;
   } finally {
     clearTimeout(timer);
