@@ -5,14 +5,17 @@
 import type { CoinData, WhaleTrade } from '@/lib/whaleRadarState';
 import type { CouncilContext } from '@/types/council';
 import type { RegimeReading } from '@/lib/regime/types';
+import { getCeoSignalLabel } from '@/services/signals';
 
-export function getCeoSignalLabel(score: number, threat: string, category: string | null, vmcap: number): string {
-  if (threat === 'CRITICAL' && (category === 'WASH' || vmcap > 800)) return 'AVOID — wash/manipulation';
-  if (score >= 75) return 'STRONG ACCUMULATION SIGNAL';
-  if (score >= 55) return 'WATCH — building';
-  if (score >= 35) return 'NEUTRAL';
-  return 'NO EDGE';
-}
+// getCeoSignalLabel used to be duplicated here with its own, different
+// thresholds/label set ('STRONG ACCUMULATION SIGNAL' / 'NO EDGE' / etc.)
+// instead of reusing the canonical version in services/signals.ts (the one
+// WRScanner's live table actually shows the user, 'AGGRESSIVE LONG' /
+// 'AVOID / SHORT' / etc.). That meant the AI Council was being told a
+// completely different "CEO signal" for the same coin than what the user
+// was looking at on screen — re-exported here (not re-implemented) so both
+// surfaces can never drift apart again.
+export { getCeoSignalLabel };
 
 export function isHighSignal(c: Partial<CoinData>): boolean {
   const score = c.score ?? 0;
@@ -47,7 +50,7 @@ export function buildCouncilContext(
     whaleReasons: coin.reasons ?? [],
     threat: coin.threat ?? 'LOW',
     manipulationPattern: coin.category ?? null,
-    ceoSignal: getCeoSignalLabel(coin.score ?? 0, coin.threat ?? '', coin.category ?? null, coin.vmcap ?? 0),
+    ceoSignal: getCeoSignalLabel(coin.score ?? 0, coin.threat ?? '', coin.category ?? '', coin.vmcap ?? 0),
     birdeye: coin.birdData
       ? {
           rugScore: coin.birdData.rugScore,
