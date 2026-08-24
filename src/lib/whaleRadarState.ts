@@ -38,6 +38,26 @@ export interface CoinData {
   dsLiq: { liq: number; pairs: number } | null;
   isSol: boolean;
   birdData: BirdeyeData | null;
+  /** Keyless RugCheck on-chain risk report — undefined until enrichment runs. */
+  rugCheck?: RugCheckData | null;
+}
+
+export interface RugCheckData {
+  ts: number;
+  sym: string;
+  addr: string;
+  /** 0-100, higher = riskier (RugCheck score_normalised). */
+  score: number | null;
+  mintAuthority: string | null;
+  freezeAuthority: string | null;
+  isMintable: boolean;
+  isFreezable: boolean;
+  /** Best (highest) LP locked/burned percentage across markets, 0-100. */
+  lpLockedPct: number | null;
+  lpProviders: number | null;
+  liquidityUsd: number | null;
+  rugged: boolean;
+  risks: string[];
 }
 
 export interface BirdeyeData {
@@ -53,6 +73,7 @@ export interface BirdeyeData {
   rugScore: number;
   devActivity: string;
 }
+
 
 export interface AlertItem {
   ts: number;
