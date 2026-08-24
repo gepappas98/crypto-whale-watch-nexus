@@ -5,6 +5,7 @@
  */
 
 import { InsiderRiskData, TokenHolder, TransferEvent, DEFAULT_CEX_ADDRESSES } from '@/types/insiderRisk';
+import type { CoinData } from './whaleRadarState';
 
 // Known "scam" patterns for realistic mock generation
 const SUSPICIOUS_PATTERNS = [
@@ -183,7 +184,7 @@ function calculateMockRiskScore(
 
 // Main mock data generator
 export function generateMockInsiderData(
-  coin: any,
+  coin: CoinData,
   index: number
 ): InsiderRiskData {
   // Use symbol hash as seed for deterministic "random" data
@@ -276,7 +277,7 @@ export function generateMockInsiderData(
 }
 
 // Generate batch of mock data
-export function generateMockInsiderBatch(coins: any[]): InsiderRiskData[] {
+export function generateMockInsiderBatch(coins: CoinData[]): InsiderRiskData[] {
   return coins.map((coin, index) => generateMockInsiderData(coin, index));
 }
 

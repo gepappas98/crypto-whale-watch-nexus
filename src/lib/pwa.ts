@@ -141,7 +141,7 @@ export async function triggerBackgroundSync(tag: string = 'whale-sync'): Promise
   }
 
   try {
-    await (registration as unknown as { sync: { register: (t: string) => Promise<void> } }).sync.register(tag);
+    await (registration as ServiceWorkerRegistration & { sync: { register(tag: string): Promise<void> } }).sync.register(tag);
     console.log('[PWA] Background sync registered:', tag);
   } catch (err) {
     console.error('[PWA] Background sync failed:', err);
@@ -159,7 +159,7 @@ export function setupInstallPrompt(callback: (event: BeforeInstallPromptEvent) =
   });
 
   // Expose install function
-  (window as unknown as { installPWA: () => Promise<void> }).installPWA = async () => {
+  (window as Window & { installPWA?: () => Promise<void> }).installPWA = async () => {
     if (!deferredPrompt) return;
     
     deferredPrompt.prompt();
