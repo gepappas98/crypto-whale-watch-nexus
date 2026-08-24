@@ -678,6 +678,28 @@ const generateAIForecast = (
 // FALLBACK API HELPERS
 // ============================================================
 
+/** Binance kline tuple: [openTime, open, high, low, close, volume,
+ *  closeTime, quoteAssetVolume, numTrades, takerBuyBaseVol,
+ *  takerBuyQuoteVol, ignore] — only high/low/close/volume (indices 2-5)
+ *  are read anywhere in this file, but the array is heterogeneous
+ *  (numbers and strings mixed) so a loose element type is the honest one. */
+type BinanceKline = (number | string)[];
+
+interface CoinCapMarketData {
+  priceUsd: string;
+  changePercent24Hr: string;
+  volumeUsd24Hr: string;
+  marketCapUsd: string;
+}
+
+interface BinanceTicker24hr {
+  lastPrice: string;
+  priceChangePercent: string;
+  volume: string;
+  highPrice: string;
+  lowPrice: string;
+}
+
 /**
  * Fetch klines from Binance directly (CORS-enabled)
  */
@@ -686,7 +708,7 @@ async function fetchBinanceKlinesDirect(
   interval: string,
   limit = 200,
   timeout = 8000
-): Promise<any[] | null> {
+): Promise<BinanceKline[] | null> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
@@ -705,7 +727,7 @@ async function fetchBinanceKlinesDirect(
 /**
  * Fetch market data from CoinCap (CORS-enabled)
  */
-async function fetchCoinCapMarketData(coinId: string): Promise<any | null> {
+async function fetchCoinCapMarketData(coinId: string): Promise<CoinCapMarketData | null> {
   try {
     // api.coincap.io v2 is retired (now key-gated and CORS-blocked); calling it
     // only produced "Failed to fetch" noise. Skip straight to the Binance/CoinGecko
@@ -720,7 +742,7 @@ async function fetchCoinCapMarketData(coinId: string): Promise<any | null> {
 /**
  * Fetch market data from Binance ticker (CORS-enabled) as fallback
  */
-async function fetchBinanceTicker(symbol: string): Promise<any | null> {
+async function fetchBinanceTicker(symbol: string): Promise<BinanceTicker24hr | null> {
   try {
     const url = proxied(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}USDT`);
     const res = await fetch(url);
@@ -755,8 +777,9 @@ async function resilientFetch(
           continue;
         }
         errors.push(`Proxy ${proxyIdx} attempt ${attempt}: HTTP ${res.status}`);
-      } catch (err: any) {
-        errors.push(`Proxy ${proxyIdx} attempt ${attempt}: ${err.name || err.message}`);
+      } catch (err) {
+        const e = err instanceof Error ? err : undefined;
+        errors.push(`Proxy ${proxyIdx} attempt ${attempt}: ${e?.name || e?.message || String(err)}`);
         if (attempt < retries) {
           await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
         }
@@ -822,7 +845,7 @@ export default function WRCrystalBallPro() {
       coin: Coin,
       tf: Timeframe,
       marketData: { price: number; change24h: number; change7d: number; volume: number; marketCap: number; high24h: number; low24h: number } | null,
-      klines: any[] | null,
+      klines: BinanceKline[] | null,
       isCached: boolean
     ): AnalysisResult => {
       // --- Extract market data ---
@@ -875,10 +898,10 @@ export default function WRCrystalBallPro() {
 
       // --- Technical analysis (if we have klines) ---
       if (klines && Array.isArray(klines) && klines.length > 30) {
-        const closes = klines.map((k: any) => parseFloat(k[4]));
-        const highs = klines.map((k: any) => parseFloat(k[2]));
-        const lows = klines.map((k: any) => parseFloat(k[3]));
-        const volumes = klines.map((k: any) => parseFloat(k[5]));
+        const closes = klines.map((k) => parseFloat(k[4] as string));
+        const highs = klines.map((k) => parseFloat(k[2] as string));
+        const lows = klines.map((k) => parseFloat(k[3] as string));
+        const volumes = klines.map((k) => parseFloat(k[5] as string));
 
         const rsiValues = calculateRSI(closes);
         rsiVal = rsiValues[rsiValues.length - 1] || 50;
@@ -1124,13 +1147,13 @@ export default function WRCrystalBallPro() {
       // Mark degraded if we couldn't get both marketData and klinesData from at least one live source
       const hasLiveData = !!marketData && !!klinesData;
       setIsDegraded(!hasLiveData);
-    } catch (err: any) {
+    } catch (err) {
       // If we had cached data, keep it and only show degraded status
       if (hasCachedData) {
         setIsDegraded(true);
         setError(null);
       } else {
-        setError(err.message || "Failed to fetch data. Please try again.");
+        setError(err instanceof Error ? err.message : "Failed to fetch data. Please try again.");
         setIsDegraded(true);
       }
     } finally {

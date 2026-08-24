@@ -153,7 +153,11 @@ export function detectWalletType(bytecode?: string, codeHash?: string): 'GNOSIS_
 export function analyzePrePumpPattern(
   transfers: TransferEvent[],
   priceChange24h: number
-): { detected: boolean; confidence: number; details?: any } {
+): {
+  detected: boolean;
+  confidence: number;
+  details?: { transfers: TransferEvent[]; totalAmount: number; avgHoursBefore: number };
+} {
   if (!transfers.length || priceChange24h < 20) {
     return { detected: false, confidence: 0 };
   }
@@ -254,6 +258,10 @@ export function exportInsiderRiskCSV(data: InsiderRiskData[]): void {
   document.body.removeChild(link);
 }
 
+interface EtherscanHolderRow { TokenHolderAddress: string; TokenHolderQuantity: string }
+interface EtherscanTransferRow { from: string; to: string; value: string; tokenDecimal: string; timeStamp: string; hash: string }
+interface EtherscanListResponse<T> { status: string; message?: string; result: T[] }
+
 /**
  * Fetch token holders from Etherscan
  */
@@ -264,15 +272,15 @@ export async function fetchEtherscanTokenHolders(
   const url = `https://api.etherscan.io/api?module=token&action=tokenholderlist&contractaddress=${contractAddress}&page=1&offset=10&apikey=${apiKey}`;
 
   const response = await fetch(url);
-  const data = await response.json();
+  const data = await response.json() as EtherscanListResponse<EtherscanHolderRow>;
 
   if (data.status !== '1') {
     throw new Error(data.message || 'Failed to fetch holders');
   }
 
-  const totalSupply = data.result.reduce((sum: number, h: any) => sum + parseFloat(h.TokenHolderQuantity), 0);
+  const totalSupply = data.result.reduce((sum, h) => sum + parseFloat(h.TokenHolderQuantity), 0);
 
-  return data.result.map((h: any) => ({
+  return data.result.map((h) => ({
     address: h.TokenHolderAddress,
     balance: parseFloat(h.TokenHolderQuantity),
     percentage: (parseFloat(h.TokenHolderQuantity) / totalSupply) * 100,
@@ -292,13 +300,13 @@ export async function fetchEtherscanTransfers(
   const url = `https://api.etherscan.io/api?module=account&action=tokentx&contractaddress=${contractAddress}&address=${deployerAddress}&page=1&offset=100&sort=desc&apikey=${apiKey}`;
 
   const response = await fetch(url);
-  const data = await response.json();
+  const data = await response.json() as EtherscanListResponse<EtherscanTransferRow>;
 
   if (data.status !== '1') {
     return [];
   }
 
-  return data.result.map((tx: any) => ({
+  return data.result.map((tx) => ({
     from: tx.from,
     to: tx.to,
     value: parseFloat(tx.value) / Math.pow(10, parseInt(tx.tokenDecimal)),
@@ -314,7 +322,7 @@ export async function fetchEtherscanTransfers(
 export async function fetchBirdeyeTokenData(
   mintAddress: string,
   apiKey: string
-): Promise<any> {
+): Promise<unknown> {
   const response = await fetch(`https://public-api.birdeye.so/defi/token_overview?address=${mintAddress}`, {
     headers: {
       'X-API-KEY': apiKey,
