@@ -141,7 +141,7 @@ export async function triggerBackgroundSync(tag: string = 'whale-sync'): Promise
   }
 
   try {
-    await (registration as any).sync.register(tag);
+    await (registration as unknown as { sync: { register: (t: string) => Promise<void> } }).sync.register(tag);
     console.log('[PWA] Background sync registered:', tag);
   } catch (err) {
     console.error('[PWA] Background sync failed:', err);
@@ -159,7 +159,7 @@ export function setupInstallPrompt(callback: (event: BeforeInstallPromptEvent) =
   });
 
   // Expose install function
-  (window as any).installPWA = async () => {
+  (window as unknown as { installPWA: () => Promise<void> }).installPWA = async () => {
     if (!deferredPrompt) return;
     
     deferredPrompt.prompt();
@@ -215,14 +215,14 @@ export function useInstallPrompt() {
 // Check if app is installed
 export function isStandalone(): boolean {
   return window.matchMedia('(display-mode: standalone)').matches ||
-         (window.navigator as any).standalone === true;
+         (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
 }
 
 // Helper: Convert base64 to Uint8Array for VAPID
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding)
-    .replace(/\-/g, '+')
+    .replace(/-/g, '+')
     .replace(/_/g, '/');
 
   const rawData = window.atob(base64);

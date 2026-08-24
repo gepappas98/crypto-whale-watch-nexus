@@ -244,7 +244,7 @@ export function useWhaleWebSocket({
     wsRef.current = null;
     if (pingInterval.current) clearInterval(pingInterval.current);
     if (wsWatchdogTimer.current) clearTimeout(wsWatchdogTimer.current);
-    if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) {} }
+    if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) { /* already closed/closing */ } }
 
     const pairs = optionsRef.current.subscribedPairs;
     if (!pairs.size) { setBinanceReady(false); return; }
@@ -284,7 +284,7 @@ export function useWhaleWebSocket({
           const trade: WhaleTrade = { ts: Date.now(), sym, side, price, qty, usdt, cls, ex: 'binance' };
           if (optionsRef.current.whaleFeedEx === 'all' || optionsRef.current.whaleFeedEx === 'binance')
             optionsRef.current.onWhaleTrade(trade);
-        } catch (_) {}
+        } catch (_) { /* malformed message, drop it */ }
       });
     };
 
@@ -314,7 +314,7 @@ export function useWhaleWebSocket({
     ws2Ref.current = null;
     if (ws2PingInterval.current) clearInterval(ws2PingInterval.current);
     if (ws2WatchdogTimer.current) clearTimeout(ws2WatchdogTimer.current);
-    if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) {} }
+    if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) { /* already closed/closing */ } }
 
     if (!optionsRef.current.bybitEnabled || !optionsRef.current.subscribedPairs.size) {
       setBybitReady(false); return;
@@ -359,7 +359,7 @@ export function useWhaleWebSocket({
             if (optionsRef.current.whaleFeedEx === 'all' || optionsRef.current.whaleFeedEx === 'bybit')
               optionsRef.current.onWhaleTrade(trade);
           });
-        } catch (_) {}
+        } catch (_) { /* malformed message, drop it */ }
       });
     };
 
@@ -408,13 +408,13 @@ export function useWhaleWebSocket({
     return () => {
       const old = wsRef.current;
       wsRef.current = null;
-      if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) {} }
+      if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) { /* already closed/closing */ } }
       if (pingInterval.current) clearInterval(pingInterval.current);
       if (wsWatchdogTimer.current) clearTimeout(wsWatchdogTimer.current);
       if (wsRebuildTimer.current) clearTimeout(wsRebuildTimer.current);
       if (wsCircuitTimer.current) clearTimeout(wsCircuitTimer.current);
       stopFallbackPollingRef.current();
-      try { httpAbortRef.current?.abort(); } catch {}
+      try { httpAbortRef.current?.abort(); } catch { /* already aborted/settled */ }
       httpAbortRef.current = new AbortController();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -426,7 +426,7 @@ export function useWhaleWebSocket({
     } else if (!bybitEnabled) {
       const old = ws2Ref.current;
       ws2Ref.current = null;
-      if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) {} }
+      if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) { /* already closed/closing */ } }
       if (ws2PingInterval.current) clearInterval(ws2PingInterval.current);
       if (ws2WatchdogTimer.current) clearTimeout(ws2WatchdogTimer.current);
       if (ws2RebuildTimer.current) clearTimeout(ws2RebuildTimer.current);
@@ -436,7 +436,7 @@ export function useWhaleWebSocket({
     return () => {
       const old = ws2Ref.current;
       ws2Ref.current = null;
-      if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) {} }
+      if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) { /* already closed/closing */ } }
       if (ws2PingInterval.current) clearInterval(ws2PingInterval.current);
       if (ws2WatchdogTimer.current) clearTimeout(ws2WatchdogTimer.current);
       if (ws2RebuildTimer.current) clearTimeout(ws2RebuildTimer.current);

@@ -9,7 +9,7 @@ const HL_TRADING_URL = 'https://api.hyperliquid.xyz/info';
 
 // Optional: explorer indexer (Hypurrscan / custom edge fn). Unset by default.
 const HL_EXPLORER_URL: string | undefined =
-  (import.meta as any)?.env?.VITE_HL_EXPLORER_URL || undefined;
+  import.meta.env?.VITE_HL_EXPLORER_URL || undefined;
 
 export function isHLConfigured(): boolean {
   return Boolean(HL_EXPLORER_URL);
@@ -17,7 +17,12 @@ export function isHLConfigured(): boolean {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export interface HLCachedResponse<T = any> {
+interface HLUniverseAsset { name: string; maxLeverage?: number }
+interface HLAssetCtx { markPx?: string; oraclePx?: string; funding?: string; openInterest?: string; dayNtlVlm?: string }
+interface HLMetaAndAssetCtxsResponse { universe?: HLUniverseAsset[] }
+interface HLFundingHistoryEntry { coin: string; fundingRate: string; premium: string; time: number }
+
+export interface HLCachedResponse<T = unknown> {
   data: T;
   cached: boolean;
   stale?: boolean;
@@ -108,7 +113,7 @@ export class HLApiError extends Error {
 
 // ── Core POST ─────────────────────────────────────────────────────────────────
 
-async function postTrading(body: unknown, signal?: AbortSignal): Promise<any> {
+async function postTrading(body: unknown, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(HL_TRADING_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -127,13 +132,13 @@ async function postTrading(body: unknown, signal?: AbortSignal): Promise<any> {
 // ── Markets builder (real Hyperliquid metaAndAssetCtxs) ───────────────────────
 
 async function fetchMarkets(signal?: AbortSignal): Promise<{ markets: HLMarket[]; summary: HLMarketSummary }> {
-  const raw = await postTrading({ type: 'metaAndAssetCtxs' }, signal);
+  const raw = await postTrading({ type: 'metaAndAssetCtxs' }, signal) as [HLMetaAndAssetCtxsResponse, HLAssetCtx[]] | undefined;
   const meta = raw?.[0];
   const ctxs = raw?.[1];
   if (!meta?.universe || !Array.isArray(ctxs)) {
     return { markets: [], summary: { totalOI: 0, totalVolume24h: 0, avgFundingRate: 0, marketCount: 0 } };
   }
-  const markets: HLMarket[] = meta.universe.map((u: any, i: number) => {
+  const markets: HLMarket[] = meta.universe.map((u, i) => {
     const c = ctxs[i] ?? {};
     const mark = parseFloat(c.markPx ?? '0');
     const oracle = parseFloat(c.oraclePx ?? '0');
@@ -161,21 +166,21 @@ async function fetchMarkets(signal?: AbortSignal): Promise<{ markets: HLMarket[]
 
 // ── Unified fetch (used by hooks) ─────────────────────────────────────────────
 
-export async function hlFetch<T = any>(
+export async function hlFetch<T = unknown>(
   endpoint: HLEndpoint,
   paramOrParams?: string | { coin?: string; user?: string; startTime?: number },
   signal?: AbortSignal,
 ): Promise<HLCachedResponse<T>> {
   const start = performance.now();
-  let data: any;
+  let data: unknown;
 
   switch (endpoint) {
     // ── Real trading data (Hyperliquid public API) ─────────────────────────
     case 'allMids': {
-      const raw = await postTrading({ type: 'allMids' }, signal);
+      const raw = await postTrading({ type: 'allMids' }, signal) as Record<string, string>;
       data = Object.entries(raw).map(([symbol, price]) => ({
         symbol,
-        price: parseFloat(price as string),
+        price: parseFloat(price),
       }));
       break;
     }
@@ -194,8 +199,8 @@ export async function hlFetch<T = any>(
         type: 'fundingHistory',
         coin: p.coin.toUpperCase(),
         startTime: p.startTime ?? Date.now() - 86_400_000,
-      }, signal);
-      data = (raw as any[]).map((f) => ({
+      }, signal) as HLFundingHistoryEntry[];
+      data = raw.map((f) => ({
         coin: f.coin,
         fundingRate: parseFloat(f.fundingRate),
         premium: parseFloat(f.premium),
@@ -206,13 +211,14 @@ export async function hlFetch<T = any>(
     case 'l2Book': {
       const p = typeof paramOrParams === 'object' ? paramOrParams : undefined;
       if (!p?.coin) throw new HLApiError('coin required');
-      const raw = await postTrading({ type: 'l2Book', coin: p.coin.toUpperCase() }, signal);
+      const raw = await postTrading({ type: 'l2Book', coin: p.coin.toUpperCase() }, signal) as {
+        coin: string;
+        levels?: [Array<{ px: string; sz: string }>, Array<{ px: string; sz: string }>];
+      };
       data = {
         coin: raw.coin,
-        bids: ((raw.levels?.[0] ?? []) as Array<{ px: string; sz: string }>)
-          .map((l) => ({ price: parseFloat(l.px), size: parseFloat(l.sz) })),
-        asks: ((raw.levels?.[1] ?? []) as Array<{ px: string; sz: string }>)
-          .map((l) => ({ price: parseFloat(l.px), size: parseFloat(l.sz) })),
+        bids: (raw.levels?.[0] ?? []).map((l) => ({ price: parseFloat(l.px), size: parseFloat(l.sz) })),
+        asks: (raw.levels?.[1] ?? []).map((l) => ({ price: parseFloat(l.px), size: parseFloat(l.sz) })),
       };
       break;
     }

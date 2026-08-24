@@ -281,7 +281,7 @@ export function HLExplorer({ isActive = true }: HLExplorerProps) {
         {SUB_TABS.map((t) => (
           <button
             key={t.id}
-            onClick={() => setSubTab(t.id as any)}
+            onClick={() => setSubTab(t.id as typeof subTab)}
             className={`px-3 py-2 text-xs font-medium transition-colors ${
               subTab === t.id
                 ? 'text-wr-cyan border-b-2 border-wr-cyan'

@@ -30,8 +30,8 @@ export async function safeInvoke<T = unknown>(
   try {
     const { data, error } = await supabase.functions.invoke(fnName, options);
     if (error) return { data: null, error: new Error(error.message ?? String(error)) };
-    if (data && typeof data === 'object' && 'error' in (data as any)) {
-      return { data: null, error: new Error(String((data as any).error)) };
+    if (data && typeof data === 'object' && 'error' in (data as Record<string, unknown>)) {
+      return { data: null, error: new Error(String((data as Record<string, unknown>).error)) };
     }
     return { data: data as T, error: null };
   } catch (err) {

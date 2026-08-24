@@ -124,7 +124,7 @@ export function installChunkRecovery(): void {
         ((target as HTMLScriptElement).src?.includes('/assets/') ||
           (target as HTMLLinkElement).href?.includes('/assets/'))
       ) {
-        handle(new Error(`Failed to load ${target.tagName}: ${(target as any).src || (target as any).href}`), 'resource');
+        handle(new Error(`Failed to load ${target.tagName}: ${(target as HTMLScriptElement).src || (target as HTMLLinkElement).href}`), 'resource');
         return;
       }
       handle(event.error, 'error');

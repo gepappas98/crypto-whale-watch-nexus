@@ -146,7 +146,7 @@ export function useWhaleStream({
       if (pingTimer.current) { clearInterval(pingTimer.current); pingTimer.current = null; }
       const ws = wsRef.current;
       wsRef.current = null;
-      if (ws) { ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null; try { ws.close(); } catch (_) {} }
+      if (ws) { ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null; try { ws.close(); } catch (_) { /* already closed/closing */ } }
     };
   }, [enabled, connect]);
 

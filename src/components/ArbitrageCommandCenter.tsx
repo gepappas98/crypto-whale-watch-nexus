@@ -62,15 +62,15 @@ export default function ArbitrageCommandCenter() {
 
         try {
           hlPrice = parseFloat(hlMids[sym] || '0') || null;
-        } catch (_) {}
+        } catch (_) { /* price unavailable, stays null */ }
 
         try {
           binPrice = await fetchBinancePrice(sym);
-        } catch (_) {}
+        } catch (_) { /* price unavailable, stays null */ }
 
         try {
           bpPrice = await fetchBackpackPrice(sym);
-        } catch (_) {}
+        } catch (_) { /* price unavailable, stays null */ }
 
         const prices = [hlPrice, bpPrice, binPrice].filter((p): p is number => p !== null);
         if (prices.length < 2) continue;

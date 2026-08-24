@@ -21,7 +21,7 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useHLBlocks, useHLTxs, useHLMarkets } from './useHyperliquid';
-import type { HLBlock, HLTx } from '@/lib/hyperliquid';
+import type { HLBlock, HLTx, HLMarket } from '@/lib/hyperliquid';
 import type { AlertItem } from '@/lib/whaleRadarState';
 
 // ── Thresholds ────────────────────────────────────────────────────────────────
@@ -294,7 +294,7 @@ export function useHLManipulationScanner({
 
     const newOpportunities: HLOpportunity[] = [];
 
-    markets.forEach((m: any) => {
+    markets.forEach((m: HLMarket) => {
       const fundingRate = m.fundingRate || 0;
       const premium = m.premium || 0;
       const oi = m.openInterest || 0;

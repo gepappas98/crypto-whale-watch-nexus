@@ -117,7 +117,7 @@ export function useMarketData({
 
   // Cancellable per-scan controller
   const scanAbortRef = useRef<AbortController | null>(null);
-  useEffect(() => () => { try { scanAbortRef.current?.abort(); } catch {} }, []);
+  useEffect(() => () => { try { scanAbortRef.current?.abort(); } catch { /* already aborted/settled */ } }, []);
 
   // ── enrichCoins (Birdeye + DexScreener side-fetches) ──────────────────────
   const enrichCoins = useCallback(async (mapped: CoinData[]) => {
@@ -293,7 +293,7 @@ export function useMarketData({
     setScanning(true);
     setScanBadge('SCANNING');
 
-    try { scanAbortRef.current?.abort(); } catch {}
+    try { scanAbortRef.current?.abort(); } catch { /* already aborted/settled */ }
     scanAbortRef.current = new AbortController();
     const signal = scanAbortRef.current.signal;
 

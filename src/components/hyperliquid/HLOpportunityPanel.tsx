@@ -16,6 +16,7 @@
 
 import React, { useMemo, useState, useCallback } from 'react';
 import { useHLMarkets } from '@/hooks/useHyperliquid';
+import type { HLMarket } from '@/lib/hyperliquid';
 import { fmtN } from '@/lib/whaleRadarState';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -112,13 +113,13 @@ export const HLOpportunityPanel: React.FC<HLOpportunityPanelProps> = ({
 
     const opportunities: HLSignal[] = [];
 
-    markets.forEach((m: any) => {
+    markets.forEach((m: HLMarket) => {
       const fundingRate = m.fundingRate || 0;
       const premium = m.premium || 0;
       const oi = m.openInterest || 0;
       const vol = m.dayVolume || 0;
       const markPrice = m.markPrice || 0;
-      const indexPrice = m.indexPrice || m.oraclePrice || 0;
+      const indexPrice = m.oraclePrice || 0;
       const maxLev = m.maxLeverage || 0;
 
       // ── 1. FUNDING RATE ARBITRAGE ──────────────────────────────────────
@@ -363,6 +364,14 @@ export const HLOpportunityPanel: React.FC<HLOpportunityPanelProps> = ({
     return result.slice(0, maxSignals);
   }, [markets, minApy, maxSignals, filterType, sortBy]);
 
+  // Must run before the `enabled` early return below — Rules of Hooks
+  // requires every hook to run on every render, and this one previously
+  // sat after that guard, so it was skipped whenever enabled=false while
+  // still being called on other renders.
+  const handleTradeClick = useCallback((symbol: string) => {
+    window.open(`https://app.hyperliquid.xyz/trade/${symbol}`, '_blank', 'noopener,noreferrer');
+  }, []);
+
   if (!enabled) return null;
 
   // ── Type config ──────────────────────────────────────────────────────────
@@ -451,10 +460,6 @@ export const HLOpportunityPanel: React.FC<HLOpportunityPanelProps> = ({
     if (side === 'SHORT') return <ArrowDownRight className="w-3 h-3 text-red-400" />;
     return <Shield className="w-3 h-3 text-blue-400" />;
   };
-
-  const handleTradeClick = useCallback((symbol: string) => {
-    window.open(`https://app.hyperliquid.xyz/trade/${symbol}`, '_blank', 'noopener,noreferrer');
-  }, []);
 
   const totalOI = summary?.totalOI ?? 0;
   const totalVol = summary?.totalVolume24h ?? 0;
