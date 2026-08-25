@@ -3,7 +3,8 @@ import { REGIME_COLORS, PERSISTENCE_SNAPSHOTS } from '@/lib/regime/engine';
 import { SIGNAL_ORDER } from '@/lib/regime/weights';
 import { FAMILY_ORDER, FAMILY_LABELS, SIGNAL_FAMILIES } from '@/lib/regime/families';
 import { useRegimeAlerts } from '@/hooks/useRegimeAlerts';
-import type { RegimeReading, RegimeSignal, RegimeSnapshot, RegimeWeights } from '@/lib/regime/types';
+import { useRegimeBacktest } from '@/hooks/useRegimeBacktest';
+import type { RegimeName, RegimeReading, RegimeSignal, RegimeSnapshot, RegimeWeights } from '@/lib/regime/types';
 
 const NOOP_ADD_ALERT = () => {};
 
@@ -55,6 +56,8 @@ export function RegimePanel({ reading, history, weights, setWeights, restoreDefa
   useRegimeAlerts(reading, addAlert ?? NOOP_ADD_ALERT);
   const [open, setOpen] = useState(false);
   const [tuning, setTuning] = useState(false);
+  const [backtestOpen, setBacktestOpen] = useState(false);
+  const backtest = useRegimeBacktest();
 
   const spark = history.slice(-40);
   const regimeColor = reading ? REGIME_COLORS[reading.regime] : 'text-wr-muted';
@@ -123,6 +126,9 @@ export function RegimePanel({ reading, history, weights, setWeights, restoreDefa
         </button>
         <button onClick={() => setTuning((p) => !p)} aria-label="Tune regime signal weights" className={BTN}>
           ⚖ WEIGHTS
+        </button>
+        <button onClick={() => setBacktestOpen((p) => !p)} aria-label="Backtest the regime engine's own historical calls" className={BTN}>
+          📊 BACKTEST
         </button>
         <button
           onClick={() => setOpen((p) => !p)}
@@ -209,6 +215,72 @@ export function RegimePanel({ reading, history, weights, setWeights, restoreDefa
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {backtestOpen && (
+        <div className="px-4 pb-3 border-t border-wr-border pt-2">
+          <div className="flex items-center gap-2 mb-2">
+            <h2 className="text-[9px] tracking-widest text-wr-muted">
+              BACKTEST — confirmed regime calls vs actual forward BTC price
+            </h2>
+            <button onClick={() => backtest.run(history)} className={BTN} disabled={backtest.loading}>
+              {backtest.loading ? 'RUNNING…' : backtest.result ? 'RE-RUN' : 'RUN'}
+            </button>
+          </div>
+
+          {backtest.error && <p className="text-[10px] text-wr-red">{backtest.error}</p>}
+
+          {!backtest.result && !backtest.loading && !backtest.error && (
+            <p className="text-[10px] text-wr-muted leading-snug">
+              Tests every confirmed regime call still in your local history against actual forward
+              BTC price action at 1h/4h/24h. Only as deep as this browser's own accumulated
+              session (history caps at 400 snapshots, ~5 min apart) — not a multi-year replay.
+            </p>
+          )}
+
+          {backtest.result && (
+            <div className="space-y-2">
+              <p className="text-[10px] text-wr-muted">
+                {backtest.result.resolvedCalls} of {backtest.result.totalConfirmedCalls} confirmed
+                calls have a resolvable forward price so far — recent ones need time to reach
+                their horizon.
+              </p>
+              {backtest.result.totalConfirmedCalls === 0 ? (
+                <p className="text-[10px] text-wr-muted">
+                  No confirmed regime transitions in local history yet — a regime has to hold for
+                  {` ${PERSISTENCE_SNAPSHOTS} `}consecutive checks before it counts as a call.
+                </p>
+              ) : (
+                <table className="text-[10px] w-full">
+                  <thead>
+                    <tr className="text-wr-muted text-left">
+                      <th className="pr-3 font-normal">Regime</th>
+                      <th className="pr-3 font-normal">Calls</th>
+                      {backtest.result.horizonsHours.map((h) => (
+                        <th key={h} className="pr-3 font-normal">{h}h avg / hit%</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(backtest.result.byRegime).map(([regime, stats]) => (
+                      <tr key={regime}>
+                        <td className={REGIME_COLORS[regime as RegimeName]}>{regime}</td>
+                        <td className="text-wr-white">{stats!.count}</td>
+                        {backtest.result!.horizonsHours.map((h) => (
+                          <td key={h} className="text-wr-white whitespace-nowrap">
+                            {stats!.avgReturnPctByHorizon[h] == null ? '—' : `${stats!.avgReturnPctByHorizon[h]!.toFixed(1)}%`}
+                            {' / '}
+                            {stats!.hitRatePctByHorizon[h] == null ? '—' : `${stats!.hitRatePctByHorizon[h]!.toFixed(0)}%`}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </div>
       )}
     </section>
