@@ -50,6 +50,15 @@ export interface RegimeSnapshot {
   /** How many signals had usable data this tick. */
   active: number;
   signals: RegimeSignal[];
+  /** Optional because the RegimeSnapshot type predates confirmedRegime, but
+   *  it's genuinely present on every entry engine.ts's evaluate() persists —
+   *  writeHistory() is handed the full RegimeReading (which has this field),
+   *  not a stripped-down snapshot, so it's really in localStorage today.
+   *  Declared here, not just on RegimeReading, so backtest.ts (which reads
+   *  persisted history as RegimeSnapshot[]) can access it type-safely
+   *  instead of casting. Absent/undefined on any snapshot written before
+   *  this field existed. */
+  confirmedRegime?: RegimeName | null;
 }
 
 /** One signal family's aggregated read — see families.ts for why families
