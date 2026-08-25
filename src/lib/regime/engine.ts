@@ -1,5 +1,6 @@
 /* ══ REGIME ENGINE — scoring, classification, persistence ══════════════════ */
-import type { RegimeName, RegimeReading, RegimeSignal, RegimeSnapshot, RegimeWeights } from './types';
+import type { RegimeName, RegimeReading, RegimeSignal, RegimeSnapshot, RegimeWeights, FamilyReading } from './types';
+import { FAMILY_ORDER, FAMILY_LABELS, SIGNAL_FAMILIES } from './families';
 
 const HISTORY_KEY = 'wr_regime_history';
 const MAX_HISTORY = 400;
@@ -34,6 +35,36 @@ export function classify(score: number, acceleration: number | null): RegimeName
   if (score >= 43) return 'NEUTRAL';
   if (score >= 28) return 'RECOVERY';
   return 'BEAR';
+}
+
+/** Aggregate signals into their 5 families (see families.ts). Mirrors
+ *  scoreOf()'s own rules for what counts as "active" (usable score AND a
+ *  nonzero weight) so a family's active/agreeing counts stay comparable to
+ *  the overall reading's — just scoped to that family's members instead of
+ *  all 10 signals. Each family judges "agreeing" against ITS OWN dominant
+ *  direction, not the overall reading's, so a family can legitimately show
+ *  e.g. 1/2 agreeing while still being the family dragging the overall
+ *  score the other way. */
+function familyReadings(signals: RegimeSignal[], weights: RegimeWeights): FamilyReading[] {
+  return FAMILY_ORDER.map((id) => {
+    const members = signals.filter(
+      (s) => SIGNAL_FAMILIES[s.id] === id && s.score != null && (weights[s.id] ?? 0) > 0,
+    );
+    if (members.length === 0) {
+      return { id, label: FAMILY_LABELS[id], score: null, active: 0, agreeing: 0 };
+    }
+    let wSum = 0;
+    let acc = 0;
+    for (const s of members) {
+      const w = weights[s.id] ?? 0;
+      wSum += w;
+      acc += w * (s.score as number);
+    }
+    const score = wSum > 0 ? acc / wSum : 0;
+    const dir = score >= 0 ? 1 : -1;
+    const agreeing = members.filter((s) => (s.score as number) * dir > 0.2).length;
+    return { id, label: FAMILY_LABELS[id], score, active: members.length, agreeing };
+  });
 }
 
 export const REGIME_COLORS: Record<RegimeName, string> = {
@@ -84,6 +115,12 @@ function buildReasons(reading: Omit<RegimeReading, 'reasons'>): string[] {
     .map((s) => s.detail);
 
   const head = `${reading.agreeing} of ${reading.active} live signals agree on a ${dir > 0 ? 'bullish' : 'bearish'} read (score ${reading.score}/100).`;
+  const familiesActive = reading.families.filter((f) => f.score != null);
+  const familiesLeaning = familiesActive.filter((f) => (f.score as number) * dir > 0.2).length;
+  const breadth =
+    familiesActive.length > 0
+      ? `That holds across ${familiesLeaning} of ${familiesActive.length} independent signal families (not just a cluster of correlated signals within one).`
+      : null;
   const persistence =
     reading.confirmedRegime
       ? `${reading.regime} has held for ${reading.heldSnapshots} consecutive checks — treated as confirmed.`
@@ -93,7 +130,7 @@ function buildReasons(reading: Omit<RegimeReading, 'reasons'>): string[] {
       ? 'Not enough history yet to read acceleration.'
       : `Regime score is moving ${reading.acceleration >= 0 ? '+' : ''}${reading.acceleration.toFixed(1)} pts/hour.`;
 
-  return [head, persistence, accel, ...contributing];
+  return [head, breadth, persistence, accel, ...contributing].filter((l): l is string => l != null);
 }
 
 /** Score signals against history WITHOUT persisting — used when the read is
@@ -144,6 +181,7 @@ function buildReading(signals: RegimeSignal[], weights: RegimeWeights, history: 
     acceleration,
     confirmedRegime: held >= PERSISTENCE_SNAPSHOTS ? regime : null,
     heldSnapshots: held,
+    families: familyReadings(signals, weights),
   };
 
   return { ...base, reasons: buildReasons(base) };

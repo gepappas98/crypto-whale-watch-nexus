@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { REGIME_COLORS, PERSISTENCE_SNAPSHOTS } from '@/lib/regime/engine';
 import { SIGNAL_ORDER } from '@/lib/regime/weights';
+import { FAMILY_ORDER, FAMILY_LABELS, SIGNAL_FAMILIES } from '@/lib/regime/families';
 import { useRegimeAlerts } from '@/hooks/useRegimeAlerts';
 import type { RegimeReading, RegimeSignal, RegimeSnapshot, RegimeWeights } from '@/lib/regime/types';
 
@@ -87,6 +88,16 @@ export function RegimePanel({ reading, history, weights, setWeights, restoreDefa
         )}
 
         {reading && (
+          <span
+            className="text-[9px] tracking-widest text-wr-cyan"
+            title="How many of the 5 independent signal families (Trend, Derivatives, Flow, Sentiment, Dominance) lean the same way — a more honest breadth read than raw signal count, since several signals within one family are correlated readings of the same underlying thing"
+          >
+            🔗 {reading.families.filter((f) => f.score != null && f.score * (reading.score >= 50 ? 1 : -1) > 0.2).length}
+            /{reading.families.filter((f) => f.score != null).length} FAMILIES
+          </span>
+        )}
+
+        {reading && (
           <span className="flex items-center gap-2">
             <Delta label="5m" value={reading.delta5m} />
             <Delta label="30m" value={reading.delta30m} />
@@ -135,17 +146,32 @@ export function RegimePanel({ reading, history, weights, setWeights, restoreDefa
           </div>
           <div>
             <h2 className="text-[9px] tracking-widest text-wr-muted mb-1">SIGNALS</h2>
-            <ul className="space-y-0.5">
-              {reading.signals.map((s) => (
-                <li key={s.id} className="flex items-center justify-between gap-2 text-[10px]" title={s.detail}>
-                  <span className="text-wr-muted truncate">{s.label}</span>
-                  <span className={`${signalTone(s)} whitespace-nowrap`}>
-                    {s.value}
-                    <span className="text-wr-muted"> · w{weights[s.id]}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+            {reading.families.map((f) => {
+              const members = reading.signals.filter((s) => SIGNAL_FAMILIES[s.id] === f.id);
+              if (members.length === 0) return null;
+              return (
+                <div key={f.id} className="mb-1.5">
+                  <div
+                    className="text-[9px] tracking-widest text-wr-muted/70 flex items-center justify-between"
+                    title={`${f.label} family — ${f.score == null ? 'no usable data this tick' : `${f.agreeing}/${f.active} members agree with each other`}`}
+                  >
+                    <span>{f.label.toUpperCase()}</span>
+                    <span>{f.score == null ? '—' : `${f.agreeing}/${f.active}`}</span>
+                  </div>
+                  <ul className="space-y-0.5">
+                    {members.map((s) => (
+                      <li key={s.id} className="flex items-center justify-between gap-2 text-[10px]" title={s.detail}>
+                        <span className="text-wr-muted truncate pl-2">{s.label}</span>
+                        <span className={`${signalTone(s)} whitespace-nowrap`}>
+                          {s.value}
+                          <span className="text-wr-muted"> · w{weights[s.id]}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -156,24 +182,31 @@ export function RegimePanel({ reading, history, weights, setWeights, restoreDefa
             <h2 className="text-[9px] tracking-widest text-wr-muted">SIGNAL WEIGHTS (rescores instantly)</h2>
             <button onClick={restoreDefaults} className={BTN}>RESET</button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
-            {SIGNAL_ORDER.map((id) => (
-              <label key={id} className="flex items-center gap-2 text-[10px]">
-                <span className="text-wr-muted w-40 truncate">
-                  {reading?.signals.find((s) => s.id === id)?.label ?? id}
-                </span>
-                <input
-                  type="range"
-                  min={0}
-                  max={30}
-                  step={1}
-                  value={weights[id]}
-                  onChange={(e) => setWeights({ ...weights, [id]: Number(e.target.value) })}
-                  className="flex-1"
-                  aria-label={`Weight for ${id}`}
-                />
-                <span className="text-wr-cyan w-6 text-right">{weights[id]}</span>
-              </label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
+            {FAMILY_ORDER.map((fid) => (
+              <div key={fid} className="col-span-1 md:col-span-2">
+                <div className="text-[9px] tracking-widest text-wr-muted/70 mb-0.5">{FAMILY_LABELS[fid]}</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+                  {SIGNAL_ORDER.filter((id) => SIGNAL_FAMILIES[id] === fid).map((id) => (
+                    <label key={id} className="flex items-center gap-2 text-[10px]">
+                      <span className="text-wr-muted w-40 truncate pl-2">
+                        {reading?.signals.find((s) => s.id === id)?.label ?? id}
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={30}
+                        step={1}
+                        value={weights[id]}
+                        onChange={(e) => setWeights({ ...weights, [id]: Number(e.target.value) })}
+                        className="flex-1"
+                        aria-label={`Weight for ${id}`}
+                      />
+                      <span className="text-wr-cyan w-6 text-right">{weights[id]}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>

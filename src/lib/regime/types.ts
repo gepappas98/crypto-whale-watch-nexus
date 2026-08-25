@@ -3,6 +3,7 @@
  *  Strategic Direction). Everything here is market-WIDE, not per-asset: the
  *  per-asset machinery (scanner, council, ML confidence) already exists.
  * ═══════════════════════════════════════════════════════════════════════════ */
+import type { FamilyId } from './families';
 
 export type RegimeName =
   | 'BEAR'
@@ -51,6 +52,22 @@ export interface RegimeSnapshot {
   signals: RegimeSignal[];
 }
 
+/** One signal family's aggregated read — see families.ts for why families
+ *  exist and which signals belong to which. */
+export interface FamilyReading {
+  id: FamilyId;
+  label: string;
+  /** Weighted-average score of this family's active, weighted signals,
+   *  -1..1. Null if no member signal had usable data this tick. */
+  score: number | null;
+  /** How many member signals had usable (non-null) data this tick and a
+   *  nonzero weight. */
+  active: number;
+  /** Of those active signals, how many agree with THIS family's own
+   *  dominant direction — not the overall reading's direction. */
+  agreeing: number;
+}
+
 export interface RegimeReading extends RegimeSnapshot {
   /** Score change over each horizon (null until history is deep enough). */
   delta5m: number | null;
@@ -66,6 +83,11 @@ export interface RegimeReading extends RegimeSnapshot {
   heldSnapshots: number;
   /** Plain-language trigger list for the current reading. */
   reasons: string[];
+  /** Signals grouped into 5 (mostly-)independent families — see
+   *  families.ts. A more honest breadth read than raw agreeing/active,
+   *  since several raw signals are correlated readings of the same
+   *  underlying thing (e.g. fng_level/fng_roc both come off one index). */
+  families: FamilyReading[];
 }
 
 export type RegimeWeights = Record<SignalId, number>;
