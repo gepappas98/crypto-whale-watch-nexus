@@ -104,4 +104,5 @@ export const RL_KEYS = {
   BIRDEYE:     'birdeye',
   BACKEND:     'backend',
   DEXSCREENER: 'dexscreener',
+  RUGCHECK:    'rugcheck',
 } as const;
