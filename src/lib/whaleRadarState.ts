@@ -40,6 +40,12 @@ export interface CoinData {
   birdData: BirdeyeData | null;
   /** Keyless RugCheck on-chain risk report — undefined until enrichment runs. */
   rugCheck?: RugCheckData | null;
+  /** Chain slug -> contract address, from CoinGecko's include_platform=true.
+   *  Empty/undefined for native L1 coins that aren't a token on another
+   *  chain (BTC, ETH itself, SOL itself, etc.) — that's correct, not a gap.
+   *  This is what the Insider Risk Scanner's real-data path (insiderRiskApi.ts)
+   *  needs a contract address from; see its InsiderRiskCoin comment. */
+  platforms?: Record<string, string> | null;
 }
 
 export interface RugCheckData {
