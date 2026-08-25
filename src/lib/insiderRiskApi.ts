@@ -15,21 +15,26 @@ import { detectCEX, detectWalletType, detectPrePumpPattern } from './insiderRisk
 import type { CoinData } from './whaleRadarState';
 
 /** What analyzeTokenRisk actually reads off a "coin" beyond CoinData's real
- *  fields. IMPORTANT — found while removing `any` here, not fixed: nothing
- *  in this app's CoinData pipeline (useMarketData.ts) ever sets chain/
- *  platforms/contract_address — coin.id is a CoinGecko slug like "bitcoin",
- *  never a contract address. That means isSolana below is always false and
- *  contractAddress is always undefined for every real coin this app scans,
- *  so the Etherscan/Birdeye "real data" path always throws and every scan
- *  silently falls back to generateMockInsiderData() in
- *  WRInsiderRiskScanner.tsx's catch block — regardless of the useRealData
- *  toggle or whether API keys are configured. This type change doesn't fix
- *  that; it just stops `any` from hiding it. A real fix needs a decision
- *  about where a per-coin contract address should come from (e.g. an extra
- *  CoinGecko /coins/{id} lookup per scanned coin) — not made here. */
+ *  fields. FIXED: this was dead for every real coin — CoinData.platforms was
+ *  never populated (useMarketData.ts's CoinGecko request used
+ *  include_platform=false), so isSolana was always false and contractAddress
+ *  always undefined, meaning the Etherscan/Birdeye "real data" path always
+ *  threw and every scan silently fell back to generateMockInsiderData()
+ *  regardless of the useRealData toggle or configured API keys. Fixed at the
+ *  source rather than here: the existing bulk CoinGecko request now passes
+ *  include_platform=true (server proxy in scan.ts and the direct-CG fallback
+ *  in services/api.ts), which adds a chain->contract-address `platforms` map
+ *  to every coin at zero extra request cost, and useMarketData.ts's
+ *  processData() carries it through onto CoinData.platforms. `coin.id` is
+ *  still just a CoinGecko slug, never a contract address — that part of this
+ *  note remains true; `coin.chain`/`coin.contract_address` below stay as a
+ *  fallback for any caller that sets them directly, but the real, populated
+ *  field for every scanned coin is now `coin.platforms`. Native L1 coins
+ *  (BTC, ETH itself, SOL itself, etc.) correctly have an empty platforms
+ *  object — there's no contract to inspect — and still degrade to mock data,
+ *  which is the right behavior, not a remaining gap. */
 type InsiderRiskCoin = CoinData & {
   chain?: string;
-  platforms?: { solana?: string; ethereum?: string };
   contract_address?: string;
 };
 

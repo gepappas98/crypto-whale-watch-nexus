@@ -74,7 +74,12 @@ export async function runScan({
   const cgBase = isCgProKey
     ? 'https://pro-api.coingecko.com/api/v3'
     : 'https://api.coingecko.com/api/v3';
-  const cgUrl = `${cgBase}/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h&include_platform=false`;
+  // include_platform=true adds a `platforms` object (chain slug -> contract
+  // address) to every coin at zero extra request cost — this is what feeds
+  // CoinData.platforms, which the Insider Risk Scanner's real-data path
+  // needs to ever have a contract address to look up (see useMarketData.ts
+  // processData() and insiderRiskApi.ts's InsiderRiskCoin note).
+  const cgUrl = `${cgBase}/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h&include_platform=true`;
   const cgHeaders: Record<string, string> = {};
   if (isCgProKey)  cgHeaders['x-cg-pro-api-key']  = apiKey;
   if (isCgDemoKey) cgHeaders['x-cg-demo-api-key'] = apiKey;

@@ -208,6 +208,12 @@ export function useMarketData({
         score: det.score, threat: det.threat, category: det.category,
         confidence: det.confidence, reasons: det.reasons,
         dexHot: false, dsLiq: null, isSol, birdData: null,
+        // Present when the scan request used include_platform=true (both the
+        // server /api/scan proxy and the direct CoinGecko fallback do) —
+        // chain slug -> contract address. This is the field the Insider Risk
+        // Scanner's real-data path needs; see insiderRiskApi.ts's
+        // InsiderRiskCoin comment for the gap this closes.
+        platforms: (c.platforms as Record<string, string> | null | undefined) ?? null,
       }];
     });
 

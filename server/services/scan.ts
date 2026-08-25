@@ -15,6 +15,11 @@ interface CoinGeckoRaw {
   circulating_supply: number | null;
   total_supply: number | null;
   market_cap_rank: number | null;
+  /** Present when the request includes include_platform=true — chain slug
+   *  (e.g. "ethereum", "solana") -> contract address. Empty object for
+   *  native L1 coins (BTC, ETH, SOL itself, etc.) that aren't a token on
+   *  another chain. */
+  platforms?: Record<string, string> | null;
 }
 
 export interface ScanCoin {
@@ -29,6 +34,7 @@ export interface ScanCoin {
   rank: number;
   circulating_supply: number | null;
   total_supply: number | null;
+  platforms?: Record<string, string> | null;
 }
 
 export interface ScanResult {
@@ -119,6 +125,7 @@ function transformOne(c: CoinGeckoRaw, i: number): ScanCoin | null {
     rank: c.market_cap_rank ?? (i + 1),
     circulating_supply: c.circulating_supply,
     total_supply: c.total_supply,
+    platforms: c.platforms ?? null,
   };
 }
 
@@ -144,7 +151,9 @@ export async function performScan(apiKey?: string): Promise<ScanResult> {
     ? 'https://pro-api.coingecko.com/api/v3'
     : 'https://api.coingecko.com/api/v3';
 
-  const url = `${cgBase}/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h&include_platform=false`;
+  // include_platform=true adds each coin's chain->contract-address map at no
+  // extra request cost — see the `platforms` field note on CoinGeckoRaw above.
+  const url = `${cgBase}/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h&include_platform=true`;
 
   const headers: Record<string, string> = {};
   if (isCgProKey)  headers['x-cg-pro-api-key']  = apiKey!;
