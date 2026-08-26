@@ -41,7 +41,7 @@ export function classify(score: number, acceleration: number | null): RegimeName
  *  scoreOf()'s own rules for what counts as "active" (usable score AND a
  *  nonzero weight) so a family's active/agreeing counts stay comparable to
  *  the overall reading's — just scoped to that family's members instead of
- *  all 10 signals. Each family judges "agreeing" against ITS OWN dominant
+ *  all raw signals. Each family judges "agreeing" against ITS OWN dominant
  *  direction, not the overall reading's, so a family can legitimately show
  *  e.g. 1/2 agreeing while still being the family dragging the overall
  *  score the other way. */

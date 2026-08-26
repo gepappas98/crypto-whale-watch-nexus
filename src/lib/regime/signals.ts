@@ -265,6 +265,39 @@ async function dominanceSignal(): Promise<RegimeSignal> {
   };
 }
 
+/* ── ETH/BTC relative strength ────────────────────────────────────────────
+ *  Closes the "BTC/ETH relative strength" P1 item from the README's
+ *  Strategic Direction section. A second, independent rotation read
+ *  alongside BTC dominance: dominance is BTC vs the *whole* market's total
+ *  cap (can move on a stablecoin or altcoin-basket effect); this is BTC vs
+ *  specifically ETH, the market's #2 asset and the closest thing crypto has
+ *  to a risk-on/risk-off bellwether pair. Both belong to the same "rotation"
+ *  family (see families.ts) since they're both answers to "which asset is
+ *  capital moving into," just measured against a different denominator. */
+async function ethBtcStrengthSignal(): Promise<RegimeSignal> {
+  const raw = await getJson<unknown[][]>('https://api.binance.com/api/v3/klines?symbol=ETHBTC&interval=1d&limit=10');
+  const closes = (raw ?? []).map((c) => Number(c[4])).filter(Number.isFinite);
+  if (closes.length < 8) {
+    return {
+      id: 'eth_btc_strength',
+      label: 'ETH/BTC relative strength',
+      score: null,
+      value: '—',
+      detail: 'ETHBTC daily candles unavailable',
+    };
+  }
+  const now = closes[closes.length - 1];
+  const weekAgo = closes[closes.length - 8];
+  const pctChange = (now / weekAgo - 1) * 100;
+  return {
+    id: 'eth_btc_strength',
+    label: 'ETH/BTC relative strength',
+    score: clamp(pctChange / 4),
+    value: `${pct(pctChange)} / 7d`,
+    detail: `ETH/BTC is ${pct(pctChange)} over the last 7 days — capital is rotating ${pctChange >= 0 ? 'into ETH (and, historically, alts more broadly)' : 'back into BTC'}`,
+  };
+}
+
 /* ── Local inputs: breadth + whale flow (already in the app's own state) ─── */
 export interface LocalInputs {
   /** Live scanner rows — used for market breadth. */
@@ -351,13 +384,14 @@ function whaleFlowSignal(whales: LocalInputs['whales']): RegimeSignal {
 
 /** Collect every regime signal for one tick. Never throws. */
 export async function collectSignals(local: LocalInputs): Promise<RegimeSignal[]> {
-  const [trend, derivs, aggressive, sentiment, dominance, breadth] = await Promise.all([
+  const [trend, derivs, aggressive, sentiment, dominance, breadth, ethBtc] = await Promise.all([
     btcTrendSignals(),
     derivativeSignals(),
     aggressiveFlowSignal(),
     sentimentSignals(),
     dominanceSignal(),
     marketBreadthSignal(local.coins),
+    ethBtcStrengthSignal(),
   ]);
   return [
     ...trend,
@@ -367,5 +401,6 @@ export async function collectSignals(local: LocalInputs): Promise<RegimeSignal[]
     ...derivs,
     ...sentiment,
     dominance,
+    ethBtc,
   ];
 }
