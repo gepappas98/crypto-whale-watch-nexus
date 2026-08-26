@@ -1,12 +1,28 @@
 /* ══ REGIME ENGINE — scoring, classification, persistence ══════════════════ */
-import type { RegimeName, RegimeReading, RegimeSignal, RegimeSnapshot, RegimeWeights, FamilyReading } from './types';
+import type { RegimeName, RegimeReading, RegimeSignal, RegimeSnapshot, RegimeWeights, FamilyReading, PersistenceTier } from './types';
 import { FAMILY_ORDER, FAMILY_LABELS, SIGNAL_FAMILIES } from './families';
 
 const HISTORY_KEY = 'wr_regime_history';
-const MAX_HISTORY = 400;
-/** A regime must hold across this many consecutive snapshots before it is
- *  "confirmed" — the single-spike false-positive suppressor. */
-export const PERSISTENCE_SNAPSHOTS = 3;
+export const MAX_HISTORY = 400;
+/** 3-tier persistence ladder — replaces the old flat PERSISTENCE_SNAPSHOTS=3
+ *  ("confirmed" at 15 minutes). Thresholds are in snapshots at the 5-minute
+ *  poll interval (useRegimeEngine.ts's POLL_MS); see types.ts's
+ *  PersistenceTier docstring for why this exists. A regime holding 15
+ *  minutes was never really "confirmed" — it's now honestly labeled EARLY,
+ *  and CONFIRMED means it's held up for most of a trading day.
+ *  EARLY:      3  snapshots ≈ 15 min  (was the old, only, "confirmed" mark)
+ *  DEVELOPING: 18 snapshots ≈ 1.5 hr
+ *  CONFIRMED:  96 snapshots ≈ 8 hr    (audit's proposed "~6-12h/daily" range) */
+export const EARLY_SNAPSHOTS = 3;
+export const DEVELOPING_SNAPSHOTS = 18;
+export const CONFIRMED_SNAPSHOTS = 96;
+
+function tierFor(held: number): PersistenceTier | null {
+  if (held >= CONFIRMED_SNAPSHOTS) return 'confirmed';
+  if (held >= DEVELOPING_SNAPSHOTS) return 'developing';
+  if (held >= EARLY_SNAPSHOTS) return 'early';
+  return null;
+}
 
 export function scoreOf(signals: RegimeSignal[], weights: RegimeWeights): { score: number; active: number; agreeing: number } {
   let wSum = 0;
@@ -121,10 +137,18 @@ function buildReasons(reading: Omit<RegimeReading, 'reasons'>): string[] {
     familiesActive.length > 0
       ? `That holds across ${familiesLeaning} of ${familiesActive.length} independent signal families (not just a cluster of correlated signals within one).`
       : null;
-  const persistence =
-    reading.confirmedRegime
-      ? `${reading.regime} has held for ${reading.heldSnapshots} consecutive checks — treated as confirmed.`
-      : `${reading.regime} has only held for ${reading.heldSnapshots} check${reading.heldSnapshots === 1 ? '' : 's'} — not confirmed yet, so it can't raise alert severity on its own.`;
+  const persistence = (() => {
+    if (reading.tier === 'confirmed') {
+      return `${reading.regime} has held for ${reading.heldSnapshots} consecutive checks — CONFIRMED (≈8h+).`;
+    }
+    if (reading.tier === 'developing') {
+      return `${reading.regime} has held for ${reading.heldSnapshots} consecutive checks — developing (≈1.5h+), not yet confirmed.`;
+    }
+    if (reading.tier === 'early') {
+      return `${reading.regime} has held for ${reading.heldSnapshots} consecutive checks — an early read (≈15min+), not yet developing or confirmed.`;
+    }
+    return `${reading.regime} has only held for ${reading.heldSnapshots} check${reading.heldSnapshots === 1 ? '' : 's'} — too fresh to call even an early read yet.`;
+  })();
   const accel =
     reading.acceleration == null
       ? 'Not enough history yet to read acceleration.'
@@ -173,13 +197,15 @@ function buildReading(signals: RegimeSignal[], weights: RegimeWeights, history: 
     else break;
   }
 
+  const tier = tierFor(held);
   const base: Omit<RegimeReading, 'reasons'> = {
     ...snapshot,
     delta5m: deltaOver(history, snapshot, 5 * 60_000),
     delta30m: d30,
     delta2h: deltaOver(history, snapshot, 2 * 3_600_000),
     acceleration,
-    confirmedRegime: held >= PERSISTENCE_SNAPSHOTS ? regime : null,
+    confirmedRegime: tier === 'confirmed' ? regime : null,
+    tier,
     heldSnapshots: held,
     families: familyReadings(signals, weights),
   };

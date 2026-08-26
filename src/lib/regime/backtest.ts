@@ -87,7 +87,11 @@ async function btcPriceAt(ts: number): Promise<number | null> {
 /** Every point in `history` where confirmedRegime actually changed to a new
  *  non-null value — i.e. a genuine new "call" the engine made. Most 5-minute
  *  ticks just reconfirm the same regime; those aren't new calls and would
- *  massively over-count (and self-correlate) the backtest if included. */
+ *  massively over-count (and self-correlate) the backtest if included.
+ *  Since the 3-tier persistence ladder (v9.38, see regime/types.ts),
+ *  confirmedRegime only populates once a regime reaches the CONFIRMED tier
+ *  (~8h held, up from the old ~15min) — so a "call" here now represents a
+ *  genuinely durable regime read. Fewer calls than before, each worth more. */
 function extractCalls(history: RegimeSnapshot[]): { ts: number; regime: RegimeName; score: number }[] {
   const calls: { ts: number; regime: RegimeName; score: number }[] = [];
   let last: RegimeName | null = null;

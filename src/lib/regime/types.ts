@@ -42,6 +42,16 @@ export interface RegimeSignal {
   detail: string;
 }
 
+/** 3-tier persistence ladder (replaces the old flat confirmedRegime-at-15min
+ *  design) — closes the "Early/Developing/Confirmed" open item from the
+ *  README's Strategic Direction section. A regime holding for 15 minutes
+ *  was never really "confirmed" in the way a human would use that word;
+ *  this makes the engine's own confidence language honest about how long a
+ *  read has actually held, instead of collapsing "just formed" and "held
+ *  all day" into the same flag. See engine.ts's EARLY_SNAPSHOTS/
+ *  DEVELOPING_SNAPSHOTS/CONFIRMED_SNAPSHOTS for the actual thresholds. */
+export type PersistenceTier = 'early' | 'developing' | 'confirmed';
+
 export interface RegimeSnapshot {
   ts: number;
   /** 0-100. 50 = no information / perfectly mixed signals. */
@@ -88,8 +98,19 @@ export interface RegimeReading extends RegimeSnapshot {
   acceleration: number | null;
   /** Regime that has held across every snapshot in the persistence window.
    *  Null while the regime is still flickering — this is the false-positive
-   *  suppressor: a single spike never promotes an alert on its own. */
+   *  suppressor: a single spike never promotes an alert on its own.
+   *  Since the 3-tier ladder (see PersistenceTier above), this only
+   *  populates once `tier` reaches 'confirmed' — i.e. much later than the
+   *  old ~15min mark (now ~8h, see engine.ts's CONFIRMED_SNAPSHOTS). Use
+   *  `tier`/`regime` together for anything that wants an earlier read. */
   confirmedRegime: RegimeName | null;
+  /** Where the CURRENT regime streak sits on the 3-tier ladder. Null until
+   *  it's held even the EARLY threshold — i.e. a regime can be freshly
+   *  classified (`regime` already reflects it) well before `tier` is
+   *  anything but null. Monotonic within one streak (early → developing →
+   *  confirmed) since `heldSnapshots` only ever increases while `regime`
+   *  stays the same and resets to 1 the moment it changes. */
+  tier: PersistenceTier | null;
   /** Consecutive snapshots the current regime has held for. */
   heldSnapshots: number;
   /** Plain-language trigger list for the current reading. */
