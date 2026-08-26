@@ -43,7 +43,10 @@ import {
 } from '@/lib/whaleRadarState';
 
 type AlertLevel = 'critical' | 'high' | 'medium' | 'info';
-type AddAlert = (level: AlertLevel, tag: string, text: string, sizing?: string) => void;
+type AddAlert = (
+  level: AlertLevel, tag: string, text: string, sizing?: string,
+  coinId?: string | null, entryPrice?: number | null,
+) => void;
 type DataSource = 'live' | 'cached' | 'fallback';
 
 export interface UseMarketDataOptions {
@@ -99,13 +102,13 @@ export function useMarketData({
   useEffect(() => { addAlertRef.current = addAlert; }, [addAlert]);
 
   // Gate every alert through the cooldown/circuit-breaker before it reaches the UI sink.
-  const guardedAddAlert = useCallback<AddAlert>((level, tag, text, sizing) => {
+  const guardedAddAlert = useCallback<AddAlert>((level, tag, text, sizing, coinId, entryPrice) => {
     const { allowed, reason } = alertCooldown.checkAndRecord(tag, level);
     if (!allowed) {
       console.debug(`[useMarketData] alert suppressed for ${tag}: ${reason}`);
       return;
     }
-    addAlertRef.current(level, tag, text, sizing);
+    addAlertRef.current(level, tag, text, sizing, coinId, entryPrice);
     // Fan out to Discord/Telegram if configured — see lib/notifyChannels.ts.
     // Only alerts that survived the cooldown gate reach here, so external
     // channels get the same noise reduction as the in-app feed.
@@ -271,17 +274,20 @@ export function useMarketData({
     // Generate alerts for critical/high — gated by cooldown (see guardedAddAlert above)
     // sizing = real, backtested expectancy for this signal category (see lib/sizingHint.ts) —
     // the alert feed's `sizing` field existed but was never populated before this.
+    // coinId/entryPrice (v9.37): these two call sites are the only ones with an
+    // actual coin behind the alert, so they're the only ones that populate the
+    // decision-outcome loop's price-tracking fields — see AlertItem's docstring.
     alertable.filter(c => c.threat === 'CRITICAL').slice(0, 3).forEach(c => {
       const signal = getCeoSignalLabel(c.score, c.threat, c.category || '', c.vmcap);
       guardedAddAlert('critical', c.symbol,
         `SCORE=${c.score}/100 VOL/MCAP=${c.vmcap.toFixed(0)}% ΔP=${c.change.toFixed(1)}% — ${c.reasons.join(' · ')}`,
-        getSizingHint(signal).label);
+        getSizingHint(signal).label, c.id, c.price);
     });
     alertable.filter(c => c.threat === 'HIGH' && c.category).slice(0, 3).forEach(c => {
       const signal = getCeoSignalLabel(c.score, c.threat, c.category || '', c.vmcap);
       guardedAddAlert('high', c.symbol,
         `[${c.category}] SCORE=${c.score}/100 — ${c.reasons.join(' · ')}`,
-        getSizingHint(signal).label);
+        getSizingHint(signal).label, c.id, c.price);
     });
 
     return mapped;

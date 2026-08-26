@@ -36,7 +36,12 @@ interface WRRightPanelProps {
   wallets: WalletEntry[];
   onAddWallet: (w: WalletEntry) => void;
   onRemoveWallet: (addr: string) => void;
-  onTogglePin: (idx: number) => void;
+  onTogglePin: (ts: number) => void;
+  /** Logs the user's decision on an alert (v9.37 decision-outcome loop) —
+   *  identified by ts, same reasoning as onTogglePin above: an index into
+   *  the filtered/rendered list doesn't match the caller's full alerts
+   *  array, so identity has to travel by something stable instead. */
+  onLogOutcome: (ts: number, action: 'reviewed' | 'bought') => void;
   onClearAlerts: () => void;
   bybitEnabled: boolean;
   onToggleBybit: () => void;
@@ -50,7 +55,7 @@ interface WRRightPanelProps {
 
 export function WRRightPanel({
   whaleFeed, alerts, alertFilter, onAlertFilterChange,
-  wallets, onAddWallet, onRemoveWallet, onTogglePin, onClearAlerts,
+  wallets, onAddWallet, onRemoveWallet, onTogglePin, onLogOutcome, onClearAlerts,
   bybitEnabled, onToggleBybit, whaleFeedEx, onWhaleFeedExChange,
   alertLocks = [],
   lastFiltered = [],
@@ -389,7 +394,7 @@ export function WRRightPanel({
               >
                 <button
                   className={`absolute right-1 top-1 text-[9px] cursor-pointer bg-transparent border-none text-wr-gold ${a.pinned ? 'opacity-90' : 'opacity-25 hover:opacity-90'}`}
-                  onClick={() => onTogglePin(i)}
+                  onClick={() => onTogglePin(a.ts)}
                 >
                   {a.pinned ? '📌' : '📍'}
                 </button>
@@ -407,6 +412,46 @@ export function WRRightPanel({
                   <span className="block text-[7px] text-wr-purple/80 mt-0.5 pl-0.5" title="Based on this signal category's real recorded outcomes — see the Risk Metrics panel for the full breakdown">
                     ⚖ {a.sizing}
                   </span>
+                )}
+                {/* Decision-outcome loop (v9.37): only shown once the alert has
+                    round-tripped to the server (dbId set) — same gate as the
+                    pin button's persistence, since there's no row to log a
+                    decision against otherwise. Once a decision is logged, show
+                    it as read-only status instead of re-showing both buttons —
+                    logging again would just reset the outcome (see the
+                    server's ON CONFLICT DO UPDATE), which isn't useful to
+                    invite by accident on every render. */}
+                {a.dbId != null && (
+                  a.decision == null ? (
+                    <span className="flex gap-2 mt-0.5 pl-0.5">
+                      <button
+                        className="text-[7px] text-wr-muted hover:text-wr-cyan bg-transparent border-none cursor-pointer underline decoration-dotted"
+                        title="Log that you looked at this and decided not to act on it"
+                        onClick={() => onLogOutcome(a.ts, 'reviewed')}
+                      >
+                        🔍 Reviewed
+                      </button>
+                      <button
+                        className="text-[7px] text-wr-muted hover:text-wr-green bg-transparent border-none cursor-pointer underline decoration-dotted"
+                        title={a.coinId ? 'Log that you acted on this — forward 24h price will be tracked' : 'Log that you acted on this (no coin attached to this alert, so no forward price can be tracked)'}
+                        onClick={() => onLogOutcome(a.ts, 'bought')}
+                      >
+                        💰 I Bought
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="block text-[7px] text-wr-muted mt-0.5 pl-0.5">
+                      {a.decision === 'bought' ? '💰 Bought' : '🔍 Reviewed'}
+                      {a.decision === 'bought' && a.outcomePct != null && (
+                        <span className={a.outcomePct >= 0 ? 'text-wr-green' : 'text-wr-red'}>
+                          {' '}— {a.outcomePct >= 0 ? '+' : ''}{a.outcomePct.toFixed(1)}% (24h)
+                        </span>
+                      )}
+                      {a.decision === 'bought' && a.outcomePct == null && a.coinId && (
+                        <span> — 24h outcome pending</span>
+                      )}
+                    </span>
+                  )
                 )}
                 {a.level === 'critical' && (
                   <button

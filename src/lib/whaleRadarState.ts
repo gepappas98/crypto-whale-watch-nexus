@@ -94,6 +94,24 @@ export interface AlertItem {
    *  hasn't round-tripped to the server yet (e.g. offline mode, or the
    *  save is still in flight) — pin-toggling stays local-only until then. */
   dbId?: number;
+  /** CoinGecko id, when this alert originated from a specific coin (the
+   *  scanner's CRITICAL/HIGH fires) — undefined for market-wide alerts
+   *  (REGIME-tagged) or ones with no natural coin (API errors). Needed so
+   *  the decision-outcome loop (v9.37) can look up a forward price if the
+   *  user marks the alert "I Bought". */
+  coinId?: string | null;
+  /** Coin price at the moment the alert fired — the entry price a "bought"
+   *  decision's forward return is measured against. Same availability
+   *  caveat as coinId. */
+  entryPrice?: number | null;
+  /** The user's own logged decision on this alert, once they've made one —
+   *  see the 🔍/💰 buttons in WRRightPanel and POST /api/alerts/:id/outcome.
+   *  Undefined until they act, or if this alert predates v9.37. */
+  decision?: 'reviewed' | 'bought' | null;
+  /** Forward 24h % return, once resolved — only ever set for decision
+   *  === 'bought' with a coinId; null/undefined otherwise, including while
+   *  still waiting on the 24h window to elapse. */
+  outcomePct?: number | null;
 }
 
 export interface WhaleTrade {

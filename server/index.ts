@@ -9,7 +9,7 @@ import { scansRouter }          from './routes/scans';
 import { scanRouter }           from './routes/scan';
 import { portfolioRouter }      from './routes/portfolio';
 import { trackedRouter }        from './routes/tracked';
-import { alertsRouter }         from './routes/alerts';
+import { alertsRouter, fillAlertOutcomePrices }         from './routes/alerts';
 import { whaleEventsRouter }    from './routes/whaleEvents';
 import { whalesRouter }         from './routes/whales';
 import { signalOutcomesRouter, fillOutcomePrices } from './routes/signalOutcomes';
@@ -129,3 +129,16 @@ setInterval(() => {
 }, FILL_INTERVAL_MS);
 
 console.log(`[priceFiller] Background price filler scheduled every ${FILL_INTERVAL_MS / 60_000}min`);
+
+// ── Background alert-decision price filler ─────────────────────────────────
+// Same cadence as the signal_outcomes filler above — fills 24h forward
+// price for any 'bought' alert decision that has a coin_id. Separate job,
+// separate table (alert_outcomes), same reasoning: no point filling more
+// often than the shortest horizon it tracks.
+setTimeout(() => {
+  fillAlertOutcomePrices().catch(e => console.error('[alertPriceFiller] init fill error:', e));
+}, 15_000);
+
+setInterval(() => {
+  fillAlertOutcomePrices().catch(e => console.error('[alertPriceFiller] scheduled fill error:', e));
+}, FILL_INTERVAL_MS);

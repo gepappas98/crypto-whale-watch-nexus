@@ -32,7 +32,7 @@ import {
   calcSizing, saveState, loadState,
 } from '@/lib/whaleRadarState';
 import { handleRateLimit, getActiveCooldowns, onRateLimitChange } from '@/lib/rateLimit';
-import { saveWhaleEvent, initBackendCheck, saveAlert, loadAlerts, toggleAlertPin, savePortfolioEntry, deletePortfolioEntry, loadPortfolio, saveTrackedToken, deleteTrackedToken, loadTracked } from '@/lib/db';
+import { saveWhaleEvent, initBackendCheck, saveAlert, loadAlerts, toggleAlertPin, logAlertOutcome, savePortfolioEntry, deletePortfolioEntry, loadPortfolio, saveTrackedToken, deleteTrackedToken, loadTracked } from '@/lib/db';
 import { sendPush } from '@/lib/pushBridge';
 import { fillSignalPrices } from '@/lib/signalStore';
 import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
@@ -214,9 +214,12 @@ export default function WhaleRadarApp() {
   const lastCriticalPushRef = useRef(0);
   const CRITICAL_PUSH_MIN_GAP_MS = 60_000;
 
-  const addAlert = useCallback((level: AlertItem['level'], tag: string, text: string, sizing?: string) => {
+  const addAlert = useCallback((
+    level: AlertItem['level'], tag: string, text: string, sizing?: string,
+    coinId?: string | null, entryPrice?: number | null,
+  ) => {
     const tc = level === 'critical' ? 'C' : level === 'high' ? 'H' : level === 'medium' ? 'M' : 'I';
-    const newItem: AlertItem = { ts: Date.now(), level, tag, text, tc, sizing, pinned: false };
+    const newItem: AlertItem = { ts: Date.now(), level, tag, text, tc, sizing, pinned: false, coinId, entryPrice };
     setAlerts(prev => [newItem, ...prev].slice(0, CFG.AFEED_MAX * 2));
     // Patch in the backend row id once it resolves, matched by ts (unique
     // per alert at creation time) — this is what lets a later pin-toggle
@@ -678,14 +681,26 @@ export default function WhaleRadarApp() {
           wallets={wallets}
           onAddWallet={(w) => setWallets(prev => [...prev, w])}
           onRemoveWallet={(addr) => setWallets(prev => prev.filter(w => w.address !== addr))}
-          onTogglePin={(idx) => {
-            setAlerts(prev => prev.map((a, i) => {
-              if (i !== idx) return a;
+          onTogglePin={(ts) => {
+            setAlerts(prev => prev.map((a) => {
+              if (a.ts !== ts) return a;
               // Fire-and-forget the persisted toggle — local state flips
               // immediately either way, this just makes the pin survive a
               // reload instead of silently reverting (see db.ts).
               if (a.dbId != null) toggleAlertPin(a.dbId).catch(() => {});
               return { ...a, pinned: !a.pinned };
+            }));
+          }}
+          onLogOutcome={(ts, action) => {
+            setAlerts(prev => prev.map((a) => {
+              if (a.ts !== ts || a.dbId == null) return a;
+              // Same fire-and-forget-then-reconcile shape as onTogglePin
+              // above: flip local state immediately, persist in the
+              // background. coinId/entryPrice are whatever this alert was
+              // created with — undefined for market-wide/coin-less alerts,
+              // which the server already treats as "no price to track".
+              logAlertOutcome(a.dbId, action, a.coinId, a.entryPrice).catch(() => {});
+              return { ...a, decision: action };
             }));
           }}
           onClearAlerts={() => setAlerts([])}
