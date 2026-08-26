@@ -306,6 +306,8 @@ export async function saveAlert(alert: AlertItem): Promise<number | null> {
       text: alert.text,
       sizing: alert.sizing ?? null,
       pinned: alert.pinned,
+      coin_id: alert.coinId ?? null,
+      entry_price: alert.entryPrice ?? null,
     }),
   });
   return row?.id ?? null;
@@ -315,6 +317,8 @@ export async function loadAlerts(): Promise<AlertItem[]> {
   const rows = await api<Array<{
     id: number; level: string; tag: string; text: string;
     sizing: string | null; pinned: boolean; created_at: string;
+    coin_id: string | null; entry_price: string | null;
+    action: 'reviewed' | 'bought' | null; outcome_24h_pct: string | null;
   }>>('/alerts', { _silent: true });
   if (!rows) return [];
   return rows.map(r => ({
@@ -326,11 +330,31 @@ export async function loadAlerts(): Promise<AlertItem[]> {
     sizing: r.sizing,
     pinned: r.pinned,
     dbId: r.id,
+    coinId: r.coin_id,
+    entryPrice: r.entry_price != null ? parseFloat(r.entry_price) : null,
+    decision: r.action,
+    outcomePct: r.outcome_24h_pct != null ? parseFloat(r.outcome_24h_pct) : null,
   }));
 }
 
 export async function toggleAlertPin(dbId: number): Promise<void> {
   await api(`/alerts/${dbId}/pin`, { method: 'PATCH' });
+}
+
+/** Log the user's decision on an alert — closes the decision-outcome loop
+ *  (v9.37). coinId/entryPrice only matter for action='bought' (the server
+ *  drops them for 'reviewed' regardless); pass the alert's own coinId/
+ *  entryPrice through unchanged when calling this for a 'bought' decision. */
+export async function logAlertOutcome(
+  dbId: number,
+  action: 'reviewed' | 'bought',
+  coinId?: string | null,
+  entryPrice?: number | null,
+): Promise<void> {
+  await api(`/alerts/${dbId}/outcome`, {
+    method: 'POST',
+    body: JSON.stringify({ action, coin_id: coinId ?? null, entry_price: entryPrice ?? null }),
+  });
 }
 
 // ══ WHALE EVENTS ══════════════════════════════════════════════════════════════
