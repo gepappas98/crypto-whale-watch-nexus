@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { REGIME_COLORS, PERSISTENCE_SNAPSHOTS } from '@/lib/regime/engine';
+import { REGIME_COLORS, EARLY_SNAPSHOTS, DEVELOPING_SNAPSHOTS, CONFIRMED_SNAPSHOTS, MAX_HISTORY as MAX_HISTORY_SNAPSHOTS } from '@/lib/regime/engine';
 import { SIGNAL_ORDER } from '@/lib/regime/weights';
 import { FAMILY_ORDER, FAMILY_LABELS, SIGNAL_FAMILIES } from '@/lib/regime/families';
 import { useRegimeAlerts } from '@/hooks/useRegimeAlerts';
@@ -75,12 +75,18 @@ export function RegimePanel({ reading, history, weights, setWeights, restoreDefa
 
         {reading && (
           <span
-            className={`text-[9px] tracking-widest px-1.5 py-0.5 border border-wr-border ${reading.confirmedRegime ? 'text-wr-green' : 'text-wr-amber'}`}
-            title={`A regime must hold ${PERSISTENCE_SNAPSHOTS} consecutive checks before it counts as confirmed`}
+            className={`text-[9px] tracking-widest px-1.5 py-0.5 border border-wr-border ${
+              reading.tier === 'confirmed' ? 'text-wr-green'
+                : reading.tier === 'developing' ? 'text-wr-cyan'
+                : reading.tier === 'early' ? 'text-wr-amber'
+                : 'text-wr-muted'
+            }`}
+            title={`3-tier persistence ladder: EARLY ≥${EARLY_SNAPSHOTS} checks (≈15min), DEVELOPING ≥${DEVELOPING_SNAPSHOTS} (≈1.5h), CONFIRMED ≥${CONFIRMED_SNAPSHOTS} (≈8h) — replaces the old single "confirmed at 15min" flag`}
           >
-            {reading.confirmedRegime
-              ? `CONFIRMED ×${reading.heldSnapshots}`
-              : `UNCONFIRMED ${reading.heldSnapshots}/${PERSISTENCE_SNAPSHOTS}`}
+            {reading.tier === 'confirmed' ? `CONFIRMED ×${reading.heldSnapshots}`
+              : reading.tier === 'developing' ? `DEVELOPING ×${reading.heldSnapshots}`
+              : reading.tier === 'early' ? `EARLY ×${reading.heldSnapshots}`
+              : `FORMING ${reading.heldSnapshots}/${EARLY_SNAPSHOTS}`}
           </span>
         )}
 
@@ -235,7 +241,7 @@ export function RegimePanel({ reading, history, weights, setWeights, restoreDefa
             <p className="text-[10px] text-wr-muted leading-snug">
               Tests every confirmed regime call still in your local history against actual forward
               BTC price action at 1h/4h/24h. Only as deep as this browser's own accumulated
-              session (history caps at 400 snapshots, ~5 min apart) — not a multi-year replay.
+              session (history caps at {MAX_HISTORY_SNAPSHOTS} snapshots, ~5 min apart) — not a multi-year replay.
             </p>
           )}
 
@@ -249,7 +255,10 @@ export function RegimePanel({ reading, history, weights, setWeights, restoreDefa
               {backtest.result.totalConfirmedCalls === 0 ? (
                 <p className="text-[10px] text-wr-muted">
                   No confirmed regime transitions in local history yet — a regime has to hold for
-                  {` ${PERSISTENCE_SNAPSHOTS} `}consecutive checks before it counts as a call.
+                  {` ${CONFIRMED_SNAPSHOTS} `}consecutive checks (≈8h) to reach the CONFIRMED tier
+                  and count as a call. With history capped at {MAX_HISTORY_SNAPSHOTS} snapshots
+                  (~{Math.round((MAX_HISTORY_SNAPSHOTS * 5) / 60)}h), that's reachable but takes a
+                  while — check back after the browser's been open a few hours.
                 </p>
               ) : (
                 <table className="text-[10px] w-full">

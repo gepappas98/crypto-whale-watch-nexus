@@ -71,6 +71,7 @@ export function buildCouncilContext(
           score: opts.regime.score,
           regime: opts.regime.regime,
           confirmedRegime: opts.regime.confirmedRegime,
+          tier: opts.regime.tier,
           heldSnapshots: opts.regime.heldSnapshots,
           agreeing: opts.regime.agreeing,
           active: opts.regime.active,

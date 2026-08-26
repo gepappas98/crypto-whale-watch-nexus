@@ -114,6 +114,13 @@ export interface CouncilContext {
     score: number;
     regime: string;
     confirmedRegime: string | null;
+    /** New in the 3-tier persistence ladder — see regime/types.ts. Since
+     *  confirmedRegime now only populates once a regime has held for
+     *  CONFIRMED_SNAPSHOTS (~8h, up from the old ~15min), the Council would
+     *  otherwise be blind to an early/developing read for most of a
+     *  regime's life. null means the current regime hasn't held even the
+     *  EARLY threshold yet. */
+    tier: 'early' | 'developing' | 'confirmed' | null;
     heldSnapshots: number;
     agreeing: number;
     active: number;
