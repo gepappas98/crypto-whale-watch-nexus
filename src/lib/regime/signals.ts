@@ -265,6 +265,83 @@ async function dominanceSignal(): Promise<RegimeSignal> {
   };
 }
 
+/* ── Stablecoin supply flow (needs its own local history) ─────────────────
+ *  Closes the "stablecoin/liquidity flow" P1 item from the README's
+ *  Strategic Direction section. Total stablecoin market cap is the closest
+ *  thing crypto has to an on-chain "dry powder" gauge: net issuance
+ *  (Tether/Circle minting more USDT/USDC) means fresh capital is entering
+ *  the ecosystem and sitting ready to buy; net redemption means capital is
+ *  actively leaving crypto altogether, not just rotating between coins
+ *  inside it — a meaningfully different read than BTC dominance or
+ *  ETH/BTC strength, both of which only capture rotation *within* the
+ *  market. Same local-history technique as dominanceSignal() above, since
+ *  CoinGecko doesn't expose a ready-made "growth" number to read directly. */
+const STABLE_KEY = 'wr_regime_stablecoin_history';
+type StablePoint = { ts: number; mcap: number };
+
+function readStableHistory(): StablePoint[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STABLE_KEY) ?? '[]') as StablePoint[];
+    return Array.isArray(raw) ? raw.filter((p) => typeof p?.mcap === 'number') : [];
+  } catch {
+    return [];
+  }
+}
+
+async function stablecoinFlowSignal(): Promise<RegimeSignal> {
+  const raw = await getJson<{ market_cap?: number }[]>(
+    'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&category=stablecoins&order=market_cap_desc&per_page=100&page=1',
+  );
+  const mcap = (raw ?? []).reduce((sum, c) => sum + (typeof c.market_cap === 'number' ? c.market_cap : 0), 0);
+  if (!raw || raw.length === 0 || mcap <= 0) {
+    return {
+      id: 'stablecoin_flow',
+      label: 'Stablecoin supply flow',
+      score: null,
+      value: '—',
+      detail: 'CoinGecko stablecoins category data unavailable',
+    };
+  }
+
+  const cutoff = Date.now() - 8 * 24 * 3_600_000;
+  const history = [...readStableHistory().filter((p) => p.ts > cutoff), { ts: Date.now(), mcap }].slice(-500);
+  try {
+    localStorage.setItem(STABLE_KEY, JSON.stringify(history));
+  } catch {
+    /* ignore */
+  }
+
+  // Compare against the oldest point at least 24h old — net issuance is a
+  // slower-moving, noisier-at-short-horizons metric than dominance, so a
+  // same-day reference (like dominance's 6h) would mostly capture exchange
+  // reserve noise rather than real minting/redemption. Until we have one,
+  // honestly unavailable rather than a guessed zero.
+  const ref = history.find((p) => Date.now() - p.ts >= 24 * 3_600_000);
+  if (!ref) {
+    return {
+      id: 'stablecoin_flow',
+      label: 'Stablecoin supply flow',
+      score: null,
+      value: `$${(mcap / 1e9).toFixed(1)}B`,
+      detail: 'Building stablecoin supply history — needs 24h of samples before it can read a trend',
+    };
+  }
+  const pctChange = (mcap / ref.mcap - 1) * 100;
+  return {
+    id: 'stablecoin_flow',
+    label: 'Stablecoin supply flow',
+    // Scaled so a ~2% total-supply move over 24h — genuinely large net
+    // minting/redemption, not routine noise — saturates the signal.
+    // Day-to-day noise on a multi-hundred-billion-dollar aggregate is
+    // typically well under 0.5%, so a tighter divisor here would mean
+    // ordinary noise saturates the score every tick, making this a useless
+    // always-±1 flag instead of a real weighted contributor.
+    score: clamp(pctChange / 2),
+    value: `$${(mcap / 1e9).toFixed(1)}B (${pctChange >= 0 ? '+' : ''}${pctChange.toFixed(2)}%)`,
+    detail: `Total stablecoin supply is ${pctChange >= 0 ? 'up' : 'down'} ${Math.abs(pctChange).toFixed(2)}% over ~24h ($${(mcap / 1e9).toFixed(1)}B total) — ${pctChange >= 0 ? 'fresh capital is entering crypto' : 'capital is leaving crypto, not just rotating within it'}`,
+  };
+}
+
 /* ── ETH/BTC relative strength ────────────────────────────────────────────
  *  Closes the "BTC/ETH relative strength" P1 item from the README's
  *  Strategic Direction section. A second, independent rotation read
@@ -384,7 +461,7 @@ function whaleFlowSignal(whales: LocalInputs['whales']): RegimeSignal {
 
 /** Collect every regime signal for one tick. Never throws. */
 export async function collectSignals(local: LocalInputs): Promise<RegimeSignal[]> {
-  const [trend, derivs, aggressive, sentiment, dominance, breadth, ethBtc] = await Promise.all([
+  const [trend, derivs, aggressive, sentiment, dominance, breadth, ethBtc, stableFlow] = await Promise.all([
     btcTrendSignals(),
     derivativeSignals(),
     aggressiveFlowSignal(),
@@ -392,6 +469,7 @@ export async function collectSignals(local: LocalInputs): Promise<RegimeSignal[]
     dominanceSignal(),
     marketBreadthSignal(local.coins),
     ethBtcStrengthSignal(),
+    stablecoinFlowSignal(),
   ]);
   return [
     ...trend,
@@ -402,5 +480,6 @@ export async function collectSignals(local: LocalInputs): Promise<RegimeSignal[]
     ...sentiment,
     dominance,
     ethBtc,
+    stableFlow,
   ];
 }

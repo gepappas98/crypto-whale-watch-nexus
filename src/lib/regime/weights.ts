@@ -15,6 +15,7 @@ export const DEFAULT_WEIGHTS: RegimeWeights = {
   fng_roc: 5,
   btc_dominance: 5,
   eth_btc_strength: 8,
+  stablecoin_flow: 9,
 };
 
 export const SIGNAL_ORDER: SignalId[] = Object.keys(DEFAULT_WEIGHTS) as SignalId[];
