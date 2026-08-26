@@ -25,7 +25,8 @@ export type SignalId =
   | 'fng_level'
   | 'fng_roc'
   | 'btc_dominance'
-  | 'eth_btc_strength';
+  | 'eth_btc_strength'
+  | 'stablecoin_flow';
 
 /** One regime input. `score` is normalized to -1 (max bearish) … +1 (max
  *  bullish); `null` means the data genuinely wasn't available this tick —
