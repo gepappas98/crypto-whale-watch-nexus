@@ -365,7 +365,11 @@ export default function WhaleRadarApp() {
   });
   streamLive.current = streamStatus === 'live';
 
-  // Wrap whale handler for legacy hook to suppress Binance dupes when stream is live
+  // Defense-in-depth for the brief handoff window while useWhaleWebSocket's
+  // own effect teardown is in flight after streamStatus flips to 'live' —
+  // the connection itself is now actually closed at that point (see
+  // binanceEnabled passed below), this filter just guards against any
+  // trade that arrives in the moment before that teardown completes.
   const handleLegacyWhale = useCallback((t: WhaleTrade) => {
     if (t.ex === 'binance' && streamLive.current) return;
     handleWhaleTrade(t);
@@ -374,13 +378,21 @@ export default function WhaleRadarApp() {
   const { binanceReady, bybitReady, wsStatus: legacyWsStatus, wsLagMs, reconnectAttempts: legacyReconnects } = useWhaleWebSocket({
     subscribedPairs,
     bybitEnabled,
-    // Server-side whale-stream carries Binance when it's live — close the
-    // duplicate browser→Binance socket instead of dropping its trades later.
-    binanceEnabled: streamStatus !== 'live',
     whaleThr,
     whaleFeedEx,
     onWhaleTrade:    handleLegacyWhale,
     onTrackerPrice:  handleTrackerPrice,
+    // v9.39: this hook's own direct-to-Binance connection is now actually
+    // closed (not just data-discarded afterward, see handleLegacyWhale
+    // above, which stays as a defense-in-depth guard for the brief handoff
+    // window while this effect's teardown is in flight) whenever the
+    // server-side stream (useWhaleStream.ts, above) is live — no more
+    // permanently-open second connection to the exact same upstream. Not
+    // gated on whaleFeedEx: onTrackerPrice needs Binance price ticks
+    // regardless of which exchange is selected for whale-trade display, so
+    // the only thing that should turn this leg off is genuine redundancy
+    // with the server stream, not the feed-exchange selector.
+    binanceEnabled: streamStatus !== 'live',
   });
 
   // ── OKX feed (new exchange, generic adapter-driven hook — see hooks/useExchangeFeed.ts) ──

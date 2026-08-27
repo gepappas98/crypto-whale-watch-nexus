@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
-  Shield, AlertTriangle, AlertOctagon, CheckCircle, 
+  Shield, AlertTriangle, AlertOctagon, CheckCircle, HelpCircle,
   RefreshCw, Download, ChevronDown, ChevronUp,
   Database, Activity, Lock, Unlock, Building2,
   ArrowRightLeft, TrendingUp, AlertCircle, Zap
@@ -66,9 +66,21 @@ const RiskBadge: React.FC<{ level: string; score: number }> = ({ level, score })
       icon: CheckCircle,
       label: 'LOW'
     },
+    // Real scan failure (API error, no data) — was previously indistinguishable
+    // from LOW risk because the fallback below defaulted any unrecognized
+    // level to the green LOW/checkmark badge. A failed scan is not the same
+    // claim as "we checked and it's low risk" and must never render like one.
+    UNKNOWN: {
+      cls: 'bg-white/5 border-white/20 text-wr-muted',
+      icon: HelpCircle,
+      label: 'NO DATA',
+    },
   };
 
-  const cfg = config[level as keyof typeof config] || config.LOW;
+  // Was `|| config.LOW` — meant any unrecognized/missing level silently
+  // rendered as a reassuring green "LOW ✓" badge. An unrecognized level is
+  // exactly the failure case that must NOT look like a clean bill of health.
+  const cfg = config[level as keyof typeof config] || config.UNKNOWN;
   const Icon = cfg.icon;
 
   return (
@@ -77,7 +89,7 @@ const RiskBadge: React.FC<{ level: string; score: number }> = ({ level, score })
     }`}>
       <Icon className="w-3 h-3" />
       <span className="text-[10px] font-bold tracking-wider">{cfg.label}</span>
-      <span className="text-[10px] opacity-70">({score})</span>
+      {level !== 'UNKNOWN' && <span className="text-[10px] opacity-70">({score})</span>}
     </div>
   );
 };
@@ -389,26 +401,18 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
       const coin = coins[i];
       setScanProgress({ current: i + 1, total: coins.length });
 
+      if (!useRealData) {
+        // Explicit, clearly-labeled demo mode — this component already
+        // shows a SIMULATED banner/badge whenever useRealData is false, so
+        // this is a visible choice, not a hidden fallback. See
+        // generateMockInsiderData()'s dataSource: 'simulated' stamp.
+        results.push(generateMockInsiderData(coin, i));
+        await new Promise(r => setTimeout(r, 50));
+        continue;
+      }
+
       try {
-        let riskInfo: Partial<InsiderRiskData>;
-
-        if (useRealData) {
-          // Try to get real data from APIs
-          try {
-            riskInfo = await analyzeTokenRisk(coin, {
-              etherscanKey,
-              birdeyeKey
-            });
-          } catch (apiError) {
-            console.warn(`API failed for ${coin.symbol}, using mock data:`, apiError);
-            riskInfo = generateMockInsiderData(coin, i);
-          }
-        } else {
-          // Use mock data
-          riskInfo = generateMockInsiderData(coin, i);
-        }
-
-        // Calculate final risk score
+        const riskInfo = await analyzeTokenRisk(coin, { etherscanKey, birdeyeKey });
         const { score, level, flags } = calculateRiskScore(riskInfo);
 
         results.push({
@@ -433,12 +437,54 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
           riskLevel: level,
           flags,
           lastUpdated: Date.now(),
-          scanStatus: 'completed'
+          scanStatus: 'completed',
+          dataSource: 'real',
         });
       } catch (error) {
-        console.error(`Failed to analyze ${coin.symbol}:`, error);
+        // Real-data mode failed for THIS coin. Used to silently substitute
+        // generateMockInsiderData() here — a fabricated row with zero
+        // visual difference from a genuine result, sitting in the same
+        // table as coins that really were scanned. Removed: an honest
+        // "couldn't scan this" row instead. riskLevel: 'UNKNOWN' renders
+        // distinctly (see RiskBadge's own comment) rather than defaulting
+        // to a reassuring green LOW badge, and riskScore stays 0 without
+        // implying "checked, found clean" the way a fabricated low score
+        // would.
+        console.error(`Real-data scan failed for ${coin.symbol}:`, error);
         errorCount++;
-        results.push(generateMockInsiderData(coin, i));
+        results.push({
+          id: coin.id || `token-${i}`,
+          symbol: coin.symbol || 'UNKNOWN',
+          name: coin.name || 'Unknown Token',
+          chain: i % 2 === 0 ? 'ethereum' : 'solana',
+          address: (coin as unknown as { contract_address?: string }).contract_address || '',
+          totalSupply: (coin as unknown as { total_supply?: number }).total_supply || 0,
+          circulatingSupply: (coin as unknown as { circulating_supply?: number }).circulating_supply || 0,
+          circulatingPercentage: 0,
+          holders: [],
+          top10Concentration: 0,
+          deployerAddress: '',
+          deployerBalance: 0,
+          deployerWalletType: 'UNKNOWN',
+          largeTransfers: [],
+          cexTransfers24h: 0,
+          cexTransfers72h: 0,
+          prePumpTransfer: null,
+          riskScore: 0,
+          riskLevel: 'UNKNOWN',
+          flags: {
+            lowCirculating: false,
+            extremeTeamControl: false,
+            highConcentration: false,
+            prePumpCEX: false,
+            gnosisSafe: false,
+            largeCEXTransfers: false,
+          },
+          lastUpdated: Date.now(),
+          scanStatus: 'error',
+          errorMessage: error instanceof Error ? error.message : 'Scan failed',
+          dataSource: 'real',
+        });
       }
 
       // Small delay to prevent UI freezing
@@ -559,7 +605,7 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="bg-[hsl(var(--wr-bg2))] border-[hsl(var(--wr-border))]">
-              {['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(level => (
+              {['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'].map(level => (
                 <DropdownMenuItem 
                   key={level}
                   onClick={() => setFilterLevel(level)}

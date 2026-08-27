@@ -53,7 +53,12 @@ export interface InsiderRiskData {
 
   // Risk Score
   riskScore: number;
-  riskLevel: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  // 'UNKNOWN' — a real scan was attempted and failed (API error, no data
+  // available). Distinct from every other level: those all mean "we
+  // checked, here's what we found." UNKNOWN means "we couldn't check,"
+  // which is never the same claim as LOW and must never render like it —
+  // see WRInsiderRiskScanner.tsx's RiskBadge.
+  riskLevel: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
 
   // Flags
   flags: {
@@ -69,6 +74,12 @@ export interface InsiderRiskData {
   lastUpdated: number;
   scanStatus: 'pending' | 'scanning' | 'completed' | 'error';
   errorMessage?: string;
+  // Whether the fields above are real, fetched data or clearly-labeled
+  // simulated/demo data (generateMockInsiderData) — added so a real API
+  // failure can never again be silently backfilled with fabricated numbers
+  // that are indistinguishable from a real result. Every row must set this
+  // explicitly; there is no default.
+  dataSource: 'real' | 'simulated';
 }
 
 export interface InsiderRiskSettings {

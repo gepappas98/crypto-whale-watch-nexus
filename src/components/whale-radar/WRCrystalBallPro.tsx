@@ -867,17 +867,18 @@ export default function WRCrystalBallPro() {
         low24h = marketData.low24h || currentPrice;
       }
 
-      // --- Fallback: deterministic realistic price based on symbol (if all APIs fail) ---
+      // --- All real sources failed: this used to fabricate a price from a
+      // hash of the symbol plus Math.random() 24h/7d changes, then run a
+      // full technical analysis on it and display it with the same visual
+      // confidence as real data — the only hint was a small "Degraded" pill
+      // that never said the price itself was made up. Removed: there is no
+      // honest analysis to build on invented numbers. Throwing here routes
+      // into fetchData()'s existing catch block below, which already does
+      // the right thing — keep showing real cached data (flagged degraded)
+      // if there is any, or a clear error if there isn't, instead of ever
+      // showing a fabricated result as if it were real. */
       if (currentPrice <= 0) {
-        const hash = coin.symbol.split("").reduce((a, b) => a + b.charCodeAt(0), 0);
-        const basePrice = Math.max((hash % 500) + 0.01, 0.01);
-        const popular = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA"];
-        const scale = popular.includes(coin.symbol) ? 100 : popular.includes(coin.symbol.slice(0, 3)) ? 10 : 1;
-        currentPrice = basePrice * scale;
-        high24h = currentPrice * 1.05;
-        low24h = currentPrice * 0.95;
-        change24h = (Math.random() * 6) - 3;
-        change7d = (Math.random() * 12) - 6;
+        throw new Error(`No real market data available for ${coin.symbol} right now — every price source failed.`);
       }
 
       // --- Initialize with defaults ---
@@ -1136,7 +1137,10 @@ export default function WRCrystalBallPro() {
         }
       }
 
-      // If we still have no market data, we'll fallback to deterministic fake price later in buildAnalysis
+      // If every real source failed, buildAnalysis() throws (see its own
+      // comment) instead of fabricating a price — caught below, which
+      // already does the right thing: keep real cached data if there is
+      // any, or show a clear error if there isn't.
       const isCached = !!cached;
       const analysis = buildAnalysis(coin, tf, marketData, klinesData, isCached);
 
