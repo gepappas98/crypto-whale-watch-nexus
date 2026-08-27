@@ -1,4 +1,4 @@
-/* ══ WHALE STREAM v1 — Server-side Binance WS multiplexer + signal engine ════
+/* ══ WHALE STREAM v2 — Server-side Binance WS multiplexer + signal engine ════
  *  ARCHITECTURE
  *    • Per-instance singleton: ONE upstream Binance WS connection
  *    • Multiplexes subscriptions from all connected client WS sessions
@@ -21,7 +21,57 @@
  *                     count:{mid,big,mega}, maxUsd, ts }
  *    { type:"status", upstream:"connected"|"reconnecting"|"down" }
  *    { type:"pong" }
+ *
+ *  v2 LIFECYCLE FIXES (over v1)
+ *    1. EdgeRuntime.waitUntil() — Supabase/Deno Deploy can suspend an
+ *       isolate's background work (the upstream WS, reconnect timer, signal
+ *       broadcaster all live at module scope, not tied to any one client's
+ *       request/response) once it decides a request is "done." A WebSocket
+ *       upgrade response doesn't automatically communicate "keep the whole
+ *       isolate's background timers alive too." Each client session now
+ *       registers a promise via EdgeRuntime.waitUntil() that only resolves
+ *       when that client disconnects — as long as any client is connected,
+ *       the runtime knows not to suspend the isolate hosting the shared
+ *       upstream connection and timers. No-ops safely if EdgeRuntime isn't
+ *       present (e.g. local `supabase functions serve`).
+ *    2. Stale-instance guard — every upstream WS event handler used to
+ *       mutate module-level state unconditionally. If a slow-closing old
+ *       connection's onclose/onerror fired AFTER a replacement connection
+ *       was already established (a real race: ensureUpstream() creates a
+ *       new socket without waiting for an old one in the CLOSING state to
+ *       finish closing), it would clobber the new connection's just-set
+ *       'connected' status back to 'down' and schedule a redundant
+ *       reconnect — thrashing. Every handler now captures the connection's
+ *       own id and no-ops if it's no longer the current one.
+ *    3. Connection-attempt timeout — `new WebSocket(...)` had no timeout:
+ *       if it never fired onopen/onerror/onclose (a real failure mode on a
+ *       stalled TCP handshake), the connection just hung in CONNECTING
+ *       forever with no retry. Now force-abandoned after CONNECT_TIMEOUT_MS.
+ *    4. Silent-death watchdog — aggTrade streams are usually continuous,
+ *       but a half-open TCP connection (network partition on one side)
+ *       can leave the socket reporting OPEN with no onclose/onerror ever
+ *       firing while no data arrives. A periodic check now force-reconnects
+ *       if 'connected' but no upstream message has arrived in STALE_MS
+ *       despite active subscriptions.
  * ═══════════════════════════════════════════════════════════════════════════ */
+
+// Deno Deploy / Supabase Edge Runtime global — not in the standard Deno lib
+// types, so declared loosely here. Always feature-detected before use (see
+// waitUntilAlive()) so this file still runs fine under `supabase functions
+// serve` or any runtime that doesn't expose it.
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
+
+function waitUntilAlive(promise: Promise<unknown>): void {
+  try {
+    if (typeof EdgeRuntime !== 'undefined' && typeof EdgeRuntime.waitUntil === 'function') {
+      EdgeRuntime.waitUntil(promise);
+    }
+  } catch (_) {
+    // EdgeRuntime referenced but not actually usable in this environment —
+    // degrade to "isolate lifetime managed however the platform normally
+    // would," not a hard failure.
+  }
+}
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -51,10 +101,24 @@ interface ClientSession {
 const clients = new Set<ClientSession>();
 const subRefCount = new Map<string, number>(); // symbol → number of clients subscribed
 let upstream: WebSocket | null = null;
+let upstreamId = 0; // incremented every time `upstream` is replaced — lets
+                     // stale handlers from a superseded connection recognize
+                     // themselves as stale and no-op (fix #2 above).
 let upstreamStatus: 'connected' | 'reconnecting' | 'down' = 'down';
 let reconnectAttempt = 0;
 let reconnectTimer: number | null = null;
 let upstreamReady = false;
+let lastUpstreamMessageAt = 0;
+let connectTimeoutTimer: number | null = null;
+
+const CONNECT_TIMEOUT_MS = 10_000;
+const STALE_MS = 45_000; // aggTrade traffic on any subscribed symbol should
+                          // never realistically go this long with zero
+                          // messages while the connection reports 'connected'
+const MAX_RECONNECT_ATTEMPT = 20; // backoff() already caps the delay at 30s
+                                   // via Math.min, but this keeps `attempt`
+                                   // itself from growing unbounded over a
+                                   // very long uptime with intermittent drops
 
 // rolling trade buffers per symbol (5 min retention, signals computed at 1m & 5m)
 const tradeBuf = new Map<string, WhaleTrade[]>();
@@ -71,33 +135,68 @@ function broadcastStatus() {
   }
 }
 
+function clearConnectTimeout() {
+  if (connectTimeoutTimer != null) {
+    clearTimeout(connectTimeoutTimer);
+    connectTimeoutTimer = null;
+  }
+}
+
 function ensureUpstream() {
   if (upstream && (upstream.readyState === 0 || upstream.readyState === 1)) return;
   if (subRefCount.size === 0) return;
   upstreamStatus = 'reconnecting';
   broadcastStatus();
 
+  const id = ++upstreamId; // this connection's identity — every handler
+                            // below checks `id === upstreamId` before
+                            // touching shared state (fix #2)
+  let socket: WebSocket;
   try {
-    upstream = new WebSocket('wss://stream.binance.com:9443/stream');
+    socket = new WebSocket('wss://stream.binance.com:9443/stream');
   } catch (err) {
     console.error('[whale-stream] upstream construct failed', err);
     scheduleReconnect();
     return;
   }
+  upstream = socket;
 
-  upstream.onopen = () => {
+  clearConnectTimeout();
+  connectTimeoutTimer = setTimeout(() => {
+    if (id !== upstreamId) return; // superseded already, nothing to do
+    connectTimeoutTimer = null;
+    if (socket.readyState === 0) {
+      console.warn('[whale-stream] upstream connect timed out, forcing retry');
+      try { socket.close(); } catch (_) { /* ignore */ }
+      // socket.close() on a still-CONNECTING socket may not reliably fire
+      // onclose in every runtime — drive the retry from here directly
+      // rather than assuming onclose will.
+      upstreamReady = false;
+      upstreamStatus = 'down';
+      broadcastStatus();
+      scheduleReconnect();
+    }
+  }, CONNECT_TIMEOUT_MS) as unknown as number;
+
+  socket.onopen = () => {
+    if (id !== upstreamId) return; // stale — a newer connection replaced this one
+    clearConnectTimeout();
     upstreamReady = true;
     reconnectAttempt = 0;
+    lastUpstreamMessageAt = Date.now();
     upstreamStatus = 'connected';
     broadcastStatus();
     // resubscribe everything
     const params = [...subRefCount.keys()].map(s => `${s.toLowerCase()}usdt@aggTrade`);
-    if (params.length && upstream) {
-      upstream.send(JSON.stringify({ method: 'SUBSCRIBE', params, id: Date.now() }));
+    if (params.length) {
+      socket.send(JSON.stringify({ method: 'SUBSCRIBE', params, id: Date.now() }));
     }
   };
 
-  upstream.onmessage = (ev) => {
+  socket.onmessage = (ev) => {
+    if (id !== upstreamId) return; // stale
+    lastUpstreamMessageAt = Date.now();
+
     let raw: { stream?: string; data?: { p: string; q: string; m: boolean; s: string; T: number } };
     try { raw = JSON.parse(ev.data); } catch (_) { return; }
     const d = raw.data;
@@ -130,14 +229,19 @@ function ensureUpstream() {
     }
   };
 
-  upstream.onclose = () => {
+  socket.onclose = () => {
+    if (id !== upstreamId) return; // stale — already superseded, don't
+                                    // clobber the replacement's state or
+                                    // double-schedule a reconnect
+    clearConnectTimeout();
     upstreamReady = false;
     upstreamStatus = 'down';
     broadcastStatus();
     scheduleReconnect();
   };
 
-  upstream.onerror = (err) => {
+  socket.onerror = (err) => {
+    if (id !== upstreamId) return; // stale
     console.error('[whale-stream] upstream error', (err as ErrorEvent).message);
   };
 }
@@ -145,11 +249,39 @@ function ensureUpstream() {
 function scheduleReconnect() {
   if (reconnectTimer != null) return;
   if (subRefCount.size === 0) return;
-  const delay = backoff(reconnectAttempt++);
+  const attempt = Math.min(reconnectAttempt++, MAX_RECONNECT_ATTEMPT);
+  const delay = backoff(attempt);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     ensureUpstream();
   }, delay) as unknown as number;
+}
+
+// Silent-death watchdog: a half-open TCP connection can leave the socket
+// reporting readyState OPEN with no onclose/onerror ever firing while no
+// data actually arrives — onclose-driven reconnect (fix in ensureUpstream)
+// never triggers in that failure mode, so this checks elapsed time instead.
+// Piggybacks on the existing 1s signal-broadcast timer rather than adding a
+// second interval.
+function checkUpstreamHealth() {
+  if (upstreamStatus !== 'connected') return;
+  if (subRefCount.size === 0) return;
+  if (lastUpstreamMessageAt === 0) return; // just connected, hasn't had a
+                                            // chance to receive anything yet
+  if (Date.now() - lastUpstreamMessageAt <= STALE_MS) return;
+
+  console.warn(`[whale-stream] no upstream messages in ${STALE_MS}ms with active subscriptions — forcing reconnect`);
+  const staleId = upstreamId;
+  upstreamId++; // immediately invalidate the stale connection's handlers
+                // before touching it, so its own onclose (if it ever does
+                // fire) is a guaranteed no-op
+  try { upstream?.close(); } catch (_) { /* ignore */ }
+  if (staleId === upstreamId - 1) {
+    upstreamReady = false;
+    upstreamStatus = 'down';
+    broadcastStatus();
+    scheduleReconnect();
+  }
 }
 
 function subscribeUpstream(syms: string[]) {
@@ -210,8 +342,9 @@ function computeSignal(sym: string, windowMs: number) {
   };
 }
 
-// signal broadcaster — runs every 1s, sends to subscribed clients
+// signal broadcaster + upstream health check — runs every 1s
 const signalTimer = setInterval(() => {
+  checkUpstreamHealth();
   if (clients.size === 0) return;
   for (const sym of subRefCount.keys()) {
     const s1 = computeSignal(sym, 60_000);
@@ -243,6 +376,15 @@ Deno.serve((req) => {
 
   const { socket, response } = Deno.upgradeWebSocket(req);
   const session: ClientSession = { socket, pairs: new Set(), thr: 100_000, alive: false };
+
+  // Fix #1: tell the Edge Runtime not to suspend this isolate's background
+  // work (the shared upstream connection, reconnect timer, signal
+  // broadcaster all live at module scope) while this client is connected.
+  // Resolves in cleanup() below, once this specific client disconnects —
+  // as long as ANY client session's promise is still pending, the runtime
+  // knows the isolate has real background work to keep alive.
+  let resolveSessionDone: () => void = () => {};
+  waitUntilAlive(new Promise<void>((resolve) => { resolveSessionDone = resolve; }));
 
   socket.onopen = () => {
     session.alive = true;
@@ -284,6 +426,7 @@ Deno.serve((req) => {
     session.alive = false;
     clients.delete(session);
     if (session.pairs.size) unsubscribeUpstream([...session.pairs]);
+    resolveSessionDone();
   };
   socket.onclose = cleanup;
   socket.onerror = cleanup;

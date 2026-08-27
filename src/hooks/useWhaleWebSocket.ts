@@ -27,6 +27,10 @@ export type WsStatus = 'live' | 'delayed' | 'fallback' | 'reconnecting' | 'offli
 interface UseWhaleWebSocketOptions {
   subscribedPairs: Set<string>;
   bybitEnabled: boolean;
+  /** When false the direct browser→Binance socket is actually CLOSED (not just
+   *  filtered downstream) — used when the server-side whale-stream feed is live
+   *  so we don't hold two upstream Binance connections open. Defaults to true. */
+  binanceEnabled?: boolean;
   whaleThr: number;
   whaleFeedEx: string;
   onWhaleTrade: (trade: WhaleTrade) => void;
@@ -39,9 +43,10 @@ function backoffWithJitter(attempt: number): number {
 }
 
 export function useWhaleWebSocket({
-  subscribedPairs, bybitEnabled, whaleThr, whaleFeedEx,
+  subscribedPairs, bybitEnabled, binanceEnabled = true, whaleThr, whaleFeedEx,
   onWhaleTrade, onTrackerPrice,
 }: UseWhaleWebSocketOptions) {
+
   const [binanceReady, setBinanceReady] = useState(false);
   const [bybitReady,   setBybitReady]   = useState(false);
   const [wsStatus,     setWsStatus]     = useState<WsStatus>('offline');
@@ -61,6 +66,7 @@ export function useWhaleWebSocket({
   const ws2RebuildTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastMsgTime    = useRef(0);
   const lagCheckInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastSeedAt     = useRef(0);
   const inFallbackMode = useRef(false);
   const pollTimer      = useRef<ReturnType<typeof setInterval> | null>(null);
   const wsCircuitOpen = useRef(false);
@@ -75,8 +81,8 @@ export function useWhaleWebSocket({
   bybitReadyRef.current = bybitReady;
   reconnectAttemptsRef.current = reconnectAttempts;
 
-  const optionsRef = useRef({ subscribedPairs, bybitEnabled, whaleThr, whaleFeedEx, onWhaleTrade, onTrackerPrice });
-  optionsRef.current = { subscribedPairs, bybitEnabled, whaleThr, whaleFeedEx, onWhaleTrade, onTrackerPrice };
+  const optionsRef = useRef({ subscribedPairs, bybitEnabled, binanceEnabled, whaleThr, whaleFeedEx, onWhaleTrade, onTrackerPrice });
+  optionsRef.current = { subscribedPairs, bybitEnabled, binanceEnabled, whaleThr, whaleFeedEx, onWhaleTrade, onTrackerPrice };
 
   const seedFromHttp = useCallback(async () => {
     try {
@@ -174,12 +180,26 @@ export function useWhaleWebSocket({
       const binReady = binanceReadyRef.current;
       const byReady  = bybitReadyRef.current;
       const recon    = reconnectAttemptsRef.current;
+      const { binanceEnabled: binOn, bybitEnabled: byOn } = optionsRef.current;
 
       if (!binReady && !byReady) {
+        // Neither direct socket is up. If BOTH are intentionally disabled
+        // (server-side whale-stream is carrying the feed) this is not an
+        // outage and must not trigger a REST seed every single second.
+        if (!binOn && !byOn) return;
         setWsStatus('offline');
-        if (optionsRef.current.subscribedPairs.size > 0) seedFromHttp();
+        // Throttle the REST reseed to the normal poll cadence instead of
+        // hammering Binance once per second for as long as we stay down.
+        if (
+          optionsRef.current.subscribedPairs.size > 0 &&
+          Date.now() - lastSeedAt.current >= POLL_INTERVAL_MS
+        ) {
+          lastSeedAt.current = Date.now();
+          seedFromHttp();
+        }
         return;
       }
+
       if (wsCircuitOpen.current) { setWsStatus('degraded'); return; }
       if (recon >= 2) { setWsStatus('reconnecting'); return; }
 
@@ -247,7 +267,7 @@ export function useWhaleWebSocket({
     if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) { /* already closed/closing */ } }
 
     const pairs = optionsRef.current.subscribedPairs;
-    if (!pairs.size) { setBinanceReady(false); return; }
+    if (!pairs.size || !optionsRef.current.binanceEnabled) { setBinanceReady(false); return; }
     if (wsRetries.current >= MAX_WS_RECONNECTS) { openWsCircuit(); return; }
 
     const ws = new WebSocket('wss://stream.binance.com:9443/ws');
@@ -294,7 +314,7 @@ export function useWhaleWebSocket({
       if (pingInterval.current) clearInterval(pingInterval.current);
       if (wsWatchdogTimer.current) clearTimeout(wsWatchdogTimer.current);
       setBinanceReady(false);
-      if (pairs.size) {
+      if (pairs.size && optionsRef.current.binanceEnabled) {
         wsRetries.current++;
         setReconnectAttempts(wsRetries.current);
         if (wsRetries.current >= MAX_WS_RECONNECTS) {
@@ -404,7 +424,20 @@ export function useWhaleWebSocket({
   const pairsKey = [...subscribedPairs].sort().join(',');
 
   useEffect(() => {
-    if (subscribedPairs.size) scheduleRebuildWs(300);
+    if (binanceEnabled && subscribedPairs.size) {
+      scheduleRebuildWs(300);
+    } else if (!binanceEnabled) {
+      // Server-side whale-stream is live — actually close the direct socket
+      // rather than keeping it open and discarding duplicate trades.
+      const old = wsRef.current;
+      wsRef.current = null;
+      if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) { /* already closed/closing */ } }
+      if (pingInterval.current) clearInterval(pingInterval.current);
+      if (wsWatchdogTimer.current) clearTimeout(wsWatchdogTimer.current);
+      if (wsRebuildTimer.current) clearTimeout(wsRebuildTimer.current);
+      wsRetries.current = 0;
+      setBinanceReady(false);
+    }
     return () => {
       const old = wsRef.current;
       wsRef.current = null;
@@ -418,7 +451,8 @@ export function useWhaleWebSocket({
       httpAbortRef.current = new AbortController();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pairsKey]);
+  }, [binanceEnabled, pairsKey]);
+
 
   useEffect(() => {
     if (bybitEnabled && subscribedPairs.size) {

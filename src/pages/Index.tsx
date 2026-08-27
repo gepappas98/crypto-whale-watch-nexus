@@ -374,6 +374,9 @@ export default function WhaleRadarApp() {
   const { binanceReady, bybitReady, wsStatus: legacyWsStatus, wsLagMs, reconnectAttempts: legacyReconnects } = useWhaleWebSocket({
     subscribedPairs,
     bybitEnabled,
+    // Server-side whale-stream carries Binance when it's live — close the
+    // duplicate browser→Binance socket instead of dropping its trades later.
+    binanceEnabled: streamStatus !== 'live',
     whaleThr,
     whaleFeedEx,
     onWhaleTrade:    handleLegacyWhale,
