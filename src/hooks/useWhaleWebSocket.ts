@@ -179,12 +179,26 @@ export function useWhaleWebSocket({
       const binReady = binanceReadyRef.current;
       const byReady  = bybitReadyRef.current;
       const recon    = reconnectAttemptsRef.current;
+      const { binanceEnabled: binOn, bybitEnabled: byOn } = optionsRef.current;
 
       if (!binReady && !byReady) {
+        // Neither direct socket is up. If BOTH are intentionally disabled
+        // (server-side whale-stream is carrying the feed) this is not an
+        // outage and must not trigger a REST seed every single second.
+        if (!binOn && !byOn) return;
         setWsStatus('offline');
-        if (optionsRef.current.subscribedPairs.size > 0) seedFromHttp();
+        // Throttle the REST reseed to the normal poll cadence instead of
+        // hammering Binance once per second for as long as we stay down.
+        if (
+          optionsRef.current.subscribedPairs.size > 0 &&
+          Date.now() - lastSeedAt.current >= POLL_INTERVAL_MS
+        ) {
+          lastSeedAt.current = Date.now();
+          seedFromHttp();
+        }
         return;
       }
+
       if (wsCircuitOpen.current) { setWsStatus('degraded'); return; }
       if (recon >= 2) { setWsStatus('reconnecting'); return; }
 
