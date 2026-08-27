@@ -80,8 +80,8 @@ export function useWhaleWebSocket({
   bybitReadyRef.current = bybitReady;
   reconnectAttemptsRef.current = reconnectAttempts;
 
-  const optionsRef = useRef({ subscribedPairs, bybitEnabled, whaleThr, whaleFeedEx, onWhaleTrade, onTrackerPrice });
-  optionsRef.current = { subscribedPairs, bybitEnabled, whaleThr, whaleFeedEx, onWhaleTrade, onTrackerPrice };
+  const optionsRef = useRef({ subscribedPairs, bybitEnabled, binanceEnabled, whaleThr, whaleFeedEx, onWhaleTrade, onTrackerPrice });
+  optionsRef.current = { subscribedPairs, bybitEnabled, binanceEnabled, whaleThr, whaleFeedEx, onWhaleTrade, onTrackerPrice };
 
   const seedFromHttp = useCallback(async () => {
     try {
