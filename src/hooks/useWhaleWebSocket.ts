@@ -314,7 +314,7 @@ export function useWhaleWebSocket({
       if (pingInterval.current) clearInterval(pingInterval.current);
       if (wsWatchdogTimer.current) clearTimeout(wsWatchdogTimer.current);
       setBinanceReady(false);
-      if (pairs.size) {
+      if (pairs.size && optionsRef.current.binanceEnabled) {
         wsRetries.current++;
         setReconnectAttempts(wsRetries.current);
         if (wsRetries.current >= MAX_WS_RECONNECTS) {
