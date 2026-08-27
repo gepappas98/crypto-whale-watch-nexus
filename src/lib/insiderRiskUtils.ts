@@ -206,6 +206,7 @@ export function exportInsiderRiskCSV(data: InsiderRiskData[]): void {
     'Contract Address',
     'Risk Score',
     'Risk Level',
+    'Data Source',
     'Circulating %',
     'Top 10 Concentration %',
     'Deployer Wallet Type',
@@ -225,6 +226,10 @@ export function exportInsiderRiskCSV(data: InsiderRiskData[]): void {
     token.address,
     token.riskScore,
     token.riskLevel,
+    // Real vs simulated (or, for a failed real scan, "real" with an
+    // UNKNOWN risk level and empty metrics — see WRInsiderRiskScanner.tsx).
+    // Exported explicitly so this distinction survives outside the app.
+    token.dataSource,
     token.circulatingPercentage.toFixed(2),
     token.top10Concentration.toFixed(2),
     token.deployerWalletType,

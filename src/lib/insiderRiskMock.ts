@@ -272,7 +272,11 @@ export function generateMockInsiderData(
     flags,
 
     lastUpdated: Date.now(),
-    scanStatus: 'completed'
+    scanStatus: 'completed',
+    // Every field above is seeded-random, not fetched — see this file's
+    // module docstring. Explicit so the scanner can never mix this into a
+    // real result silently; see InsiderRiskData's own docstring.
+    dataSource: 'simulated',
   };
 }
 

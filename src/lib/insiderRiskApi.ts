@@ -31,7 +31,10 @@ import type { CoinData } from './whaleRadarState';
  *  fallback for any caller that sets them directly, but the real, populated
  *  field for every scanned coin is now `coin.platforms`. Native L1 coins
  *  (BTC, ETH itself, SOL itself, etc.) correctly have an empty platforms
- *  object — there's no contract to inspect — and still degrade to mock data,
+ *  object — there's no contract to inspect — and correctly throw here, which
+ *  the caller (WRInsiderRiskScanner.tsx) now surfaces as an honest
+ *  riskLevel: 'UNKNOWN' / scanStatus: 'error' row instead of the mock-data
+ *  substitution it used to do (removed — see that file's own comment),
  *  which is the right behavior, not a remaining gap. */
 type InsiderRiskCoin = CoinData & {
   chain?: string;
