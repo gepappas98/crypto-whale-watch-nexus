@@ -27,6 +27,10 @@ export type WsStatus = 'live' | 'delayed' | 'fallback' | 'reconnecting' | 'offli
 interface UseWhaleWebSocketOptions {
   subscribedPairs: Set<string>;
   bybitEnabled: boolean;
+  /** When false the direct browser→Binance socket is actually CLOSED (not just
+   *  filtered downstream) — used when the server-side whale-stream feed is live
+   *  so we don't hold two upstream Binance connections open. Defaults to true. */
+  binanceEnabled?: boolean;
   whaleThr: number;
   whaleFeedEx: string;
   onWhaleTrade: (trade: WhaleTrade) => void;
@@ -39,9 +43,10 @@ function backoffWithJitter(attempt: number): number {
 }
 
 export function useWhaleWebSocket({
-  subscribedPairs, bybitEnabled, whaleThr, whaleFeedEx,
+  subscribedPairs, bybitEnabled, binanceEnabled = true, whaleThr, whaleFeedEx,
   onWhaleTrade, onTrackerPrice,
 }: UseWhaleWebSocketOptions) {
+
   const [binanceReady, setBinanceReady] = useState(false);
   const [bybitReady,   setBybitReady]   = useState(false);
   const [wsStatus,     setWsStatus]     = useState<WsStatus>('offline');
