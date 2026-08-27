@@ -66,6 +66,7 @@ export function useWhaleWebSocket({
   const ws2RebuildTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastMsgTime    = useRef(0);
   const lagCheckInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastSeedAt     = useRef(0);
   const inFallbackMode = useRef(false);
   const pollTimer      = useRef<ReturnType<typeof setInterval> | null>(null);
   const wsCircuitOpen = useRef(false);
