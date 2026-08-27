@@ -267,7 +267,7 @@ export function useWhaleWebSocket({
     if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) { /* already closed/closing */ } }
 
     const pairs = optionsRef.current.subscribedPairs;
-    if (!pairs.size) { setBinanceReady(false); return; }
+    if (!pairs.size || !optionsRef.current.binanceEnabled) { setBinanceReady(false); return; }
     if (wsRetries.current >= MAX_WS_RECONNECTS) { openWsCircuit(); return; }
 
     const ws = new WebSocket('wss://stream.binance.com:9443/ws');
