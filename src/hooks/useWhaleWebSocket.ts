@@ -424,7 +424,20 @@ export function useWhaleWebSocket({
   const pairsKey = [...subscribedPairs].sort().join(',');
 
   useEffect(() => {
-    if (subscribedPairs.size) scheduleRebuildWs(300);
+    if (binanceEnabled && subscribedPairs.size) {
+      scheduleRebuildWs(300);
+    } else if (!binanceEnabled) {
+      // Server-side whale-stream is live — actually close the direct socket
+      // rather than keeping it open and discarding duplicate trades.
+      const old = wsRef.current;
+      wsRef.current = null;
+      if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; try { old.close(); } catch (_) { /* already closed/closing */ } }
+      if (pingInterval.current) clearInterval(pingInterval.current);
+      if (wsWatchdogTimer.current) clearTimeout(wsWatchdogTimer.current);
+      if (wsRebuildTimer.current) clearTimeout(wsRebuildTimer.current);
+      wsRetries.current = 0;
+      setBinanceReady(false);
+    }
     return () => {
       const old = wsRef.current;
       wsRef.current = null;
@@ -438,7 +451,8 @@ export function useWhaleWebSocket({
       httpAbortRef.current = new AbortController();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pairsKey]);
+  }, [binanceEnabled, pairsKey]);
+
 
   useEffect(() => {
     if (bybitEnabled && subscribedPairs.size) {
