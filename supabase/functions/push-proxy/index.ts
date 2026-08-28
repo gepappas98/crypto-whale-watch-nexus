@@ -8,6 +8,16 @@
 // Required secrets (same ones nexus-bot-proxy already uses — set once):
 //   NEXUS_BOT_API_URL   — base URL of the Express server
 //   API_AUTH_TOKEN      — the SAME token the Express server checks
+//
+// ⚠️ CANDIDATE FOR REMOVAL AS OF v9.44 — supabase/functions/push/index.ts now
+// implements push subscribe/unsubscribe/send natively (Deno's npm: support
+// for the 'web-push' package), talking to Postgres directly with no Express
+// involved at all. This proxy's entire reason to exist — protecting
+// API_AUTH_TOKEN on the way to Express — evaporates once there's no Express
+// in the path to protect a token for. Not deleted here (same caution as
+// market-data/index.ts's note in v9.40: can't rule out something outside
+// this repo still calling this specific URL), but once the client is
+// pointed at the new push function, this one has no remaining purpose.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
