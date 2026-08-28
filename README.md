@@ -1,6 +1,6 @@
-# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.39
+# 🐋 Whale Radar (crypto-whale-watch-nexus) — v9.40
 
-![Version](https://img.shields.io/badge/version-9.39-blue)
+![Version](https://img.shields.io/badge/version-9.40-blue)
 ![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite)
@@ -40,6 +40,17 @@ Real-time crypto intelligence platform: whale-transaction tracking, market-manip
 
 ## 🆕 What's New
 
+- **Step 4 of George's production-architecture plan — one real vertical slice migrated, the rest mapped honestly rather than moved blind** (v9.40): the target shape (Browser → Supabase Edge → persistent state/DB → alerts, Express only where actually needed) already existed in part — `nexus-bot-proxy` and `push-proxy` already bridge Edge→Express specifically to keep `API_AUTH_TOKEN` out of the browser bundle for real trade-execution routes. What was still Express-only for no architectural reason: the alerts CRUD + v9.37 decision-outcome loop, a pure-CRUD-plus-one-background-job vertical slice with zero dependency on ccxt or persistent-process execution.
+
+  **Migrated**: new `supabase/functions/alerts/index.ts` ports every operation from `server/routes/alerts.ts` (list/create/pin/delete/log-outcome/eval/fill-prices) to query Postgres directly via the Supabase service-role client — no Express dependency for any of it. Two operations needed real thought, not a 1:1 port: the pin toggle needed atomicity (`pinned = NOT pinned` from two browser tabs at once could lose an update if done as a client-side read-then-write), so it's now a `toggle_alert_pin()` Postgres RPC (new migration `006_alert_pin_toggle.sql`) called atomically in one round trip; the background price filler (`fillAlertOutcomePrices()`, previously a `setInterval` inside the long-running Express process) becomes an `op: 'fill_prices'` action meant to be invoked on a schedule via `pg_cron` + `pg_net` — migration `007_alert_price_filler_cron.sql` sets that up (needs your project ref + service-role key filled in, documented inline; this is the actual point of the migration, since a periodic DB-touching job shouldn't need a permanently-running server process to exist at all).
+
+  **Deliberately not swapped in yet**: `server/routes/alerts.ts` keeps running exactly as before; `src/lib/db.ts` still calls it. Nothing currently in production depends on the new function until it's deployed, its migrations run, and `db.ts` is deliberately pointed at it — flipping that over blind, from a sandbox with no live deploy or test access, would risk breaking a working production path for an architectural preference. Treat the new function as the target implementation ready for a tested cutover, not a live swap made unilaterally.
+
+  **Found while auditing what else should move**: `supabase/functions/market-data/index.ts` — a working, well-built 125-line proxy+cache function — has zero callers anywhere in this codebase. `coingecko-proxy` (a simpler allowlist-based proxy) is what `src/lib/binanceProxy.ts`'s `proxied()` helper actually uses everywhere instead; `market-data` looks like an earlier or alternate design that was superseded without being removed. Flagged with a docstring rather than deleted (a code-only audit can't rule out some caller outside this repo), but it's real, currently-deployed dead surface area.
+
+  **The rest of the map, not migrated this round**: good candidates for the same alerts-style treatment (pure CRUD, no persistent-process dependency) — `portfolio.ts`, `tracked.ts`, `whaleEvents.ts`, `whales.ts`, `scans.ts`, `signalOutcomes.ts` (which has its own background filler, same `pg_cron` pattern as alerts). `push.ts` is a different case — currently Edge-bridged to Express only to protect the auth token, not because it needs a persistent process; Deno can run the web-push protocol natively, so it's a real candidate to drop the Express dependency entirely rather than just re-route it, lower priority than the pure-CRUD group. Genuinely Express-only and correctly so: `ccxtExecutor.ts`, `nexusBotWorker.ts` (a continuous poll loop), `freqtradeClient.ts`, and the `nexusBot`/`strategyTrader` routes — real trade execution plus a persistent process, already correctly Edge-bridged for auth via the existing `nexus-bot-proxy` pattern rather than needing to move.
+
+  **Step 5 (runtime verification of the live deployment) still not attempted** — same reasoning as before: this sandbox has no DNS/network access to the production domain.
 - **Production hygiene pass, per George's explicit prioritized plan (Greek: "σειρά που θα έκανα τώρα τις διορθώσεις") — steps 1-3 of 5** (v9.39):
 
   **Step 1 — removed every hidden fake-data path found:**
