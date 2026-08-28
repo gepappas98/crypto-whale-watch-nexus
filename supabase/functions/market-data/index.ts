@@ -1,5 +1,17 @@
 // Server-side proxy + cache for CoinGecko & Binance public endpoints.
 // Eliminates browser CORS issues and the failing free-proxy chain.
+//
+// ⚠️ ORPHANED AS OF v9.40 — checked every client file for a caller and found
+// none. coingecko-proxy/index.ts (a simpler allowlist-based "pass this URL
+// through" proxy) is what src/lib/binanceProxy.ts's proxied() helper
+// actually uses everywhere in this app instead — this function appears to
+// predate that, or be an alternative design that was superseded without
+// being removed. Not deleted here (can't rule out some external caller
+// outside this repo — a Lovable preview integration, manual testing, etc.
+// — that a code-only audit can't see), but this is a real candidate for
+// removal: an unused Edge Function is still deployed surface area and
+// maintenance burden for zero benefit. Confirm nothing external calls it,
+// then `supabase functions delete market-data`.
 import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
 
 interface CacheEntry { data: unknown; ts: number; }
