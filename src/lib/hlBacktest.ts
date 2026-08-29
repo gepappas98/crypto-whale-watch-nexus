@@ -4,7 +4,7 @@
  *  portfolio simulator — honest about limitations in the result meta.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-import { fetchWithLatency } from "./circuitBreaker";
+import { fetchWithLatency } from "./nexus/circuitBreaker";
 
 export interface HlCandle {
   t: number;

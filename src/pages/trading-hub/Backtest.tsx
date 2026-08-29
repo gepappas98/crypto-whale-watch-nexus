@@ -15,7 +15,7 @@ import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from "rec
 import { AlertCircle } from "lucide-react";
 import type { BacktestResult } from "@/types/trading";
 import { SymbolQuickSelect } from "@/components/trading/SymbolQuickSelect";
-import { HlBacktestPanel } from "@/components/trading/HlBacktestPanel";
+import { HlBacktestPanel } from "@/components/hyperliquid/HlBacktestPanel";
 
 const STRATS = [
   { v: "rsi", l: "RSI" }, { v: "bollinger", l: "Bollinger" }, { v: "macd", l: "MACD" },
