@@ -15,6 +15,7 @@ import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from "rec
 import { AlertCircle } from "lucide-react";
 import type { BacktestResult } from "@/types/trading";
 import { SymbolQuickSelect } from "@/components/trading/SymbolQuickSelect";
+import { HlBacktestPanel } from "@/components/trading/HlBacktestPanel";
 
 const STRATS = [
   { v: "rsi", l: "RSI" }, { v: "bollinger", l: "Bollinger" }, { v: "macd", l: "MACD" },
@@ -167,6 +168,10 @@ export default function Backtest() {
           </Card>
         </>
       )}
+
+      <div className="border-t border-border pt-6 mt-2">
+        <HlBacktestPanel />
+      </div>
 
       {compare.data && (
         <Card className="p-4">

@@ -555,7 +555,7 @@ export default function WhaleRadarApp() {
 
       {dataSource === 'fallback' && (
         <div className="bg-wr-red/20 border-b-2 border-wr-red/60 px-4 py-2 text-center text-[10px] text-wr-red tracking-widest">
-          ⚠ RUNNING IN DEGRADED MODE — Showing simulated whale activity. Live data temporarily unavailable.
+          ⚠ SCAN FAILED — Keeping last live snapshot on screen. No simulated whale data is ever shown. Retry shortly.
         </div>
       )}
       {dataSource === 'cached' && scanBadge === 'CACHED' && (

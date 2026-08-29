@@ -30,7 +30,6 @@ import {
   formatTokenAmount 
 } from '@/lib/insiderRiskUtils';
 import { analyzeTokenRisk } from '@/lib/insiderRiskApi';
-import { generateMockInsiderData } from '@/lib/insiderRiskMock';
 import WRInsiderProgress from './WRInsiderProgress';
 import type { CoinData } from '@/lib/whaleRadarState';
 
@@ -380,14 +379,11 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
   const [filterLevel, setFilterLevel] = useState<string>('ALL');
   const [scanProgress, setScanProgress] = useState({ current: 0, total: 0 });
   const [scanStatus, setScanStatus] = useState<'idle' | 'scanning' | 'completed' | 'error'>('idle');
-  const [useRealData, setUseRealData] = useState(false);
+  // Premium keys unlock deeper transfer/CEX analysis; free public APIs
+  // (RugCheck / Ethplorer / DexScreener) always provide real data.
+  const hasPremiumKeys = !!(etherscanKey || birdeyeKey);
 
-  // Check if we have API keys for real data
-  useEffect(() => {
-    setUseRealData(!!(etherscanKey || birdeyeKey));
-  }, [etherscanKey, birdeyeKey]);
-
-  // Main scan function
+  // Main scan function — never fabricates rows
   const runScan = useCallback(async () => {
     if (coins.length === 0 || scanStatus === 'scanning') return;
 
@@ -401,26 +397,30 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
       const coin = coins[i];
       setScanProgress({ current: i + 1, total: coins.length });
 
-      if (!useRealData) {
-        // Explicit, clearly-labeled demo mode — this component already
-        // shows a SIMULATED banner/badge whenever useRealData is false, so
-        // this is a visible choice, not a hidden fallback. See
-        // generateMockInsiderData()'s dataSource: 'simulated' stamp.
-        results.push(generateMockInsiderData(coin, i));
-        await new Promise(r => setTimeout(r, 50));
-        continue;
-      }
-
       try {
         const riskInfo = await analyzeTokenRisk(coin, { etherscanKey, birdeyeKey });
-        const { score, level, flags } = calculateRiskScore(riskInfo);
+        // Prefer score from public path when already computed; otherwise
+        // derive via the shared calculator (premium Birdeye/Etherscan path).
+        const scored = (typeof riskInfo.riskScore === 'number' && riskInfo.riskLevel)
+          ? {
+              score: riskInfo.riskScore,
+              level: riskInfo.riskLevel,
+              flags: riskInfo.flags || calculateRiskScore(riskInfo).flags,
+            }
+          : calculateRiskScore(riskInfo);
+
+        const sol = coin.platforms?.solana;
+        const eth = coin.platforms?.ethereum;
+        const inferredChain: 'ethereum' | 'solana' =
+          riskInfo.chain ||
+          (sol ? 'solana' : 'ethereum');
 
         results.push({
           id: coin.id || `token-${i}`,
           symbol: coin.symbol || 'UNKNOWN',
           name: coin.name || 'Unknown Token',
-          chain: riskInfo.chain || (i % 2 === 0 ? 'ethereum' : 'solana'),
-          address: riskInfo.address || (coin as unknown as { contract_address?: string }).contract_address || '',
+          chain: inferredChain,
+          address: riskInfo.address || sol || eth || (coin as unknown as { contract_address?: string }).contract_address || '',
           totalSupply: riskInfo.totalSupply || (coin as unknown as { total_supply?: number }).total_supply || 0,
           circulatingSupply: riskInfo.circulatingSupply || (coin as unknown as { circulating_supply?: number }).circulating_supply || 0,
           circulatingPercentage: riskInfo.circulatingPercentage || 0,
@@ -429,35 +429,36 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
           deployerAddress: riskInfo.deployerAddress || '',
           deployerBalance: riskInfo.deployerBalance || 0,
           deployerWalletType: riskInfo.deployerWalletType || 'UNKNOWN',
+          topHolderAddress: riskInfo.topHolderAddress,
           largeTransfers: riskInfo.largeTransfers || [],
           cexTransfers24h: riskInfo.cexTransfers24h || 0,
           cexTransfers72h: riskInfo.cexTransfers72h || 0,
           prePumpTransfer: riskInfo.prePumpTransfer || null,
-          riskScore: score,
-          riskLevel: level,
-          flags,
+          riskScore: scored.score,
+          riskLevel: scored.level,
+          externalRiskScore: riskInfo.externalRiskScore ?? null,
+          internalRiskScore: riskInfo.internalRiskScore ?? scored.score,
+          riskModelVersion: riskInfo.riskModelVersion,
+          riskProvider: riskInfo.riskProvider,
+          flags: scored.flags,
           lastUpdated: Date.now(),
           scanStatus: 'completed',
           dataSource: 'real',
+          fieldStatus: riskInfo.fieldStatus,
         });
       } catch (error) {
-        // Real-data mode failed for THIS coin. Used to silently substitute
-        // generateMockInsiderData() here — a fabricated row with zero
-        // visual difference from a genuine result, sitting in the same
-        // table as coins that really were scanned. Removed: an honest
-        // "couldn't scan this" row instead. riskLevel: 'UNKNOWN' renders
-        // distinctly (see RiskBadge's own comment) rather than defaulting
-        // to a reassuring green LOW badge, and riskScore stays 0 without
-        // implying "checked, found clean" the way a fabricated low score
-        // would.
+        // Honest "couldn't scan this" row — never substitute fabricated
+        // numbers. riskLevel: 'UNKNOWN' renders distinctly (see RiskBadge).
         console.error(`Real-data scan failed for ${coin.symbol}:`, error);
         errorCount++;
+        const sol = coin.platforms?.solana;
+        const eth = coin.platforms?.ethereum;
         results.push({
           id: coin.id || `token-${i}`,
           symbol: coin.symbol || 'UNKNOWN',
           name: coin.name || 'Unknown Token',
-          chain: i % 2 === 0 ? 'ethereum' : 'solana',
-          address: (coin as unknown as { contract_address?: string }).contract_address || '',
+          chain: sol ? 'solana' : 'ethereum',
+          address: sol || eth || (coin as unknown as { contract_address?: string }).contract_address || '',
           totalSupply: (coin as unknown as { total_supply?: number }).total_supply || 0,
           circulatingSupply: (coin as unknown as { circulating_supply?: number }).circulating_supply || 0,
           circulatingPercentage: 0,
@@ -494,7 +495,7 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
     setRiskData(results);
     setScanStatus(errorCount > results.length / 2 ? 'error' : 'completed');
     onRefresh();
-  }, [coins, etherscanKey, birdeyeKey, useRealData, onRefresh, scanStatus]);
+  }, [coins, etherscanKey, birdeyeKey, onRefresh, scanStatus]);
 
   // Auto-scan when coins change
   useEffect(() => {
@@ -554,9 +555,9 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
             <Shield className="w-4 h-4 text-[hsl(var(--wr-pink))]" />
             <span className="text-[10px] text-[hsl(var(--wr-muted))] tracking-wider">INSIDER RISK SCANNER</span>
             <span className="text-[10px] text-[hsl(var(--wr-pink))] font-mono">v10.0</span>
-            {!useRealData && (
-              <Badge variant="outline" className="text-[8px] border-[hsl(var(--wr-amber))]/40 text-[hsl(var(--wr-amber))]">
-                DEMO MODE
+            {!hasPremiumKeys && (
+              <Badge variant="outline" className="text-[8px] border-[hsl(var(--wr-cyan))]/40 text-[hsl(var(--wr-cyan))]">
+                PUBLIC APIs
               </Badge>
             )}
           </div>
@@ -578,20 +579,16 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger>
-                <div className={`flex items-center gap-1 px-2 py-1 rounded border text-[9px] ${
-                  useRealData 
-                    ? 'border-[hsl(var(--wr-green))]/40 text-[hsl(var(--wr-green))] bg-[hsl(var(--wr-green))]/10'
-                    : 'border-[hsl(var(--wr-amber))]/40 text-[hsl(var(--wr-amber))] bg-[hsl(var(--wr-amber))]/10'
-                }`}>
+                <div className="flex items-center gap-1 px-2 py-1 rounded border text-[9px] border-[hsl(var(--wr-green))]/40 text-[hsl(var(--wr-green))] bg-[hsl(var(--wr-green))]/10">
                   <Database className="w-3 h-3" />
-                  {useRealData ? 'LIVE DATA' : 'SIMULATED'}
+                  {hasPremiumKeys ? 'LIVE + PREMIUM' : 'LIVE (PUBLIC)'}
                 </div>
               </TooltipTrigger>
               <TooltipContent>
                 <p className="text-[10px]">
-                  {useRealData 
-                    ? 'Using real Etherscan/Birdeye API data'
-                    : 'Using simulated data. Add API keys in Settings for real data.'}
+                  {hasPremiumKeys
+                    ? 'Etherscan/Birdeye keys active — full transfer & CEX analysis'
+                    : 'Keyless public APIs: RugCheck (Solana), Ethplorer (ETH), DexScreener. Add keys in Settings for deeper CEX/transfer analysis.'}
                 </p>
               </TooltipContent>
             </Tooltip>
@@ -754,15 +751,23 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
                       </div>
                     </td>
                     <td className="py-2 px-3 hidden lg:table-cell">
-                      <div className={`font-mono font-bold ${
-                        data.circulatingPercentage < 30 ? 'text-[hsl(var(--wr-pink))]' : 
-                        data.circulatingPercentage < 50 ? 'text-[hsl(var(--wr-amber))]' : 
-                        'text-[hsl(var(--wr-green))]'
-                      }`}>
-                        {data.circulatingPercentage.toFixed(1)}%
-                      </div>
-                      {data.circulatingPercentage < 30 && (
-                        <div className="text-[8px] text-[hsl(var(--wr-pink))]">⚠️ Low Float</div>
+                      {data.fieldStatus?.circulating === 'UNAVAILABLE' || data.fieldStatus?.circulating === 'ERROR' ? (
+                        <div className="font-mono text-[hsl(var(--wr-muted))]" title="Circulating supply not measured by this data provider">
+                          n/a
+                        </div>
+                      ) : (
+                        <>
+                          <div className={`font-mono font-bold ${
+                            data.circulatingPercentage < 30 ? 'text-[hsl(var(--wr-pink))]' :
+                            data.circulatingPercentage < 50 ? 'text-[hsl(var(--wr-amber))]' :
+                            'text-[hsl(var(--wr-green))]'
+                          }`}>
+                            {data.circulatingPercentage.toFixed(1)}%
+                          </div>
+                          {data.circulatingPercentage < 30 && (
+                            <div className="text-[8px] text-[hsl(var(--wr-pink))]">Low Float</div>
+                          )}
+                        </>
                       )}
                     </td>
                     <td className="py-2 px-3 hidden lg:table-cell">
@@ -788,7 +793,9 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
                       <WalletTypeBadge type={data.deployerWalletType} />
                     </td>
                     <td className="py-2 px-3 hidden xl:table-cell">
-                      {data.cexTransfers24h > 0 ? (
+                      {data.fieldStatus?.transfers === 'UNAVAILABLE' || data.fieldStatus?.transfers === 'ERROR' ? (
+                        <span className="text-[hsl(var(--wr-muted))]" title="Transfer / CEX analysis requires premium API keys">n/a</span>
+                      ) : data.cexTransfers24h > 0 ? (
                         <div className="flex items-center gap-1 text-[hsl(var(--wr-pink))]">
                           <Building2 className="w-3 h-3" />
                           <span className="font-bold">{data.cexTransfers24h}</span>
@@ -801,7 +808,7 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
                           <span className="text-[8px]">(72h)</span>
                         </div>
                       ) : (
-                        <span className="text-[hsl(var(--wr-muted))]">-</span>
+                        <span className="text-[hsl(var(--wr-muted))]">0</span>
                       )}
                     </td>
                     <td className="py-2 px-3">
@@ -851,7 +858,7 @@ export const WRInsiderRiskScanner: React.FC<WRInsiderRiskScannerProps> = ({
           <span>Analyzed: {riskData.length} tokens</span>
           <span className="hidden sm:inline">|</span>
           <span className="hidden sm:inline">
-            Data source: {useRealData ? 'Live APIs' : 'Simulated'}
+            Data source: {hasPremiumKeys ? 'Live + premium APIs' : 'Live public APIs (RugCheck / Ethplorer / DexScreener)'}
           </span>
           <span className="hidden sm:inline">|</span>
           <span className="hidden sm:inline">Last updated: {new Date(lastScanTime).toLocaleTimeString()}</span>

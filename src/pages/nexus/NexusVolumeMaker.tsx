@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { NexusEmptyState, StatCard, fmtNum } from "@/components/nexus/shared";
 import { ProtectionBanner } from "@/components/nexus/ProtectionBanner";
+import { ExecutionSafetyPanel } from "@/components/nexus/ExecutionSafetyPanel";
 import { NexusBotStatusBar } from "@/components/nexus/NexusBotStatusBar";
 import type { VolumeStats } from "@/lib/nexus/bot";
 import { startVolumeMakerGuarded, reportBotTradeClosed } from "@/lib/nexus/bot";
@@ -107,6 +108,7 @@ export default function NexusVolumeMaker() {
       </header>
       <NexusBotStatusBar />
       <ProtectionBanner />
+      <ExecutionSafetyPanel />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard label="Total Volume" value={"$" + fmtNum(stats?.totalVolumeUsd ?? 0)} />

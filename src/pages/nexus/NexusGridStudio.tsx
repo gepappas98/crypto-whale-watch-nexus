@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NexusEmptyState } from "@/components/nexus/shared";
 import { ProtectionBanner } from "@/components/nexus/ProtectionBanner";
+import { ExecutionSafetyPanel } from "@/components/nexus/ExecutionSafetyPanel";
 import { NexusBotStatusBar } from "@/components/nexus/NexusBotStatusBar";
 import type { GridConfig, GridStatus } from "@/lib/nexus/bot";
 import { createGridGuarded, reportBotTradeClosed } from "@/lib/nexus/bot";
@@ -155,6 +156,7 @@ export default function NexusGridStudio() {
       </header>
       <NexusBotStatusBar />
       <ProtectionBanner />
+      <ExecutionSafetyPanel />
 
       {showCreate && (
         <Card className="p-4">
