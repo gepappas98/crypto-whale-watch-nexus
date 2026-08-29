@@ -57,20 +57,40 @@ export function WRHeader({
         <HeaderStat label="ALERTS" value={String(alertCount)} />
         <HeaderStat label="NEXT SCAN" value={nextScan} />
         <HeaderStat label="AI CALLS" value={String(aiCallCount)} color="purple" />
-        <Link
-          to="/trading-hub"
-          className="text-[10px] tracking-[2px] px-2 py-1 rounded border border-primary/40 text-primary hover:bg-primary/10 transition-colors"
-          title="Open Trading Intelligence Hub"
-        >
-          TRADING HUB →
-        </Link>
-        <Link
-          to="/nexus"
-          className="text-[10px] tracking-[2px] px-2 py-1 rounded border border-wr-green/40 text-wr-green hover:bg-wr-green/10 transition-colors"
-          title="Open Nexus Trading Terminal"
-        >
-          NEXUS →
-        </Link>
+        {/* Grouped terminals — reduces header clutter */}
+        <div className="relative group">
+          <button
+            type="button"
+            className="text-[10px] tracking-[2px] px-2 py-1 rounded border border-wr-green/40 text-wr-green hover:bg-wr-green/10 transition-colors bg-transparent cursor-pointer"
+            title="Trading terminals"
+            aria-haspopup="true"
+          >
+            TERMINALS ▾
+          </button>
+          <div className="absolute right-0 top-full mt-1 hidden group-hover:flex group-focus-within:flex flex-col min-w-[160px] rounded border border-wr-border bg-wr-bg2 shadow-lg z-[120]">
+            <Link
+              to="/trading-hub"
+              className="text-[10px] tracking-[1px] px-3 py-2 text-primary hover:bg-primary/10 border-b border-wr-border/50"
+            >
+              Trading Hub
+              <span className="block text-[8px] text-wr-muted tracking-normal">TA · Backtest · Screener</span>
+            </Link>
+            <Link
+              to="/nexus"
+              className="text-[10px] tracking-[1px] px-3 py-2 text-wr-green hover:bg-wr-green/10 border-b border-wr-border/50"
+            >
+              Nexus
+              <span className="block text-[8px] text-wr-muted tracking-normal">HL · Arb · Grid · Bot</span>
+            </Link>
+            <Link
+              to="/orderflow"
+              className="text-[10px] tracking-[1px] px-3 py-2 text-wr-white hover:bg-wr-bg3"
+            >
+              Orderflow
+              <span className="block text-[8px] text-wr-muted tracking-normal">Depth · Liquidations</span>
+            </Link>
+          </div>
+        </div>
         {canInstall && (
           <button
             className="text-[10px] tracking-[2px] px-2 py-1 rounded border border-wr-amber/40 text-wr-amber hover:bg-wr-amber/10 transition-colors bg-transparent cursor-pointer"

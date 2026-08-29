@@ -18,6 +18,10 @@ export interface TransferEvent {
   cexName?: string;
 }
 
+/** Provenance of a numeric/boolean field — never conflate "0 / false"
+ *  (measured) with "we didn't measure this". */
+export type FieldStatus = 'REAL' | 'DERIVED' | 'UNAVAILABLE' | 'ERROR' | 'STALE';
+
 export interface InsiderRiskData {
   id: string;
   symbol: string;
@@ -28,16 +32,25 @@ export interface InsiderRiskData {
   // Supply Metrics
   totalSupply: number;
   circulatingSupply: number;
+  /** Only meaningful when fieldStatus.circulating === 'REAL'. */
   circulatingPercentage: number;
 
   // Holder Concentration
   holders: TokenHolder[];
   top10Concentration: number;
+  /**
+   * Real contract deployer/creator when known. Public paths that only
+   * observe top holders must leave this empty — top holder ≠ deployer.
+   */
   deployerAddress: string;
   deployerBalance: number;
   deployerWalletType: 'EOA' | 'GNOSIS_SAFE' | 'MULTISIG' | 'UNKNOWN';
+  /** Largest observed holder address (never labelled "deployer"). */
+  topHolderAddress?: string;
 
-  // Transfer Analysis
+  // Transfer Analysis — values are only meaningful when
+  // fieldStatus.transfers === 'REAL'. Otherwise treat as UNAVAILABLE,
+  // not "zero transfers found".
   largeTransfers: TransferEvent[];
   cexTransfers24h: number;
   cexTransfers72h: number;
@@ -51,7 +64,8 @@ export interface InsiderRiskData {
     hoursBeforePump: number;
   } | null;
 
-  // Risk Score
+  // Risk Score — `riskScore` is always the internal WR model (comparable
+  // across chains). External provider scores live in externalRiskScore.
   riskScore: number;
   // 'UNKNOWN' — a real scan was attempted and failed (API error, no data
   // available). Distinct from every other level: those all mean "we
@@ -59,8 +73,16 @@ export interface InsiderRiskData {
   // which is never the same claim as LOW and must never render like it —
   // see WRInsiderRiskScanner.tsx's RiskBadge.
   riskLevel: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
+  /** Provider-native score when available (e.g. RugCheck score_normalised). */
+  externalRiskScore?: number | null;
+  /** Always the internal Whale Radar 0–100 model. */
+  internalRiskScore?: number;
+  riskModelVersion?: string;
+  riskProvider?: 'rugcheck' | 'ethplorer' | 'birdeye' | 'etherscan' | 'mixed' | 'none';
 
-  // Flags
+  // Flags — booleans that were never checked must stay false AND be
+  // marked UNAVAILABLE in fieldStatus.flags so the UI does not claim
+  // "checked clean".
   flags: {
     lowCirculating: boolean;
     extremeTeamControl: boolean;
@@ -74,12 +96,25 @@ export interface InsiderRiskData {
   lastUpdated: number;
   scanStatus: 'pending' | 'scanning' | 'completed' | 'error';
   errorMessage?: string;
-  // Whether the fields above are real, fetched data or clearly-labeled
-  // simulated/demo data (generateMockInsiderData) — added so a real API
-  // failure can never again be silently backfilled with fabricated numbers
-  // that are indistinguishable from a real result. Every row must set this
-  // explicitly; there is no default.
+  // Always 'real' for live scans. The previous 'simulated' value existed
+  // only for generateMockInsiderData(), which has been removed — free public
+  // APIs (RugCheck / Ethplorer / DexScreener) still produce real on-chain
+  // data and must stamp 'real'. Kept in the union only for any persisted
+  // CSV rows from older builds.
   dataSource: 'real' | 'simulated';
+  /**
+   * Per-field provenance. Missing keys default to REAL for premium paths
+   * that fully measured the field; public paths must set these explicitly.
+   */
+  fieldStatus?: {
+    circulating?: FieldStatus;
+    holders?: FieldStatus;
+    transfers?: FieldStatus;
+    prePump?: FieldStatus;
+    walletType?: FieldStatus;
+    deployer?: FieldStatus;
+    flags?: FieldStatus;
+  };
 }
 
 export interface InsiderRiskSettings {

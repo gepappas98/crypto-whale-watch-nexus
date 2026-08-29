@@ -6,6 +6,8 @@
 
 import type { ArbitrageOpportunity } from "./arbitrage";
 import { canTrade, type TradeGateResult } from "./protections";
+import { checkCircuitBreaker } from "./circuitBreaker";
+import { checkDailyRiskGate } from "./dailyRiskGate";
 import { recordBotTrade, type BotStrategy } from "./botTradeStore";
 import { checkPairQuality } from "./pairQuality";
 import { checkOpenTradeSlot, type SlotCheckResult } from "./openTradesLimit";
@@ -173,6 +175,26 @@ export async function executeArbitrageGuarded(
   const gate = canTrade(opp.pair, "*");
   if (!gate.allowed) throw new ProtectionBlockedError(gate);
 
+  const dayRisk = checkDailyRiskGate();
+  if (!dayRisk.allowed) {
+    throw new ProtectionBlockedError({ allowed: false, reason: dayRisk.reason });
+  }
+
+  // Slippage vs mid from the two-leg price map when both quotes exist
+  const priceVals = Object.values(opp.prices).filter(
+    (p): p is number => typeof p === "number" && p > 0,
+  );
+  const mid = priceVals.length >= 2 ? (Math.min(...priceVals) + Math.max(...priceVals)) / 2 : 0;
+  const fill = priceVals.length >= 2 ? Math.max(...priceVals) : 0;
+  const circuit = checkCircuitBreaker(
+    mid > 0 && fill > 0
+      ? { midPrice: mid, estimatedFillPrice: fill, pair: opp.pair }
+      : undefined,
+  );
+  if (!circuit.allowed) {
+    throw new ProtectionBlockedError({ allowed: false, reason: circuit.reason });
+  }
+
   if (isDryRun()) {
     console.info(`[DryRun] Would execute arbitrage on ${opp.pair} — all gates passed, no order placed.`);
     return { ok: true, dryRun: true };
@@ -201,6 +223,15 @@ export async function createGridGuarded(cfg: GridConfig): Promise<GridStatus> {
   }
   const gate = canTrade(cfg.symbol, "*");
   if (!gate.allowed) throw new ProtectionBlockedError(gate);
+
+  const dayRisk = checkDailyRiskGate();
+  if (!dayRisk.allowed) {
+    throw new ProtectionBlockedError({ allowed: false, reason: dayRisk.reason });
+  }
+  const circuit = checkCircuitBreaker();
+  if (!circuit.allowed) {
+    throw new ProtectionBlockedError({ allowed: false, reason: circuit.reason });
+  }
 
   if (isDryRun()) {
     console.info(`[DryRun] Would create grid on ${cfg.symbol} (${cfg.exchange}) — all gates passed, no order placed.`);
@@ -234,6 +265,15 @@ export async function startVolumeMakerGuarded(opts: {
   }
   const gate = canTrade("*", "*");
   if (!gate.allowed) throw new ProtectionBlockedError(gate);
+
+  const dayRisk = checkDailyRiskGate();
+  if (!dayRisk.allowed) {
+    throw new ProtectionBlockedError({ allowed: false, reason: dayRisk.reason });
+  }
+  const circuit = checkCircuitBreaker();
+  if (!circuit.allowed) {
+    throw new ProtectionBlockedError({ allowed: false, reason: circuit.reason });
+  }
 
   if (isDryRun()) {
     console.info(`[DryRun] Would start volume maker (${opts.mode} on ${opts.exchange}/${opts.symbol}) — all gates passed, no order placed.`);

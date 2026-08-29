@@ -253,8 +253,9 @@ export const WRInsiderRiskSettings: React.FC<WRInsiderRiskSettingsProps> = ({
       <Alert className="bg-[hsl(var(--wr-amber))]/10 border-[hsl(var(--wr-amber))]/40 text-[hsl(var(--wr-amber))]">
         <Info className="w-3 h-3" />
         <AlertDescription className="text-[9px]">
-          Insider Risk Scanner requires valid API keys to fetch real on-chain data. 
-          Without keys, the scanner will show simulated data for demonstration.
+          Keys are optional. Without them the scanner still uses real public APIs
+          (RugCheck for Solana, Ethplorer for ETH, DexScreener for liquidity).
+          Etherscan/Birdeye keys unlock deeper transfer and CEX analysis.
         </AlertDescription>
       </Alert>
     </div>

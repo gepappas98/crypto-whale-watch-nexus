@@ -7,6 +7,7 @@ import { ProtectionBanner } from "@/components/nexus/ProtectionBanner";
 import { NexusBotStatusBar } from "@/components/nexus/NexusBotStatusBar";
 import { ProtectionOptimizerPanel } from "@/components/nexus/ProtectionOptimizerPanel";
 import { ProtectionConfigPanel } from "@/components/nexus/ProtectionConfigPanel";
+import { ExecutionSafetyPanel } from "@/components/nexus/ExecutionSafetyPanel";
 import type { PortfolioSummary } from "@/lib/nexus/bot";
 
 export default function NexusPortfolio() {
@@ -55,6 +56,7 @@ export default function NexusPortfolio() {
       </header>
       <NexusBotStatusBar />
       <ProtectionBanner />
+      <ExecutionSafetyPanel />
       <ProtectionOptimizerPanel />
       <ProtectionConfigPanel />
 
