@@ -16,7 +16,7 @@
  *  polling loop that covers that. Test everything against exchange
  *  testnets before pointing NEXUS_LIVE_TRADING_CONFIRM at a funded account.
  * ═══════════════════════════════════════════════════════════════════════════ */
-import ccxt from 'ccxt';
+import ccxt = require('ccxt');
 
 const ENV_PREFIX: Record<string, string> = {
   binance: 'BINANCE',
@@ -177,7 +177,8 @@ export async function fetchPortfolioBalances(): Promise<Array<{ name: string; ba
     try {
       const ex = getExchange(exchangeId);
       const balance = await ex.fetchBalance();
-      const totalUsd = typeof balance.total?.USDT === 'number' ? balance.total.USDT : 0;
+      const total = balance.total as unknown as Record<string, number | undefined> | undefined;
+      const totalUsd = typeof total?.USDT === 'number' ? total.USDT : 0;
       results.push({ name: exchangeId, balanceUsd: totalUsd, connected: true });
     } catch (err) {
       console.error(`[ccxtExecutor] balance fetch failed for ${exchangeId}`, (err as Error).message);

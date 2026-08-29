@@ -190,7 +190,7 @@ export async function fillAlertOutcomePrices(): Promise<AlertFillResult> {
       const url = `https://api.coingecko.com/api/v3/simple/price?ids=${batch.join(',')}&vs_currencies=usd`;
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 12_000);
-      let res: Response;
+      let res: globalThis.Response;
       try {
         res = await fetch(url, { headers: { Accept: 'application/json' }, signal: ctrl.signal });
       } finally {
