@@ -33,7 +33,7 @@ import {
   runHlSmaBacktest,
   type HlBacktestConfig,
   type HlBacktestResult,
-} from "@/lib/nexus/hlBacktest";
+} from "@/lib/hlBacktest";
 
 const INTERVALS: HlBacktestConfig["interval"][] = ["15m", "1h", "4h", "1d"];
 const COINS = ["BTC", "ETH", "SOL", "HYPE", "ARB", "LINK"];
