@@ -65,7 +65,7 @@ export default function WhaleRadarApp() {
   const [theme, setTheme] = useState<'cyber' | 'matrix' | 'dark'>('cyber');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
-  const [autoScan, setAutoScan] = useState(false);
+  const [autoScan, setAutoScan] = useState(true);
   const [autoPaused, setAutoPaused] = useState(false);
   // Owned by useMarketData below: scanning, scanBadge.
   const [kbdOpen, setKbdOpen] = useState(false);
@@ -155,10 +155,10 @@ export default function WhaleRadarApp() {
     const sbKey = localStorage.getItem('wr_supabase_anon_key') ?? '';
     if (sbUrl) setSupabaseUrl(sbUrl);
     if (sbKey) setSupabaseAnonKey(sbKey);
-    if (saved.autoScan) {
-      setAutoScan(true);
-      setAutoPaused(saved.autoPaused as boolean ?? true);
-    }
+    // AUTO SCAN IS HARD-LOCKED ON. Legacy persisted OFF/PAUSED state is ignored.
+    // The scanner must not depend on a user's browser toggle to keep the Council fed.
+    setAutoScan(true);
+    setAutoPaused(false);
   }, []);
 
   // ══ PERFORMANCE MONITORING ═══════════════════════════════════════════════
@@ -278,14 +278,14 @@ export default function WhaleRadarApp() {
         theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
         vmcapThr, pchgThr, whaleThr, soundOn, scanHistory: scanHistory.slice(-CFG.HISTORY_MAX),
         prevVolumes, aggressiveMode, watchlistOnly, bybitEnabled, whaleFeedEx,
-        autoScan, autoPaused,
+        autoScan: true, autoPaused: false,
         hlScannerEnabled, hlMegaTxUsd,
       });
     }, 500);
     return () => clearTimeout(timer);
   }, [theme, apiKey, aiKey, birdKey, heliusKey, tracked, portfolio, wallets,
     vmcapThr, pchgThr, whaleThr, soundOn, scanHistory, prevVolumes, aggressiveMode,
-    watchlistOnly, bybitEnabled, whaleFeedEx, autoScan, autoPaused,
+    watchlistOnly, bybitEnabled, whaleFeedEx,
     hlScannerEnabled, hlMegaTxUsd]);
 
 
@@ -441,7 +441,7 @@ export default function WhaleRadarApp() {
   useEffect(() => { triggerScanRef.current = triggerScan; }, [triggerScan]);
 
   useEffect(() => {
-    if (!autoScan || autoPaused) return;
+    if (!autoScan) return;
     const ms = aggressiveMode ? CFG.SCAN_MS_AGG : CFG.SCAN_MS_NORMAL;
     triggerScanRef.current();
     const timer   = setInterval(() => triggerScanRef.current(), ms);
@@ -452,7 +452,7 @@ export default function WhaleRadarApp() {
       setNextScan(r > 0 ? r + 's' : 'NOW');
     }, 1000);
     return () => { clearInterval(timer); clearInterval(cdTimer); };
-  }, [autoScan, autoPaused, aggressiveMode]);
+  }, [autoScan, aggressiveMode]);
 
   // ══ KEYBOARD SHORTCUTS ════════════════════════════════════════════════════
   useEffect(() => {
@@ -481,15 +481,16 @@ export default function WhaleRadarApp() {
   }, []);
 
   // ══ TOGGLE HANDLERS ══════════════════════════════════════════════════════
+  // AUTO SCAN IS SYSTEM-OWNED — not user-toggleable.
+  // Keep the handler as a compatibility no-op for the existing scanner props.
   const handleToggleAuto = useCallback(() => {
-    setAutoScan(p => {
-      if (!p) setAutoPaused(false);
-      return !p;
-    });
+    setAutoScan(true);
+    setAutoPaused(false);
   }, []);
 
+  // Manual pause is disabled: Council data must not starve because a visitor paused scanning.
   const handleTogglePause = useCallback(() => {
-    setAutoPaused(p => !p);
+    setAutoPaused(false);
   }, []);
 
   const handleToggleBybit = useCallback(() => {
