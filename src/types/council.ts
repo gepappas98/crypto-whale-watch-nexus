@@ -29,6 +29,9 @@ export interface CouncilDecision {
   timeHorizon: 'scalp' | 'intraday' | 'swing' | 'position';
   relatedWhaleSignals: string[];
   manipulationFlags: string[];
+  /** Server-issued proof that this decision was produced by agent-council.
+   *  council-persist rejects unsigned/replayed client-forged decisions. */
+  persistProof?: { issuedAt: number; signature: string };
 }
 
 export type CouncilDepth = 'quick' | 'standard' | 'deep';
