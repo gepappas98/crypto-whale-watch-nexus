@@ -102,7 +102,7 @@ async function verifyPersistProof(
     })();
   if (!secret) return false;
 
-  const message = `v1|\${issuedAt}|\${symbol}|\${finalVerdict}|\${conviction}|\${depth}|\${priceAt ?? ''}`;
+  const message = `v1|${issuedAt}|${symbol}|${finalVerdict}|${conviction}|${depth}|${priceAt ?? ''}`;
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(secret),
