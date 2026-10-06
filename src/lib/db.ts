@@ -388,6 +388,47 @@ export async function logAlertOutcome(
   });
 }
 
+// ══ COUNCIL RUNTIME TELEMETRY ════════════════════════════════════════════════
+export type CouncilRuntimeEventType =
+  | 'SCAN_COMPLETED'
+  | 'CANDIDATES_FOUND'
+  | 'COUNCIL_TRIGGERED'
+  | 'COUNCIL_PERSISTED'
+  | 'COUNCIL_SKIPPED'
+  | 'COUNCIL_FAILED';
+
+export async function saveCouncilRuntimeEvent(payload: {
+  event_type: CouncilRuntimeEventType;
+  symbol?: string;
+  candidate_count?: number;
+  duration_ms?: number;
+  decision_id?: string | null;
+  reason?: string | null;
+  error_message?: string | null;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  const sb = getSupabase();
+  if (!sb) return;
+
+  try {
+    const { error } = await sb.from('council_runtime_events').insert({
+      event_type: payload.event_type,
+      symbol: payload.symbol ?? null,
+      candidate_count: payload.candidate_count ?? null,
+      duration_ms: payload.duration_ms ?? null,
+      decision_id: payload.decision_id ?? null,
+      reason: payload.reason ?? null,
+      error_message: payload.error_message ?? null,
+      metadata: payload.metadata ?? {},
+    });
+    if (error) {
+      console.warn('[DB] council runtime event failed:', error.message);
+    }
+  } catch (err) {
+    console.warn('[DB] council runtime event failed:', (err as Error).message);
+  }
+}
+
 // ══ WHALE EVENTS ══════════════════════════════════════════════════════════════
 // Persists live trades from the WebSocket feed.
 // Caller (Index.tsx) throttles to 1 write per symbol per 30s.
