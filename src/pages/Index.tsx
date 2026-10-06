@@ -42,6 +42,7 @@ import { WRCouncilPanel } from '@/components/whale-radar/WRCouncilPanel';
 import { buildCouncilContext } from '@/lib/council/context';
 import { runAutonomousCouncil, type CouncilLlmSettings } from '@/lib/council/api';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
+import type { RegimeReading } from '@/lib/regime/types';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
 import { analyzeSentiment } from '@/lib/analyzeToken';
 
@@ -112,7 +113,7 @@ export default function WhaleRadarApp() {
   const councilBusyRef = useRef(false);
   const coinsRef = useRef<CoinData[]>([]);
   const whaleFeedRef = useRef<WhaleTrade[]>([]);
-  const regimeRef = useRef<typeof regimeReading>(null);
+  const regimeRef = useRef<RegimeReading | null>(null);
   const councilLlmRef = useRef<CouncilLlmSettings>({ provider: 'lovable' });
   const councilEnabledRef = useRef(true);
   const [councilLlm, setCouncilLlm] = useState<CouncilLlmSettings>(() => {
