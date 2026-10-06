@@ -251,6 +251,33 @@ async function streamAgent(
   return full;
 }
 
+async function createPersistProof(
+  symbol: string,
+  finalVerdict: string,
+  conviction: number,
+  depth: string,
+  priceAt: number | null,
+  issuedAt: number,
+): Promise<string> {
+  const secret =
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ??
+    (() => {
+      try { return JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}').default; } catch { return undefined; }
+    })();
+  if (!secret) throw new Error('Council persistence signing key unavailable');
+  const message = `v1|\${issuedAt}|\${symbol}|\${finalVerdict}|\${conviction}|\${depth}|\${priceAt ?? ''}`;
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message));
+  return btoa(String.fromCharCode(...new Uint8Array(sig)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
 function extractJson(text: string): any | null {
   const cleaned = text.replace(/```json/gi, '').replace(/```/g, '');
   const start = cleaned.lastIndexOf('{');
@@ -333,11 +360,23 @@ Deno.serve(async (req) => {
         if (!parsed) {
           send({ type: 'error', message: 'Portfolio Manager did not return a structured decision.' });
         } else {
+          const normalizedVerdict = parsed.finalVerdict ?? 'NEUTRAL';
+          const normalizedConviction = Math.max(0, Math.min(100, Number(parsed.conviction) || 0));
+          const normalizedPrice = Number.isFinite(Number(ctx.price)) && Number(ctx.price) > 0 ? Number(ctx.price) : null;
+          const issuedAt = Date.now();
+          const persistProof = await createPersistProof(
+            String(ctx.symbol).trim().toUpperCase(),
+            normalizedVerdict,
+            normalizedConviction,
+            depth,
+            normalizedPrice,
+            issuedAt,
+          );
           const decision = {
             symbol: ctx.symbol,
             timestamp: new Date().toISOString(),
-            finalVerdict: parsed.finalVerdict ?? 'NEUTRAL',
-            conviction: Math.max(0, Math.min(100, Number(parsed.conviction) || 0)),
+            finalVerdict: normalizedVerdict,
+            conviction: normalizedConviction,
             summary: String(parsed.summary ?? ''),
             bullCase: String(parsed.bullCase ?? transcript.find((t) => t.agent === 'bull')?.text ?? ''),
             bearCase: String(parsed.bearCase ?? transcript.find((t) => t.agent === 'bear')?.text ?? ''),
@@ -356,6 +395,7 @@ Deno.serve(async (req) => {
             manipulationFlags: Array.isArray(parsed.manipulationFlags)
               ? parsed.manipulationFlags.map(String)
               : (ctx.manipulationPattern ? [ctx.manipulationPattern] : []),
+            persistProof: { issuedAt, signature: persistProof },
           };
           send({ type: 'decision', decision });
         }
