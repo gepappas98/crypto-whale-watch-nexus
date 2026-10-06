@@ -65,6 +65,45 @@ export type Database = {
         }
         Relationships: []
       }
+      council_runtime_events: {
+        Row: {
+          candidate_count: number | null
+          created_at: string
+          decision_id: string | null
+          duration_ms: number | null
+          error_message: string | null
+          event_type: string
+          id: string
+          metadata: Json
+          reason: string | null
+          symbol: string | null
+        }
+        Insert: {
+          candidate_count?: number | null
+          created_at?: string
+          decision_id?: string | null
+          duration_ms?: number | null
+          error_message?: string | null
+          event_type: string
+          id?: string
+          metadata?: Json
+          reason?: string | null
+          symbol?: string | null
+        }
+        Update: {
+          candidate_count?: number | null
+          created_at?: string
+          decision_id?: string | null
+          duration_ms?: number | null
+          error_message?: string | null
+          event_type?: string
+          id?: string
+          metadata?: Json
+          reason?: string | null
+          symbol?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
