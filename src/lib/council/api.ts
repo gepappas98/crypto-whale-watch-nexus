@@ -150,6 +150,71 @@ export async function saveCouncilDecision(
   }
 }
 
+/**
+ * Run one autonomous Council cycle without rendering the Council panel.
+ * Persistence remains the same signed server->persist path as manual Council.
+ *
+ * Freshness is enforced here as the final guard: a symbol is not re-run
+ * while its newest persisted decision is still inside the 30-minute feed SLA.
+ */
+export async function runAutonomousCouncil(
+  ctx: CouncilContext,
+  llm: CouncilLlmSettings,
+  depth: CouncilDepth = 'quick',
+): Promise<string | null> {
+  const existing = await loadCouncilMemory(ctx.symbol, 1);
+  const latest = existing[0];
+  if (latest) {
+    const ageMs = Date.now() - new Date(latest.createdAt).getTime();
+    if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 30 * 60 * 1000) {
+      return null;
+    }
+  }
+
+  const memory = await refreshMemoryPerformance(
+    await loadCouncilMemory(ctx.symbol),
+    ctx.price,
+  );
+  const reflection = buildReflection(memory);
+  const transcriptByAgent = new Map<AgentId, string>();
+  let decision: CouncilDecision | null = null;
+
+  await runCouncil(
+    ctx,
+    depth,
+    memory,
+    llm,
+    {
+      onAgentStart: (agent) => {
+        transcriptByAgent.set(agent, '');
+      },
+      onDelta: (agent, text) => {
+        transcriptByAgent.set(agent, (transcriptByAgent.get(agent) ?? '') + text);
+      },
+      onAgentEnd: () => {},
+      onDecision: (d) => {
+        decision = d;
+      },
+      onError: (message) => {
+        console.warn('[council-auto] run failed:', message);
+      },
+    },
+  );
+
+  if (!decision) return null;
+
+  const transcript = Array.from(transcriptByAgent.entries())
+    .map(([agent, text]) => ({ agent, text }));
+  const id = await saveCouncilDecision(decision, ctx, transcript, depth, reflection);
+
+  if (id) {
+    console.info('[council-auto] persisted', ctx.symbol, id);
+  } else {
+    console.warn('[council-auto] decision produced but persistence failed', ctx.symbol);
+  }
+  return id;
+}
+
 export async function loadCouncilMemory(symbol: string, limit = 6): Promise<CouncilMemoryEntry[]> {
   try {
     const { data, error } = await supabase
