@@ -424,10 +424,34 @@ export async function saveCouncilRuntimeEvent(payload: {
       metadata: payload.metadata ?? {},
     });
     if (error) {
-      console.warn('[DB] council runtime event failed:', error.message);
+      const envUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+      const envKey =
+        (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ||
+        (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
+      const targetHost = (() => {
+        try { return envUrl ? new URL(envUrl).host : '(missing-url)'; }
+        catch { return '(invalid-url)'; }
+      })();
+      const keyKind = envKey
+        ? (envKey.startsWith('sb_publishable_') ? 'publishable' : 'legacy-anon-or-other')
+        : 'missing-key';
+
+      console.warn('[DB] council runtime event failed:', {
+        event_type: payload.event_type,
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        targetHost,
+        keyKind,
+        expectedHost: 'piywvcmebdrxwhujphqp.supabase.co',
+      });
     }
   } catch (err) {
-    console.warn('[DB] council runtime event failed:', (err as Error).message);
+    console.warn('[DB] council runtime event exception:', {
+      event_type: payload.event_type,
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
