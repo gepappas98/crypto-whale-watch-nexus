@@ -47,7 +47,7 @@ import type { AgentId } from '@/types/council';
 import { getSizingHint } from '@/lib/sizingHint';
 import { getRemotePairListUrl, fetchRemotePairList } from '@/lib/nexus/remotePairList';
 import {
-  CoinData, CFG, ScanSnapshot, isSolToken,
+  CoinData, CFG, ScanSnapshot, WhaleTrade, isSolToken,
 } from '@/lib/whaleRadarState';
 
 type AlertLevel = 'critical' | 'high' | 'medium' | 'info';
@@ -70,6 +70,8 @@ export interface UseMarketDataOptions {
   /** Optional initial state (e.g. from persistence). */
   initialPrevVolumes?: Record<string, number>;
   initialScanHistory?: ScanSnapshot[];
+  /** Latest shared context used by the autonomous Council; read at execution time. */
+  getCouncilContextExtras?: () => { whaleTrades?: WhaleTrade[]; regime?: import('@/lib/regime/types').RegimeReading | null };
 }
 
 export interface UseMarketDataResult {
@@ -355,7 +357,8 @@ export function useMarketData({
           continue;
         }
 
-        const ctx = buildCouncilContext(coin);
+        const extras = getCouncilContextExtras?.() ?? {};
+        const ctx = buildCouncilContext(coin, extras);
         const transcript: { agent: AgentId; text: string }[] = [];
         let activeAgent: AgentId | null = null;
         let activeText = '';
@@ -407,7 +410,7 @@ export function useMarketData({
     } finally {
       councilBusyRef.current = false;
     }
-  }, []);
+  }, [getCouncilContextExtras]);
 
   useEffect(() => {
     autoCouncilRef.current = runAutoCouncil;
