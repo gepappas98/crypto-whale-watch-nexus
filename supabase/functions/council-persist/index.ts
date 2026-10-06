@@ -77,6 +77,56 @@ function bucketFor(ageMs: number): string | null {
   return null;
 }
 
+async function verifyPersistProof(
+  symbol: string,
+  finalVerdict: string,
+  conviction: number,
+  depth: string,
+  priceAt: number | null,
+  proof: unknown,
+): Promise<boolean> {
+  if (!proof || typeof proof !== 'object') return false;
+  const p = proof as { issuedAt?: unknown; signature?: unknown };
+  const issuedAt = Number(p.issuedAt);
+  if (!Number.isFinite(issuedAt)) return false;
+  const age = Date.now() - issuedAt;
+  if (age < -60_000 || age > 10 * 60_000) return false;
+
+  const signature = typeof p.signature === 'string' ? p.signature : '';
+  if (!signature) return false;
+
+  const secret =
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ??
+    (() => {
+      try { return JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}').default; } catch { return undefined; }
+    })();
+  if (!secret) return false;
+
+  const message = `v1|\${issuedAt}|\${symbol}|\${finalVerdict}|\${conviction}|\${depth}|\${priceAt ?? ''}`;
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const expected = new Uint8Array(
+    await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message)),
+  );
+
+  let provided: Uint8Array;
+  try {
+    const padded = signature.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - signature.length % 4) % 4);
+    provided = Uint8Array.from(atob(padded), (ch) => ch.charCodeAt(0));
+  } catch {
+    return false;
+  }
+  if (provided.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected[i] ^ provided[i];
+  return diff === 0;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -106,6 +156,10 @@ Deno.serve(async (req) => {
       const priceAt = p.price_at === null || p.price_at === undefined ? null : Number(p.price_at);
       if (priceAt !== null && (!Number.isFinite(priceAt) || priceAt <= 0)) {
         throw new Error('price_at is invalid');
+      }
+
+      if (!await verifyPersistProof(symbol, p.final_verdict, conviction, p.depth, priceAt, p.persist_proof)) {
+        return json({ error: 'Invalid or expired council persistence proof' }, 403);
       }
 
       const row = {
