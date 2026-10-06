@@ -101,6 +101,7 @@ export function useMarketData({
   addAlert,
   initialPrevVolumes = {},
   initialScanHistory = [],
+  getCouncilContextExtras,
 }: UseMarketDataOptions): UseMarketDataResult {
   const [coins,        setCoins]        = useState<CoinData[]>([]);
   const [lastFiltered, setLastFiltered] = useState<{ symbol: string; reason: string }[]>([]);
