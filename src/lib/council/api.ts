@@ -161,13 +161,17 @@ export async function runAutonomousCouncil(
   ctx: CouncilContext,
   llm: CouncilLlmSettings,
   depth: CouncilDepth = 'quick',
-): Promise<string | null> {
+): Promise<{
+  status: 'persisted' | 'skipped' | 'no_decision' | 'failed';
+  id: string | null;
+  reason?: string;
+}> {
   const existing = await loadCouncilMemory(ctx.symbol, 1);
   const latest = existing[0];
   if (latest) {
     const ageMs = Date.now() - new Date(latest.createdAt).getTime();
     if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 30 * 60 * 1000) {
-      return null;
+      return { status: 'skipped', id: null, reason: 'fresh_decision_within_30m' };
     }
   }
 
@@ -201,7 +205,7 @@ export async function runAutonomousCouncil(
     },
   );
 
-  if (!decision) return null;
+  if (!decision) return { status: 'no_decision', id: null, reason: 'no_decision' };
 
   const transcript = Array.from(transcriptByAgent.entries())
     .map(([agent, text]) => ({ agent, text }));
@@ -209,10 +213,11 @@ export async function runAutonomousCouncil(
 
   if (id) {
     console.info('[council-auto] persisted', ctx.symbol, id);
-  } else {
-    console.warn('[council-auto] decision produced but persistence failed', ctx.symbol);
+    return { status: 'persisted', id, reason: 'decision_persisted' };
   }
-  return id;
+
+  console.warn('[council-auto] decision produced but persistence failed', ctx.symbol);
+  return { status: 'failed', id: null, reason: 'persistence_failed' };
 }
 
 export async function loadCouncilMemory(symbol: string, limit = 6): Promise<CouncilMemoryEntry[]> {
