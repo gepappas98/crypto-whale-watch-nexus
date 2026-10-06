@@ -71,8 +71,6 @@ export interface UseMarketDataOptions {
   /** Optional initial state (e.g. from persistence). */
   initialPrevVolumes?: Record<string, number>;
   initialScanHistory?: ScanSnapshot[];
-  /** Latest shared context used by the autonomous Council; read at execution time. */
-  getCouncilContextExtras?: () => { whaleTrades?: WhaleTrade[]; regime?: import('@/lib/regime/types').RegimeReading | null };
 }
 
 export interface UseMarketDataResult {
@@ -101,7 +99,6 @@ export function useMarketData({
   addAlert,
   initialPrevVolumes = {},
   initialScanHistory = [],
-  getCouncilContextExtras,
 }: UseMarketDataOptions): UseMarketDataResult {
   const [coins,        setCoins]        = useState<CoinData[]>([]);
   const [lastFiltered, setLastFiltered] = useState<{ symbol: string; reason: string }[]>([]);
@@ -371,8 +368,7 @@ export function useMarketData({
           continue;
         }
 
-        const extras = getCouncilContextExtras?.() ?? {};
-        const ctx = buildCouncilContext(coin, extras);
+        const ctx = buildCouncilContext(coin);
         const transcript: { agent: AgentId; text: string }[] = [];
         let activeAgent: AgentId | null = null;
         let activeText = '';
@@ -429,7 +425,7 @@ export function useMarketData({
     } finally {
       councilBusyRef.current = false;
     }
-  }, [getCouncilContextExtras]);
+  }, []);
 
   useEffect(() => {
     autoCouncilRef.current = runAutoCouncil;
