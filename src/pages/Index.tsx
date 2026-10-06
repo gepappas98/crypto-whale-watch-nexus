@@ -241,6 +241,14 @@ export default function WhaleRadarApp() {
   const birdKeyRef = useRef('');
   useEffect(() => { birdKeyRef.current = birdKey; }, [birdKey]);
   const getBirdKey = useCallback(() => birdKeyRef.current, []);
+  // Shared live context refs let the scan hook run the autonomous Council
+  // without creating a dependency cycle on the regime hook below.
+  const councilWhaleFeedRef = useRef<WhaleTrade[]>([]);
+  const councilRegimeRef = useRef<RegimeReading | null>(null);
+  const getCouncilContextExtras = useCallback(() => ({
+    whaleTrades: councilWhaleFeedRef.current,
+    regime: councilRegimeRef.current,
+  }), []);
 
   const {
     coins, setCoins,
@@ -250,7 +258,7 @@ export default function WhaleRadarApp() {
     triggerScan,
     getAlertLocks,
     lastFiltered,
-  } = useMarketData({ apiKey, getBirdKey, addAlert });
+  } = useMarketData({ apiKey, getBirdKey, addAlert, getCouncilContextExtras });
 
   // ══ REGIME ENGINE — lifted here (not owned by RegimePanel) so the same
   // reading can also feed the AI Council's REGIME DESK agent below without
@@ -265,6 +273,10 @@ export default function WhaleRadarApp() {
     loading: regimeLoading,
     refresh: refreshRegime,
   } = useRegimeEngine(regimeLocal);
+  useEffect(() => {
+    councilWhaleFeedRef.current = whaleFeed;
+    councilRegimeRef.current = regimeReading;
+  }, [whaleFeed, regimeReading]);
 
   // ══ ALERT COOLDOWN STATUS (polled — module-level state, not reactive) ═════
   const [alertLocks, setAlertLocks] = useState<ReturnType<typeof getAlertLocks>>([]);
