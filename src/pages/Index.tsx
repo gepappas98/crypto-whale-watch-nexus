@@ -453,47 +453,54 @@ export default function WhaleRadarApp() {
   useEffect(() => { councilLlmRef.current = councilLlm; }, [councilLlm]);
   useEffect(() => { councilEnabledRef.current = councilEnabled; }, [councilEnabled]);
 
-  useEffect(() => {
-    let alive = true;
+  const runAutonomousCycle = useCallback(async () => {
+    if (!councilEnabledRef.current || councilBusyRef.current) return;
+    const source = coinsRef.current;
+    if (!source.length) return;
 
-    const runAutonomousCycle = async () => {
-      if (!alive || !councilEnabledRef.current || councilBusyRef.current) return;
-      const source = coinsRef.current;
-      if (!source.length) return;
+    const ranked = [...source]
+      .filter(c => c.score >= 70 || c.threat === 'CRITICAL' || c.threat === 'HIGH')
+      .sort((a, b) => (b.score - a.score) || (a.rank - b.rank));
+    const candidates = (ranked.length ? ranked : [...source].sort((a, b) => (b.score - a.score) || (a.rank - b.rank)))
+      .slice(0, ranked.length ? 3 : 1);
+    if (!candidates.length) return;
 
-      const ranked = [...source]
-        .filter(c => c.score >= 70 || c.threat === 'CRITICAL' || c.threat === 'HIGH')
-        .sort((a, b) => (b.score - a.score) || (a.rank - b.rank));
-      const candidates = (ranked.length ? ranked : [...source].sort((a, b) => (b.score - a.score) || (a.rank - b.rank)))
-        .slice(0, ranked.length ? 3 : 1);
-      if (!candidates.length) return;
-
-      councilBusyRef.current = true;
-      try {
-        for (const coin of candidates) {
-          if (!alive) break;
-          const ctx = buildCouncilContext(coin, {
-            whaleTrades: whaleFeedRef.current,
-            regime: regimeRef.current,
-          });
-          await runAutonomousCouncil(ctx, councilLlmRef.current, 'quick');
-        }
-      } catch (err) {
-        console.warn('[council-auto] cycle failed:', err);
-      } finally {
-        councilBusyRef.current = false;
+    councilBusyRef.current = true;
+    try {
+      for (const coin of candidates) {
+        const ctx = buildCouncilContext(coin, {
+          whaleTrades: whaleFeedRef.current,
+          regime: regimeRef.current,
+        });
+        await runAutonomousCouncil(ctx, councilLlmRef.current, 'quick');
       }
-    };
+    } catch (err) {
+      console.warn('[council-auto] cycle failed:', err);
+    } finally {
+      councilBusyRef.current = false;
+    }
+  }, []);
 
-    // Give the first live scan a few seconds to populate candidate data.
+  // Run shortly after the first mount, then keep a 30m safety cadence.
+  // The scan-trigger below is the important path: a completed fresh scan
+  // always gets a Council attempt instead of racing the initial 15s timer.
+  useEffect(() => {
     const firstTimer = window.setTimeout(() => { void runAutonomousCycle(); }, 15_000);
     const timer = window.setInterval(() => { void runAutonomousCycle(); }, 30 * 60 * 1000);
     return () => {
-      alive = false;
       window.clearTimeout(firstTimer);
       window.clearInterval(timer);
     };
-  }, []);
+  }, [runAutonomousCycle]);
+
+  // A scan can finish after the mount timer (or after the source was empty).
+  // Trigger the Council from the actual fresh-scan edge, with a small debounce
+  // so coins/whale/regime refs have settled before context construction.
+  useEffect(() => {
+    if (!lastScanTs) return;
+    const timer = window.setTimeout(() => { void runAutonomousCycle(); }, 3_000);
+    return () => window.clearTimeout(timer);
+  }, [lastScanTs, runAutonomousCycle]);
 
   // ══ AUTO SCAN ═════════════════════════════════════════════════════════════
   const triggerScanRef = useRef(triggerScan);
