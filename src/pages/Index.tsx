@@ -41,6 +41,7 @@ import { startPerfMonitoring } from '@/lib/perfBudget';
 import { WRCouncilPanel } from '@/components/whale-radar/WRCouncilPanel';
 import { buildCouncilContext } from '@/lib/council/context';
 import { runAutonomousCouncil, type CouncilLlmSettings } from '@/lib/council/api';
+import { saveCouncilRuntimeEvent } from '@/lib/db';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import type { RegimeReading } from '@/lib/regime/types';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
@@ -465,6 +466,12 @@ export default function WhaleRadarApp() {
       .slice(0, ranked.length ? 3 : 1);
     if (!candidates.length) return;
 
+    void saveCouncilRuntimeEvent({
+      event_type: 'CANDIDATES_FOUND',
+      candidate_count: candidates.length,
+      metadata: { ranked_count: ranked.length },
+    });
+
     councilBusyRef.current = true;
     try {
       for (const coin of candidates) {
@@ -472,7 +479,53 @@ export default function WhaleRadarApp() {
           whaleTrades: whaleFeedRef.current,
           regime: regimeRef.current,
         });
-        await runAutonomousCouncil(ctx, councilLlmRef.current, 'quick');
+
+        void saveCouncilRuntimeEvent({
+          event_type: 'COUNCIL_TRIGGERED',
+          symbol: coin.symbol,
+          candidate_count: candidates.length,
+        });
+
+        const startedAt = performance.now();
+        try {
+          const result = await runAutonomousCouncil(ctx, councilLlmRef.current, 'quick');
+          const durationMs = Math.round(performance.now() - startedAt);
+
+          if (result.status === 'persisted') {
+            void saveCouncilRuntimeEvent({
+              event_type: 'COUNCIL_PERSISTED',
+              symbol: coin.symbol,
+              duration_ms: durationMs,
+              decision_id: result.id,
+              reason: result.reason ?? null,
+            });
+          } else if (result.status === 'failed') {
+            void saveCouncilRuntimeEvent({
+              event_type: 'COUNCIL_FAILED',
+              symbol: coin.symbol,
+              duration_ms: durationMs,
+              reason: result.reason ?? null,
+            });
+          } else {
+            void saveCouncilRuntimeEvent({
+              event_type: 'COUNCIL_SKIPPED',
+              symbol: coin.symbol,
+              duration_ms: durationMs,
+              reason: result.reason ?? result.status,
+            });
+          }
+        } catch (err) {
+          const durationMs = Math.round(performance.now() - startedAt);
+          const message = err instanceof Error ? err.message : String(err);
+          void saveCouncilRuntimeEvent({
+            event_type: 'COUNCIL_FAILED',
+            symbol: coin.symbol,
+            duration_ms: durationMs,
+            reason: 'exception',
+            error_message: message,
+          });
+          throw err;
+        }
       }
     } catch (err) {
       console.warn('[council-auto] cycle failed:', err);
@@ -498,6 +551,10 @@ export default function WhaleRadarApp() {
   // so coins/whale/regime refs have settled before context construction.
   useEffect(() => {
     if (!lastScanTs) return;
+    void saveCouncilRuntimeEvent({
+      event_type: 'SCAN_COMPLETED',
+      metadata: { lastScanTs },
+    });
     const timer = window.setTimeout(() => { void runAutonomousCycle(); }, 3_000);
     return () => window.clearTimeout(timer);
   }, [lastScanTs, runAutonomousCycle]);
