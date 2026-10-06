@@ -8,6 +8,7 @@ import type { CoinData, PortfolioEntry, TrackedToken, AlertItem } from './whaleR
 import { toast } from 'sonner';
 import { handleRateLimit, isRateLimited, RL_KEYS } from './rateLimit';
 import { saveSignal, computeSignalEval } from './signalStore';
+import { getSupabase } from './supabase';
 
 const BASE = '/api';
 let _dbOnline = true;
@@ -291,35 +292,62 @@ export async function deleteTrackedToken(symbol: string): Promise<void> {
 
 // ══ ALERTS ════════════════════════════════════════════════════════════════════
 
-/** Returns the new alert's backend row id (or null if unsaved — offline,
- *  filtered as 'info', or the request failed), same convention as
- *  saveScan()'s session_id. The server already returns the full inserted
- *  row on POST — this was previously discarded, which is why pin-toggling
- *  never persisted (toggleAlertPin() had no id to call with). */
+interface AlertDbRow {
+  id: number;
+  level: string;
+  tag: string;
+  text: string;
+  sizing: string | null;
+  pinned: boolean;
+  created_at: string;
+  coin_id: string | null;
+  entry_price: string | number | null;
+  action: 'reviewed' | 'bought' | null;
+  outcome_24h_pct: string | number | null;
+}
+
+async function alertsEdge<T = unknown>(body: Record<string, unknown>): Promise<T | null> {
+  const sb = getSupabase();
+  if (!sb) {
+    console.warn('[DB] Supabase is not configured; alerts persistence unavailable');
+    return null;
+  }
+
+  try {
+    const { data, error } = await sb.functions.invoke('alerts', { body });
+    if (error) {
+      console.warn('[DB] alerts Edge Function failed:', error.message);
+      return null;
+    }
+    _dbOnline = true;
+    return data as T;
+  } catch (err) {
+    console.warn('[DB] alerts Edge Function error:', (err as Error).message);
+    return null;
+  }
+}
+
+/** Alerts use the Supabase Edge Function directly.
+ *  This deliberately bypasses the legacy /api proxy path: the browser never
+ *  receives a service-role key, while the Edge Function performs privileged
+ *  CRUD with its server-side service-role client. */
 export async function saveAlert(alert: AlertItem): Promise<number | null> {
   if (alert.level === 'info') return null;
-  const row = await api<{ id: number }>('/alerts', {
-    method: 'POST',
-    body: JSON.stringify({
-      level: alert.level,
-      tag: alert.tag,
-      text: alert.text,
-      sizing: alert.sizing ?? null,
-      pinned: alert.pinned,
-      coin_id: alert.coinId ?? null,
-      entry_price: alert.entryPrice ?? null,
-    }),
+  const row = await alertsEdge<{ id: number }>({
+    op: 'create',
+    level: alert.level,
+    tag: alert.tag,
+    text: alert.text,
+    sizing: alert.sizing ?? null,
+    pinned: alert.pinned,
+    coin_id: alert.coinId ?? null,
+    entry_price: alert.entryPrice ?? null,
   });
   return row?.id ?? null;
 }
 
 export async function loadAlerts(): Promise<AlertItem[]> {
-  const rows = await api<Array<{
-    id: number; level: string; tag: string; text: string;
-    sizing: string | null; pinned: boolean; created_at: string;
-    coin_id: string | null; entry_price: string | null;
-    action: 'reviewed' | 'bought' | null; outcome_24h_pct: string | null;
-  }>>('/alerts', { _silent: true });
+  const rows = await alertsEdge<AlertDbRow[]>({ op: 'list' });
   if (!rows) return [];
   return rows.map(r => ({
     ts: new Date(r.created_at).getTime(),
@@ -331,14 +359,14 @@ export async function loadAlerts(): Promise<AlertItem[]> {
     pinned: r.pinned,
     dbId: r.id,
     coinId: r.coin_id,
-    entryPrice: r.entry_price != null ? parseFloat(r.entry_price) : null,
+    entryPrice: r.entry_price != null ? parseFloat(String(r.entry_price)) : null,
     decision: r.action,
-    outcomePct: r.outcome_24h_pct != null ? parseFloat(r.outcome_24h_pct) : null,
+    outcomePct: r.outcome_24h_pct != null ? parseFloat(String(r.outcome_24h_pct)) : null,
   }));
 }
 
 export async function toggleAlertPin(dbId: number): Promise<void> {
-  await api(`/alerts/${dbId}/pin`, { method: 'PATCH' });
+  await alertsEdge({ op: 'toggle_pin', id: dbId });
 }
 
 /** Log the user's decision on an alert — closes the decision-outcome loop
@@ -351,9 +379,12 @@ export async function logAlertOutcome(
   coinId?: string | null,
   entryPrice?: number | null,
 ): Promise<void> {
-  await api(`/alerts/${dbId}/outcome`, {
-    method: 'POST',
-    body: JSON.stringify({ action, coin_id: coinId ?? null, entry_price: entryPrice ?? null }),
+  await alertsEdge({
+    op: 'log_outcome',
+    id: dbId,
+    action,
+    coin_id: coinId ?? null,
+    entry_price: entryPrice ?? null,
   });
 }
 
