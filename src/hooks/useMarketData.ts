@@ -376,6 +376,7 @@ export function useMarketData({
         const transcript: { agent: AgentId; text: string }[] = [];
         let activeAgent: AgentId | null = null;
         let activeText = '';
+        let persistPromise: Promise<string | null> | null = null;
 
         await runCouncil(
           ctx,
@@ -398,15 +399,13 @@ export function useMarketData({
               }
             },
             onDecision: (decision) => {
-              void saveCouncilDecision(
+              persistPromise = saveCouncilDecision(
                 decision,
                 ctx,
                 transcript,
                 'quick',
                 buildReflection(memory),
-              ).then((id) => {
-                if (id) councilLastRunRef.current.set(coin.symbol, Date.now());
-              });
+              );
             },
             onError: (message) => {
               console.warn('[auto-council]', coin.symbol, message);
@@ -414,10 +413,16 @@ export function useMarketData({
           },
         );
 
-        // Prevent a second candidate from starting if the first one completed
-        // without persistence due to an upstream failure; the DB freshness
-        // check above remains the source of truth on the next cycle.
-        councilLastRunRef.current.set(coin.symbol, Date.now());
+        // Do not mark a Council run fresh until persistence has actually
+        // succeeded. Otherwise a transient council-persist failure can mute
+        // this symbol for 30 minutes while TCC continues to see stale Council
+        // input. The database write is the source of truth for freshness.
+        const persistedId = persistPromise ? await persistPromise : null;
+        if (persistedId) {
+          councilLastRunRef.current.set(coin.symbol, Date.now());
+        } else {
+          console.warn('[auto-council]', coin.symbol, 'decision was not persisted; freshness gate will retry on the next cycle');
+        }
       }
     } catch (error) {
       console.warn('[auto-council] runner failed:', error);
