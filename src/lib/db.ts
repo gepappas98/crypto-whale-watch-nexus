@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { handleRateLimit, isRateLimited, RL_KEYS } from './rateLimit';
 import { saveSignal, computeSignalEval } from './signalStore';
 import { getSupabase } from './supabase';
+import { supabase as canonicalSupabase } from '@/integrations/supabase/client';
 
 const BASE = '/api';
 let _dbOnline = true;
@@ -407,11 +408,12 @@ export async function saveCouncilRuntimeEvent(payload: {
   error_message?: string | null;
   metadata?: Record<string, unknown>;
 }): Promise<void> {
-  const sb = getSupabase();
-  if (!sb) return;
-
+  // Council runtime telemetry must use the same generated Supabase client as
+  // agent-council/council-persist. The legacy getSupabase() client supports
+  // localStorage overrides for user settings, which can point telemetry at a
+  // different project and silently make the runtime audit look empty.
   try {
-    const { error } = await sb.from('council_runtime_events').insert({
+    const { error } = await canonicalSupabase.from('council_runtime_events').insert({
       event_type: payload.event_type,
       symbol: payload.symbol ?? null,
       candidate_count: payload.candidate_count ?? null,
