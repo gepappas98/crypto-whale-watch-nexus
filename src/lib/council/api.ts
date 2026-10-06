@@ -112,8 +112,15 @@ export async function saveCouncilDecision(
   reflection: string | null,
 ): Promise<string | null> {
   try {
-    // Writes go through the council-persist edge function (service role).
-    // Direct client INSERTs are blocked by RLS so decisions can't be forged.
+    // Writes go through council-persist, but the server must prove that this
+    // decision was actually emitted by agent-council. The publishable key is
+    // intentionally not trusted as an authorization credential for writes.
+    const persistProof = decision.persistProof;
+    if (!persistProof?.issuedAt || !persistProof.signature) {
+      console.warn('[council] save rejected: missing server persistence proof');
+      return null;
+    }
+    const { persistProof: _proof, ...decisionForStorage } = decision;
     const { data, error } = await supabase.functions.invoke('council-persist', {
       body: {
         action: 'save',
@@ -123,11 +130,12 @@ export async function saveCouncilDecision(
           depth,
           final_verdict: decision.finalVerdict,
           conviction: decision.conviction,
-          decision: JSON.parse(JSON.stringify(decision)),
+          decision: JSON.parse(JSON.stringify(decisionForStorage)),
           context: JSON.parse(JSON.stringify(ctx)),
           transcript: JSON.parse(JSON.stringify(transcript)),
           price_at: ctx.price,
           reflection,
+          persist_proof: persistProof,
         },
       },
     });
