@@ -39,7 +39,8 @@ import { WRSignalEval } from '@/components/whale-radar/WRSignalEval';
 import WRCrystalBallPro from '@/components/whale-radar/WRCrystalBallPro';
 import { startPerfMonitoring } from '@/lib/perfBudget';
 import { WRCouncilPanel } from '@/components/whale-radar/WRCouncilPanel';
-import type { CouncilLlmSettings } from '@/lib/council/api';
+import { buildCouncilContext } from '@/lib/council/context';
+import { runAutonomousCouncil, type CouncilLlmSettings } from '@/lib/council/api';
 import type { WsStatus } from '@/hooks/useWhaleWebSocket';
 import { HLConfigBanner } from '@/components/hyperliquid/HLConfigBanner';
 import { analyzeSentiment } from '@/lib/analyzeToken';
@@ -108,6 +109,12 @@ export default function WhaleRadarApp() {
   // ── Agent Council ────────────────────────────────────────────────────────
   const [councilEnabled, setCouncilEnabled] = useState(() => localStorage.getItem('wr_council_enabled') !== '0');
   const [councilCoin, setCouncilCoin] = useState<CoinData | null>(null);
+  const councilBusyRef = useRef(false);
+  const coinsRef = useRef<CoinData[]>([]);
+  const whaleFeedRef = useRef<WhaleTrade[]>([]);
+  const regimeRef = useRef<typeof regimeReading>(null);
+  const councilLlmRef = useRef<CouncilLlmSettings>({ provider: 'lovable' });
+  const councilEnabledRef = useRef(true);
   const [councilLlm, setCouncilLlm] = useState<CouncilLlmSettings>(() => {
     try {
       const raw = localStorage.getItem('wr_council_llm');
@@ -436,12 +443,64 @@ export default function WhaleRadarApp() {
   const wsReconnects = streamReconnects + legacyReconnects;
   void latestSignals; // exposed for future signal UI panel
 
+  // ══ AUTONOMOUS COUNCIL FEED ════════════════════════════════════════════════
+  // Council is an upstream sensor for TCC. Keep its cadence independent from
+  // the manual Council panel so closing the panel cannot starve persistence.
+  useEffect(() => { coinsRef.current = coins; }, [coins]);
+  useEffect(() => { whaleFeedRef.current = whaleFeed; }, [whaleFeed]);
+  useEffect(() => { regimeRef.current = regimeReading; }, [regimeReading]);
+  useEffect(() => { councilLlmRef.current = councilLlm; }, [councilLlm]);
+  useEffect(() => { councilEnabledRef.current = councilEnabled; }, [councilEnabled]);
+
+  useEffect(() => {
+    let alive = true;
+
+    const runAutonomousCycle = async () => {
+      if (!alive || !councilEnabledRef.current || councilBusyRef.current) return;
+      const source = coinsRef.current;
+      if (!source.length) return;
+
+      const ranked = [...source]
+        .filter(c => c.score >= 70 || c.threat === 'CRITICAL' || c.threat === 'HIGH')
+        .sort((a, b) => (b.score - a.score) || (a.rank - b.rank));
+      const candidates = (ranked.length ? ranked : [...source].sort((a, b) => (b.score - a.score) || (a.rank - b.rank)))
+        .slice(0, ranked.length ? 3 : 1);
+      if (!candidates.length) return;
+
+      councilBusyRef.current = true;
+      try {
+        for (const coin of candidates) {
+          if (!alive) break;
+          const ctx = buildCouncilContext(coin, {
+            whaleTrades: whaleFeedRef.current,
+            regime: regimeRef.current,
+          });
+          await runAutonomousCouncil(ctx, councilLlmRef.current, 'quick');
+        }
+      } catch (err) {
+        console.warn('[council-auto] cycle failed:', err);
+      } finally {
+        councilBusyRef.current = false;
+      }
+    };
+
+    // Give the first live scan a few seconds to populate candidate data.
+    const firstTimer = window.setTimeout(() => { void runAutonomousCycle(); }, 15_000);
+    const timer = window.setInterval(() => { void runAutonomousCycle(); }, 30 * 60 * 1000);
+    return () => {
+      alive = false;
+      window.clearTimeout(firstTimer);
+      window.clearInterval(timer);
+    };
+  }, []);
+
   // ══ AUTO SCAN ═════════════════════════════════════════════════════════════
   const triggerScanRef = useRef(triggerScan);
   useEffect(() => { triggerScanRef.current = triggerScan; }, [triggerScan]);
 
   useEffect(() => {
-    if (!autoScan) return;
+    // Auto scan is system-controlled; legacy UI/keyboard toggles cannot turn it off.
+    if (!autoScan) setAutoScan(true);
     const ms = aggressiveMode ? CFG.SCAN_MS_AGG : CFG.SCAN_MS_NORMAL;
     triggerScanRef.current();
     const timer   = setInterval(() => triggerScanRef.current(), ms);
