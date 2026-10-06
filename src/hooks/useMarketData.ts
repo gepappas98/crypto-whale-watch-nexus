@@ -59,6 +59,7 @@ type DataSource = 'live' | 'cached' | 'fallback';
 
 const AUTO_COUNCIL_INTERVAL_MS = 30 * 60 * 1000;
 const AUTO_COUNCIL_MAX_CANDIDATES = 3;
+const AUTO_COUNCIL_FALLBACK_CANDIDATES = 1;
 const AUTO_COUNCIL_DELAY_MS = 5000;
 
 export interface UseMarketDataOptions {
@@ -331,10 +332,22 @@ export function useMarketData({
     if (councilBusyRef.current) return;
 
     const now = Date.now();
-    const candidates = coinsRef.current
+    const rankedCoins = coinsRef.current
+      .filter((c) => Number.isFinite(c.score))
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+    const priorityCandidates = rankedCoins
       .filter((c) => c.score >= 70 || c.threat === 'CRITICAL' || c.threat === 'HIGH')
-      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
       .slice(0, AUTO_COUNCIL_MAX_CANDIDATES);
+
+    // The downstream TCC treats Council as a freshness-gated input. If a scan
+    // has no HIGH/CRITICAL/70+ candidate, keep one low-priority seat warm so
+    // the Council still produces a fresh HOLD/NEUTRAL-style opinion instead of
+    // going completely stale for hours. This does not change alert thresholds
+    // or trading decisions; it only restores autonomous Council coverage.
+    const candidates = priorityCandidates.length
+      ? priorityCandidates
+      : rankedCoins.slice(0, AUTO_COUNCIL_FALLBACK_CANDIDATES);
 
     if (!candidates.length) return;
 
