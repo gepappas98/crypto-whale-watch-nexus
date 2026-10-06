@@ -521,7 +521,7 @@ export default function WhaleRadarApp() {
       if (['input', 'select', 'textarea'].includes(tag)) return;
       const k = e.key.toLowerCase();
       if (k === 's')              { e.preventDefault(); triggerScan(); }
-      else if (k === 'a')         { e.preventDefault(); setAutoScan(p => !p); setAutoPaused(false); }
+      else if (k === 'a')         { e.preventDefault(); setAutoScan(true); setAutoPaused(false); }
       else if (k === 'w')         { e.preventDefault(); setWatchlistOnly(p => !p); }
       else if (k === 'b')         { e.preventDefault(); setActiveModal('backtest'); }
       else if (k === 'p')         { e.preventDefault(); setActiveModal('portfolio'); }
