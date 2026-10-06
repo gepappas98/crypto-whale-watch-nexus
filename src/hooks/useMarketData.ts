@@ -36,6 +36,14 @@ import { recordSignalOutcome, saveScan } from '@/lib/db';
 import { applyPairFilters } from '@/lib/pairFilters';
 import { alertCooldown } from '@/lib/alertCooldown';
 import { dispatchNotification } from '@/lib/notifyChannels';
+import { buildCouncilContext } from '@/lib/council/context';
+import {
+  buildReflection,
+  loadCouncilMemory,
+  runCouncil,
+  saveCouncilDecision,
+} from '@/lib/council/api';
+import type { AgentId } from '@/types/council';
 import { getSizingHint } from '@/lib/sizingHint';
 import { getRemotePairListUrl, fetchRemotePairList } from '@/lib/nexus/remotePairList';
 import {
@@ -48,6 +56,10 @@ type AddAlert = (
   coinId?: string | null, entryPrice?: number | null,
 ) => void;
 type DataSource = 'live' | 'cached' | 'fallback';
+
+const AUTO_COUNCIL_INTERVAL_MS = 30 * 60 * 1000;
+const AUTO_COUNCIL_MAX_CANDIDATES = 3;
+const AUTO_COUNCIL_DELAY_MS = 5000;
 
 export interface UseMarketDataOptions {
   apiKey: string;
@@ -96,6 +108,17 @@ export function useMarketData({
   const [lastScanTs,   setLastScanTs]   = useState(0);
   const [prevVolumes,  setPrevVolumes]  = useState<Record<string, number>>(initialPrevVolumes);
   const [scanHistory,  setScanHistory]  = useState<ScanSnapshot[]>(initialScanHistory);
+
+  // Autonomous Agent Council runner: restores the historical candidate→Council
+  // flow without making the UI modal or manual button part of the dependency.
+  const coinsRef = useRef<CoinData[]>([]);
+  const councilBusyRef = useRef(false);
+  const councilLastRunRef = useRef<Map<string, number>>(new Map());
+  const autoCouncilRef = useRef<(() => Promise<void>) | null>(null);
+
+  // Keep the latest scan available to the autonomous Council runner even while
+  // enrichCoins updates individual rows asynchronously.
+  useEffect(() => { coinsRef.current = coins; }, [coins]);
 
   // Stable ref for addAlert — caller may pass a fresh closure each render.
   const addAlertRef = useRef<AddAlert>(addAlert);
@@ -299,6 +322,97 @@ export function useMarketData({
   useEffect(() => { processDataRef.current = processData; }, [processData]);
   useEffect(() => { enrichCoinsRef.current = enrichCoins; }, [enrichCoins]);
 
+  // ── autonomous Agent Council ────────────────────────────────────────────
+  const runAutoCouncil = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    if (localStorage.getItem('wr_council_enabled') === '0') return;
+    if (councilBusyRef.current) return;
+
+    const now = Date.now();
+    const candidates = coinsRef.current
+      .filter((c) => c.score >= 70 || c.threat === 'CRITICAL' || c.threat === 'HIGH')
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      .slice(0, AUTO_COUNCIL_MAX_CANDIDATES);
+
+    if (!candidates.length) return;
+
+    councilBusyRef.current = true;
+    try {
+      let llm: { provider: 'lovable' | 'anthropic' | 'openai' | 'openrouter' | 'groq' | 'custom'; apiKey?: string; model?: string; baseUrl?: string } = { provider: 'lovable' };
+      try {
+        const raw = localStorage.getItem('wr_council_llm');
+        if (raw) llm = JSON.parse(raw);
+      } catch { /* keep built-in default */ }
+
+      for (const coin of candidates) {
+        const lastLocal = councilLastRunRef.current.get(coin.symbol) ?? 0;
+        if (now - lastLocal < AUTO_COUNCIL_INTERVAL_MS) continue;
+
+        const memory = await loadCouncilMemory(coin.symbol, 1);
+        const latest = memory[0]?.createdAt ? new Date(memory[0].createdAt).getTime() : 0;
+        if (latest && now - latest < AUTO_COUNCIL_INTERVAL_MS) {
+          councilLastRunRef.current.set(coin.symbol, latest);
+          continue;
+        }
+
+        const ctx = buildCouncilContext(coin);
+        const transcript: { agent: AgentId; text: string }[] = [];
+        let activeAgent: AgentId | null = null;
+        let activeText = '';
+
+        await runCouncil(
+          ctx,
+          'quick',
+          memory,
+          llm,
+          {
+            onAgentStart: (agent) => {
+              activeAgent = agent;
+              activeText = '';
+            },
+            onDelta: (agent, text) => {
+              if (activeAgent === agent) activeText += text;
+            },
+            onAgentEnd: (agent) => {
+              if (activeAgent === agent) {
+                transcript.push({ agent, text: activeText });
+                activeAgent = null;
+                activeText = '';
+              }
+            },
+            onDecision: (decision) => {
+              void saveCouncilDecision(
+                decision,
+                ctx,
+                transcript,
+                'quick',
+                buildReflection(memory),
+              ).then((id) => {
+                if (id) councilLastRunRef.current.set(coin.symbol, Date.now());
+              });
+            },
+            onError: (message) => {
+              console.warn('[auto-council]', coin.symbol, message);
+            },
+          },
+        );
+
+        // Prevent a second candidate from starting if the first one completed
+        // without persistence due to an upstream failure; the DB freshness
+        // check above remains the source of truth on the next cycle.
+        councilLastRunRef.current.set(coin.symbol, Date.now());
+      }
+    } catch (error) {
+      console.warn('[auto-council] runner failed:', error);
+    } finally {
+      councilBusyRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    autoCouncilRef.current = runAutoCouncil;
+  }, [runAutoCouncil]);
+
   // ── triggerScan ───────────────────────────────────────────────────────────
   const triggerScan = useCallback(async () => {
     if (scanning) return;
@@ -331,6 +445,14 @@ export function useMarketData({
 
       saveScan(mapped).catch(() => {});
       enrichCoinsRef.current(mapped).catch(() => {});
+
+      // Historical autonomous flow: after each market scan, evaluate the
+      // strongest candidates in the background. The 30-minute per-symbol
+      // freshness gate prevents repeated LLM calls and preserves the Council
+      // freshness contract consumed by downstream systems.
+      window.setTimeout(() => {
+        void autoCouncilRef.current?.();
+      }, AUTO_COUNCIL_DELAY_MS);
     } catch (e) {
       if ((e as Error)?.name === 'AbortError') return;
       console.error('[useMarketData.triggerScan] failed', { error: (e as Error)?.message });
