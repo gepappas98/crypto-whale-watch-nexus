@@ -340,14 +340,9 @@ export function WRScanner({
         <button className={`wr-btn ${scanning ? 'animate-ai-pulse' : ''}`} onClick={onScan} disabled={scanning}>
           {scanning ? <span className="animate-spin-fast inline-block">⟳</span> : '▶'} SCAN
         </button>
-        <button className={`wr-btn ${autoScan ? 'active' : ''}`} onClick={onToggleAuto}>
-          AUTO: {autoScan ? 'ON' : 'OFF'}
-        </button>
-        {autoScan && (
-          <button className={`wr-btn ${autoPaused ? 'amber' : ''}`} onClick={onTogglePause}>
-            {autoPaused ? '▶ RESUME' : '⏸ PAUSE'}
-          </button>
-        )}
+        <span className="wr-btn active cursor-default select-none" title="System-controlled: automatic scanning cannot be disabled">
+          AUTO: ON · SYSTEM
+        </span>
         <button className={`wr-btn gold ${watchlistOnly ? 'active' : ''}`} onClick={onToggleWatchlist}>
           ☆ WL
         </button>
