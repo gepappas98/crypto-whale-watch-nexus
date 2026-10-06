@@ -265,7 +265,7 @@ async function createPersistProof(
       try { return JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}').default; } catch { return undefined; }
     })();
   if (!secret) throw new Error('Council persistence signing key unavailable');
-  const message = `v1|\${issuedAt}|\${symbol}|\${finalVerdict}|\${conviction}|\${depth}|\${priceAt ?? ''}`;
+  const message = `v1|${issuedAt}|${symbol}|${finalVerdict}|${conviction}|${depth}|${priceAt ?? ''}`;
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(secret),
